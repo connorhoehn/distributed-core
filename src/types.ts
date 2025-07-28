@@ -72,6 +72,22 @@ export interface PersistenceConfig {
   syncInterval: number;
 }
 
+export interface Message {
+  id: string;
+  type: MessageType;
+  data: any;
+  sender: NodeId;
+  timestamp: number;
+  headers?: Record<string, string>;
+}
+
+export interface GossipData {
+  nodes: NodeInfo[];
+  version: number;
+  timestamp: number;
+  checksum?: string;
+}
+
 export type EventCallback<T = any> = (data: T) => void;
 
 export interface EventEmitter {
