@@ -162,7 +162,11 @@ export class gRPCAdapter extends Transport {
         write: (data: any) => console.log(`Mock gRPC send to ${target.id}:`, data),
         end: () => console.log(`Mock gRPC client ended to ${target.id}`)
       }),
-      close: () => console.log(`Mock gRPC client closed to ${target.id}`)
+      close: () => {
+        if (process.env.NODE_ENV !== 'test') {
+          console.log(`Mock gRPC client closed to ${target.id}`);
+        }
+      }
     };
 
     this.clients.set(target.id, mockClient);
