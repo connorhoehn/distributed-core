@@ -39,8 +39,8 @@ describe('Test Harness Example', () => {
       await cluster.stop();
       
       const logs = cluster.getLogs();
-      expect(logs.some((log: any) => log.message.includes('Starting test cluster'))).toBe(true);
-      expect(logs.some((log: any) => log.message.includes('Test cluster stopped'))).toBe(true);
+      expect(logs.some((log: any) => log.message?.includes('Starting test cluster'))).toBe(true);
+      expect(logs.some((log: any) => log.message?.includes('Stopping test cluster'))).toBe(true);
     });
 
     it('should not capture logs when disabled', async () => {
