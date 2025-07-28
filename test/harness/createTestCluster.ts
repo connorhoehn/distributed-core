@@ -1,4 +1,6 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
+import { BootstrapConfig } from '../../src/cluster/BootstrapConfig';
+import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
 import { NodeId } from '../../src/types';
 
 export interface TestClusterOptions {
@@ -30,9 +32,23 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
     port: 3000 + i
   }));
 
-  // Create cluster managers (stubs)
+  // Create cluster managers with transports
   for (let i = 0; i < size; i++) {
-    const manager = new ClusterManager();
+    const nodeId = nodeIds[i];
+    const transport = new InMemoryAdapter(nodeId);
+    
+    // Use first node as seed for others
+    const seedNodes = i === 0 ? [] : [nodeIds[0]];
+    const config = new BootstrapConfig(seedNodes, 5000, 1000);
+    
+    const manager = new ClusterManager(nodeId, transport, config);
+    
+    if (enableLogging) {
+      manager.on('started', () => logs.push({ node: nodeId.id, event: 'started', timestamp: Date.now() }));
+      manager.on('member-joined', (member) => logs.push({ node: nodeId.id, event: 'member-joined', member: member.id.id, timestamp: Date.now() }));
+      manager.on('join-sent', (target) => logs.push({ node: nodeId.id, event: 'join-sent', target: target.id, timestamp: Date.now() }));
+    }
+    
     nodes.push(manager);
   }
 
@@ -43,14 +59,27 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
       if (enableLogging) {
         logs.push({ message: 'Starting test cluster', timestamp: Date.now() });
       }
-      // Stub implementation - no actual starting logic
+      
+      // Start all nodes sequentially to avoid race conditions
+      for (const node of nodes) {
+        await node.start();
+        // Small delay between node starts
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
+      // Small delay for cluster formation
+      await new Promise(resolve => setTimeout(resolve, 50));
     },
     
     async stop(): Promise<void> {
       if (enableLogging) {
-        logs.push({ message: 'Test cluster stopped', timestamp: Date.now() });
+        logs.push({ message: 'Stopping test cluster', timestamp: Date.now() });
       }
-      // Stub implementation - no actual stopping logic
+      
+      // Stop all nodes
+      for (const node of nodes) {
+        await node.stop();
+      }
     },
     
     getNode(index: number): ClusterManager {

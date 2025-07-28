@@ -34,6 +34,8 @@ export interface GossipMessageData {
 export enum MessageType {
   PING = 'ping',
   PONG = 'pong',
+  JOIN = 'join',
+  GOSSIP = 'gossip',
   MEMBERSHIP_UPDATE = 'membership_update',
   STATE_SYNC = 'state_sync',
   FAILURE_DETECTION = 'failure_detection',
