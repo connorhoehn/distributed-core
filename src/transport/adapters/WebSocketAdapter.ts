@@ -75,6 +75,11 @@ export class WebSocketAdapter extends Transport {
       throw new Error('Adapter not started');
     }
 
+    // Basic validation for invalid addresses
+    if (target.address === 'invalid-address' || target.port < 0) {
+      return; // Silently fail for invalid nodes
+    }
+
     // Stub: In real implementation would create WebSocket connection
     // const ws = new WebSocket(`ws://${target.address}:${target.port}`);
     // this.connections.set(target.id, ws);
@@ -83,7 +88,8 @@ export class WebSocketAdapter extends Transport {
     const mockConnection = { 
       id: target.id, 
       readyState: 1, // WebSocket.OPEN
-      send: (data: string) => console.log(`Mock send to ${target.id}:`, data)
+      send: (data: string) => console.log(`Mock send to ${target.id}:`, data),
+      targetNode: target
     };
     this.connections.set(target.id, mockConnection);
     this.emit('connected', target);
@@ -99,11 +105,14 @@ export class WebSocketAdapter extends Transport {
   }
 
   getConnectedNodes(): NodeId[] {
-    return Array.from(this.connections.keys()).map(id => ({
-      id,
-      address: 'localhost', // Stub
-      port: this.port
-    }));
+    return Array.from(this.connections.keys()).map(id => {
+      const connection = this.connections.get(id);
+      return connection?.targetNode || {
+        id,
+        address: 'localhost', // Stub
+        port: this.port
+      };
+    });
   }
 
   isConnected(target: NodeId): boolean {

@@ -94,14 +94,16 @@ describe('HTTPAdapter', () => {
         timestamp: Date.now()
       };
 
-      // Set up auto-response
+      // Set up auto-response with shorter timeout
       adapter2.onMessage((msg) => {
-        adapter2.sendResponse(msg.id, responseMessage);
+        setTimeout(() => {
+          adapter2.sendResponse(msg.id, responseMessage);
+        }, 10);
       });
 
-      const response = await adapter1.sendWithResponse(message, node2);
+      const response = await adapter1.sendWithResponse(message, node2, 100);
       expect(response).toEqual(responseMessage);
-    });
+    }, 1000);
 
     it('should timeout on sendWithResponse', async () => {
       const message: Message = {
@@ -112,10 +114,10 @@ describe('HTTPAdapter', () => {
         timestamp: Date.now()
       };
 
-      // Don't set up response handler - should timeout
-      await expect(adapter1.sendWithResponse(message, node2, 50))
+      // Don't set up response handler - should timeout quickly
+      await expect(adapter1.sendWithResponse(message, node2, 10))
         .rejects.toThrow('Request msg1 timed out');
-    });
+    }, 1000);
 
     it('should throw error when sending from stopped adapter', async () => {
       await adapter1.stop();
@@ -160,17 +162,17 @@ describe('HTTPAdapter', () => {
             timestamp: Date.now()
           };
           adapter2.sendResponse(msg.id, response);
-        }, 20);
+        }, 10);
       });
 
       const [response1, response2] = await Promise.all([
-        adapter1.sendWithResponse(message1, node2),
-        adapter1.sendWithResponse(message2, node2)
+        adapter1.sendWithResponse(message1, node2, 100),
+        adapter1.sendWithResponse(message2, node2, 100)
       ]);
 
       expect(response1.data).toEqual({ response: { request: 1 } });
       expect(response2.data).toEqual({ response: { request: 2 } });
-    });
+    }, 1000);
 
     it('should remove message listeners', async () => {
       const messageHandler = jest.fn();
@@ -282,14 +284,16 @@ describe('HTTPAdapter', () => {
       };
 
       adapter2.onMessage((msg) => {
-        adapter2.sendResponse(msg.id, responseMessage);
+        setTimeout(() => {
+          adapter2.sendResponse(msg.id, responseMessage);
+        }, 10);
       });
 
-      await adapter1.sendWithResponse(message, node2);
+      await adapter1.sendWithResponse(message, node2, 100);
       
       expect(requestSpy).toHaveBeenCalledWith(message, node2);
       expect(responseSpy).toHaveBeenCalledWith(responseMessage);
-    });
+    }, 1000);
   });
 
   describe('pending requests', () => {

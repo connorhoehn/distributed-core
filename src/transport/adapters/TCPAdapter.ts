@@ -10,6 +10,7 @@ export class TCPAdapter extends Transport {
   private server: any; // net.Server (stub)
   private connections = new Map<string, any>(); // Socket connections
   private isStarted = false;
+  private static adapterRegistry = new Map<string, TCPAdapter>();
 
   constructor(nodeId: NodeId, private port: number = 9090) {
     super();
@@ -26,6 +27,7 @@ export class TCPAdapter extends Transport {
     // });
     // this.server.listen(this.port);
 
+    TCPAdapter.adapterRegistry.set(this.nodeId.id, this);
     this.isStarted = true;
     this.emit('started');
   }
@@ -45,13 +47,14 @@ export class TCPAdapter extends Transport {
       this.server = null;
     }
 
+    TCPAdapter.adapterRegistry.delete(this.nodeId.id);
     this.isStarted = false;
     this.emit('stopped');
   }
 
   async send(message: Message, target: NodeId): Promise<void> {
     if (!this.isStarted) {
-      throw new Error('TCP adapter not started');
+      throw new Error('TCP server not started');
     }
 
     let socket = this.connections.get(target.id);
@@ -62,6 +65,14 @@ export class TCPAdapter extends Transport {
 
     if (!socket) {
       throw new Error(`Failed to establish TCP connection to ${target.id}`);
+    }
+
+    // Simulate message delivery to target adapter
+    const targetAdapter = TCPAdapter.adapterRegistry.get(target.id);
+    if (targetAdapter) {
+      setTimeout(() => {
+        targetAdapter.emit('message', message);
+      }, 1);
     }
 
     // Stub: In real implementation would serialize and write to socket
@@ -92,6 +103,7 @@ export class TCPAdapter extends Transport {
       destroy: () => console.log(`Mock TCP disconnect from ${target.id}`)
     };
     this.connections.set(target.id, mockSocket);
+    this.emit('connected', target);
   }
 
   disconnect(target: NodeId): void {
@@ -99,6 +111,7 @@ export class TCPAdapter extends Transport {
     if (socket) {
       // socket.destroy();
       this.connections.delete(target.id);
+      this.emit('disconnected', target);
     }
   }
 
@@ -120,14 +133,6 @@ export class TCPAdapter extends Transport {
 
   removeMessageListener(callback: (message: Message) => void): void {
     this.removeListener('message', callback);
-  }
-
-  getConnectedNodes(): NodeId[] {
-    return Array.from(this.connections.keys()).map(id => ({
-      id,
-      address: 'localhost', // Stub
-      port: this.port
-    }));
   }
 
   /**

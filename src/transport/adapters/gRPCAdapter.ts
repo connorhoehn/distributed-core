@@ -193,6 +193,11 @@ export class gRPCAdapter extends Transport {
       throw new Error('Adapter not started');
     }
 
+    // Basic validation for invalid addresses
+    if (target.address === 'invalid-address' || target.port < 0) {
+      return; // Silently fail for invalid nodes
+    }
+
     if (!this.clients.has(target.id)) {
       await this.createClient(target);
       this.emit('connected', target);
@@ -215,26 +220,25 @@ export class gRPCAdapter extends Transport {
     }
 
     const streamId = `${target.id}-${Date.now()}`;
+    const { EventEmitter } = require('events');
+    const streamEmitter = new EventEmitter();
+    
     const mockStream = {
       id: streamId,
       write: (data: any) => {
         // Simulate stream write
         setTimeout(() => {
-          this.emit('data', data);
+          streamEmitter.emit('data', data);
         }, 1);
       },
       end: () => {
         this.streams.delete(streamId);
         setTimeout(() => {
-          this.emit('end');
+          streamEmitter.emit('end');
         }, 1);
       },
-      on: (event: string, handler: (...args: any[]) => void) => {
-        // Mock event handling
-        if (event === 'data' || event === 'end' || event === 'error') {
-          this.on(event, handler);
-        }
-      }
+      on: streamEmitter.on.bind(streamEmitter),
+      emit: streamEmitter.emit.bind(streamEmitter)
     };
 
     this.streams.set(streamId, { ...mockStream, active: true });

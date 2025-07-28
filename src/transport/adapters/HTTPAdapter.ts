@@ -131,6 +131,7 @@ export class HTTPAdapter extends Transport {
         resolve: (response: Message) => {
           clearTimeout(timeout);
           this.pendingRequests.delete(requestId);
+          this.emit('response', response);
           resolve(response);
         }
       };
@@ -138,10 +139,13 @@ export class HTTPAdapter extends Transport {
       this.pendingRequests.set(requestId, mockRequest);
       this.emit('request', message, target);
       
-      // Simulate message delivery to target
-      setTimeout(() => {
-        this.emit('message', message);
-      }, 1);
+      // Simulate message delivery to target adapter
+      const targetAdapter = HTTPAdapter.adapterRegistry?.get(target.id);
+      if (targetAdapter) {
+        setTimeout(() => {
+          targetAdapter.emit('message', message);
+        }, 1);
+      }
     });
   }
 
@@ -188,11 +192,21 @@ export class HTTPAdapter extends Transport {
   }
 
   sendResponse(requestId: string, response: Message): void {
-    // Find the pending request and resolve it
-    const pendingRequest = this.pendingRequests.get(requestId);
+    // Find the pending request across all adapters
+    let pendingRequest = null;
+    let targetAdapter = null;
+
+    for (const [nodeId, adapter] of HTTPAdapter.adapterRegistry) {
+      const request = adapter.pendingRequests.get(requestId);
+      if (request) {
+        pendingRequest = request;
+        targetAdapter = adapter;
+        break;
+      }
+    }
+
     if (pendingRequest && pendingRequest.resolve) {
       pendingRequest.resolve(response);
     }
-    this.emit('response', response);
   }
 }
