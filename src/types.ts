@@ -97,3 +97,24 @@ export interface EventEmitter {
   off(event: string, callback: EventCallback): void;
   emit(event: string, data?: any): void;
 }
+
+// Persistence Layer Interfaces
+export interface IStateStore {
+  get<T>(key: string): T | undefined;
+  set<T>(key: string, value: T): void;
+  delete(key: string): void;
+  clear(): void;
+  snapshot(): Record<string, unknown>;
+}
+
+export interface IWriteAheadLog {
+  append(entry: any): void;
+  readAll(): any[];
+  clear(): void;
+}
+
+export interface IBroadcastBuffer {
+  add(message: any): void;
+  drain(): any[];
+  size(): number;
+}

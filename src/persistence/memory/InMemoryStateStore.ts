@@ -1,6 +1,6 @@
-import { IStateStore } from '../types';
+import { IStateStore } from '../../types';
 
-export class StateStore implements IStateStore {
+export class InMemoryStateStore implements IStateStore {
   private store: Record<string, any> = {};
 
   get<T>(key: string): T | undefined {
