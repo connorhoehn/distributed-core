@@ -37,3 +37,12 @@ export * from './identity/KeyManager';
 // Common modules
 export * from './common/Node';
 export * from './common/utils';
+
+// Messaging modules
+export * from './messaging';
+
+// Connection modules
+export * from './connections/Connection';
+export * from './connections/ConnectionManager';
+export * from './connections/Session';
+export * from './connections/types';
