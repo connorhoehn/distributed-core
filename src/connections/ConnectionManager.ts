@@ -197,6 +197,18 @@ export class ConnectionManager extends EventEmitter {
     return this.connections.get(connectionId)?.session;
   }
 
+  closeAll(): void {
+    for (const [id, conn] of this.connections) {
+      try {
+        conn.close('shutdown');
+      } catch (error) {
+        this.emit('connection-error', { connectionId: id, error });
+      }
+    }
+    this.connections.clear();
+    this.tagIndex.clear();
+  }
+
   updateConnectionIndex(connectionId: string): void {
     const connection = this.connections.get(connectionId);
     if (!connection) return;
