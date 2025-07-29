@@ -108,9 +108,16 @@ export class Node {
     const bootstrapConfig = new BootstrapConfig(
       config.seedNodes || [],
       5000, // joinTimeout
-      1000  // gossipInterval
+      1000, // gossipInterval
+      this.enableLogging
     );
-    this.cluster = new ClusterManager(config.id, this.transport, bootstrapConfig);
+    const nodeMetadata = {
+      region: config.region,
+      zone: config.zone,
+      role: config.role,
+      tags: config.tags
+    };
+    this.cluster = new ClusterManager(config.id, this.transport, bootstrapConfig, 100, nodeMetadata);
 
     // Initialize other subsystems
     this.router = new Router();

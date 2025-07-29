@@ -1,7 +1,5 @@
-import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { BootstrapConfig } from '../../src/cluster/BootstrapConfig';
+import { Node } from '../../src/common/Node';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { NodeId } from '../../src/types';
 
 /**
  * Cluster Coordination Test Harness
@@ -15,14 +13,13 @@ import { NodeId } from '../../src/types';
  * - Complete cluster lifecycle management
  */
 export class ClusterCoordinationHarness {
-  private clusters: Map<string, ClusterManager> = new Map();
-  private transports: Map<string, InMemoryAdapter> = new Map();
+  private nodes: Map<string, Node> = new Map();
 
   /**
-   * Create an elegant multi-node cluster test environment
+   * Create a multi-node cluster test environment
    */
   async createClusterEnvironment(nodeCount: number = 5): Promise<void> {
-    console.log(`🚀 Creating elegant ${nodeCount}-node cluster environment...`);
+    console.log(`🚀 Creating ${nodeCount}-node cluster environment...`);
 
     // Create seed node first
     const seedNodeId = 'seed-node';
@@ -47,20 +44,26 @@ export class ClusterCoordinationHarness {
    * Create and start a single cluster node
    */
   private async createNode(nodeId: string, seedNodes: string[]): Promise<void> {
-    const nodeIdObj: NodeId = { id: nodeId, address: 'localhost', port: 8000 + Math.floor(Math.random() * 1000) };
-    const transport = new InMemoryAdapter(nodeIdObj);
-    this.transports.set(nodeId, transport);
-
-    const config = BootstrapConfig.create({
-      seedNodes,
-      joinTimeout: 2000,
-      gossipInterval: 500
+    const transport = new InMemoryAdapter({
+      id: nodeId,
+      address: 'localhost',
+      port: 8000 + Math.floor(Math.random() * 1000)
     });
 
-    const cluster = new ClusterManager(nodeId, transport, config, 150); // 150 virtual nodes for better distribution
+    const node = new Node({
+      id: nodeId,
+      region: 'test-region',
+      zone: 'test-zone',
+      role: 'worker',
+      seedNodes,
+      transport,
+      enableMetrics: true,
+      enableChaos: true,
+      enableLogging: false
+    });
     
-    this.clusters.set(nodeId, cluster);
-    await cluster.start();
+    this.nodes.set(nodeId, node);
+    await node.start();
   }
 
   /**
@@ -69,37 +72,26 @@ export class ClusterCoordinationHarness {
   async demonstrateRoutingStrategies(): Promise<void> {
     console.log('\n🎯 Demonstrating sophisticated routing strategies...');
     
-    const cluster = this.clusters.get('seed-node')!;
-    const testKey = 'elegant-test-key';
+    const node = this.nodes.get('seed-node')!;
+    const testKey = 'test-key';
 
-    // Consistent hash routing (default)
-    const consistentNodes = cluster.getNodesForKey(testKey, {
-      type: 'replicas',
-      count: 3
-    });
-    console.log(`🔄 Consistent Hash (3 replicas): ${consistentNodes.join(', ')}`);
+    // Get replica nodes for the key
+    const replicaNodes = node.getReplicaNodes(testKey, 3);
+    console.log(`🔄 Consistent Hash (3 replicas): ${replicaNodes.join(', ')}`);
 
-    // Primary node routing
-    const primaryNode = cluster.getNodesForKey(testKey, {
-      type: 'primary'
-    });
-    console.log(`🎯 Primary node: ${primaryNode.join(', ')}`);
-
-    // All nodes routing
-    const allNodes = cluster.getNodesForKey(testKey, {
-      type: 'all'
-    });
-    console.log(`🌐 All nodes (${allNodes.length}): ${allNodes.slice(0, 3).join(', ')}...`);
+    // Get cluster topology
+    const topology = node.getClusterTopology();
+    console.log(`🌐 Total nodes (${topology.totalAliveNodes}): ${topology.totalAliveNodes} active`);
   }
 
   /**
-   * Display elegant cluster health metrics
+   * Display cluster health metrics
    */
   displayClusterHealth(): void {
     console.log('\n💊 Cluster Health Metrics:');
     
-    this.clusters.forEach((cluster, nodeId) => {
-      const health = cluster.getClusterHealth();
+    this.nodes.forEach((node, nodeId) => {
+      const health = node.getClusterHealth();
       const healthStatus = health.isHealthy ? '✅ HEALTHY' : '⚠️  UNHEALTHY';
       
       console.log(`  ${nodeId}:`);
@@ -110,13 +102,13 @@ export class ClusterCoordinationHarness {
   }
 
   /**
-   * Display elegant cluster topology information
+   * Display cluster topology information
    */
   displayClusterTopology(): void {
     console.log('\n🗺️  Cluster Topology:');
     
-    const seedCluster = this.clusters.get('seed-node')!;
-    const topology = seedCluster.getTopology();
+    const seedNode = this.nodes.get('seed-node')!;
+    const topology = seedNode.getClusterTopology();
     
     console.log(`  Total Active Nodes: ${topology.totalAliveNodes}`);
     console.log(`  Replication Factor: ${topology.replicationFactor}`);
@@ -134,8 +126,8 @@ export class ClusterCoordinationHarness {
   displayClusterMetadata(): void {
     console.log('\n📊 Cluster Metadata:');
     
-    const seedCluster = this.clusters.get('seed-node')!;
-    const metadata = seedCluster.getMetadata();
+    const seedNode = this.nodes.get('seed-node')!;
+    const metadata = seedNode.getClusterMetadata();
     
     console.log(`  Cluster ID: ${metadata.clusterId}`);
     console.log(`  Node Count: ${metadata.nodeCount}`);
@@ -148,23 +140,23 @@ export class ClusterCoordinationHarness {
   }
 
   /**
-   * Simulate elegant node failure and recovery
+   * Simulate node failure and recovery
    */
   async simulateNodeFailure(): Promise<void> {
-    console.log('\n💥 Simulating elegant node failure and recovery...');
+    console.log('\n💥 Simulating node failure and recovery...');
     
     const nodeToFail = 'node-1';
-    const cluster = this.clusters.get(nodeToFail);
+    const node = this.nodes.get(nodeToFail);
     
-    if (cluster) {
+    if (node) {
       console.log(`🔻 Stopping node: ${nodeToFail}`);
-      await cluster.stop();
+      await node.stop();
       
       // Wait for failure detection
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       console.log(`🔺 Recovering node: ${nodeToFail}`);
-      await cluster.start();
+      await node.start();
       
       // Wait for recovery stabilization
       await this.waitForStabilization();
@@ -180,11 +172,11 @@ export class ClusterCoordinationHarness {
   }
 
   /**
-   * Demonstrate the complete elegant cluster coordination system
+   * Demonstrate the complete cluster coordination system
    */
-  async demonstrateElegantCluster(): Promise<void> {
+  async demonstrateClusterCoordination(): Promise<void> {
     try {
-      // Create elegant cluster environment
+      // Create cluster environment
       await this.createClusterEnvironment(6);
       
       // Display cluster status
@@ -213,15 +205,14 @@ export class ClusterCoordinationHarness {
   async shutdown(): Promise<void> {
     console.log('\n🛑 Gracefully shutting down cluster...');
     
-    const shutdownPromises = Array.from(this.clusters.values()).map(cluster => cluster.stop());
+    const shutdownPromises = Array.from(this.nodes.values()).map(node => node.stop());
     await Promise.all(shutdownPromises);
     
-    this.clusters.clear();
-    this.transports.clear();
+    this.nodes.clear();
     
     console.log('✅ Cluster shutdown completed');
   }
 }
 
 // Export for use in test harnesses
-export default ClusterTestHarness;
+export default ClusterCoordinationHarness;

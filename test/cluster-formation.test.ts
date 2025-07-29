@@ -225,8 +225,9 @@ describe('Cluster Formation', () => {
       nodeId = 'test-node';
       const nodeIdObj = { id: 'test-node', address: '127.0.0.1', port: 3000 };
       transport = new InMemoryAdapter(nodeIdObj);
-      config = new BootstrapConfig();
-      clusterManager = new ClusterManager(nodeId, transport, config);
+      config = new BootstrapConfig([], 5000, 1000, false); // Enable logging=false for tests
+      const nodeMetadata = { region: 'test-region', zone: 'test-zone', role: 'worker' };
+      clusterManager = new ClusterManager(nodeId, transport, config, 100, nodeMetadata);
     });
 
     afterEach(async () => {

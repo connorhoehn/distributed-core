@@ -6,7 +6,8 @@ export class GossipStrategy {
   constructor(
     private localNodeId: string,
     private transport: Transport,
-    private gossipInterval: number = 1000
+    private gossipInterval: number = 1000,
+    private enableLogging: boolean = false
   ) {}
 
   /**
@@ -38,7 +39,9 @@ export class GossipStrategy {
         });
       } catch (error) {
         // Silently fail for unreachable nodes
-        console.debug(`Failed to gossip to ${target.id}:`, error);
+        if (this.enableLogging) {
+          console.debug(`Failed to gossip to ${target.id}:`, error);
+        }
       }
     });
 

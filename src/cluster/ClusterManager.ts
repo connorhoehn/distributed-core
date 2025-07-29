@@ -31,12 +31,13 @@ export class ClusterManager extends EventEmitter {
     private localNodeId: string,
     private transport: Transport,
     private config: BootstrapConfig,
-    virtualNodesPerNode: number = 100
+    virtualNodesPerNode: number = 100,
+    private nodeMetadata: { region?: string; zone?: string; role?: string; tags?: Record<string, string> } = {}
   ) {
     super();
     
     this.membership = new MembershipTable(localNodeId);
-    this.gossipStrategy = new GossipStrategy(localNodeId, transport, config.gossipInterval);
+    this.gossipStrategy = new GossipStrategy(localNodeId, transport, config.gossipInterval, config.enableLogging);
     this.hashRing = new ConsistentHashRing(virtualNodesPerNode);
     
         // Connect membership events
@@ -52,17 +53,8 @@ export class ClusterManager extends EventEmitter {
   async start(): Promise<void> {
     if (this.isStarted) return;
 
-    // Add self to membership
-    const localNode: NodeInfo = {
-      id: this.localNodeId,
-      status: 'ALIVE',
-      lastSeen: Date.now(),
-      version: 0,
-      metadata: {
-        address: 'localhost', // Will be set by transport layer
-        port: 0              // Will be set by transport layer
-      }
-    };
+    // Add self to membership using proper node info with metadata
+    const localNode = this.getLocalNodeInfo();
     
     this.membership.addLocalNode(localNode);
     this.rebuildHashRing();
@@ -122,7 +114,9 @@ export class ClusterManager extends EventEmitter {
           
           await this.transport.send(transportMessage, { id: seedNode, address: '', port: 0 });
         } catch (error) {
-          console.debug(`Failed to join via seed node ${seedNode}:`, error);
+          if (this.config.enableLogging) {
+            console.debug(`Failed to join via seed node ${seedNode}:`, error);
+          }
         }
       }
     }
@@ -144,7 +138,9 @@ export class ClusterManager extends EventEmitter {
           break;
       }
     } catch (error) {
-      console.error('Error handling cluster message:', error);
+      if (this.config.enableLogging) {
+        console.error('Error handling cluster message:', error);
+      }
     }
   }
 
@@ -202,7 +198,9 @@ export class ClusterManager extends EventEmitter {
 
       await this.transport.send(transportMessage, { id: targetNodeId, address: '', port: 0 });
     } catch (error) {
-      console.debug(`Failed to send join response to ${targetNodeId}:`, error);
+      if (this.config.enableLogging) {
+        console.debug(`Failed to send join response to ${targetNodeId}:`, error);
+      }
     }
   }
 
@@ -244,7 +242,9 @@ export class ClusterManager extends EventEmitter {
           this.recentUpdates = []; // Clear after sending
         }
       } catch (error) {
-        console.debug('Error during periodic gossip:', error);
+        if (this.config.enableLogging) {
+          console.debug('Error during periodic gossip:', error);
+        }
       }
     }, this.config.gossipInterval);
   }
@@ -269,7 +269,10 @@ export class ClusterManager extends EventEmitter {
       metadata: {
         address: 'localhost',
         port: 0,
-        role: 'node'
+        role: this.nodeMetadata.role || 'node',
+        region: this.nodeMetadata.region,
+        zone: this.nodeMetadata.zone,
+        tags: this.nodeMetadata.tags
       }
     };
   }

@@ -1,7 +1,6 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
 import { BootstrapConfig } from '../../src/cluster/BootstrapConfig';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { NodeId } from '../../src/types';
 
 export interface TestClusterOptions {
   size: number;
@@ -20,33 +19,39 @@ export interface TestCluster {
  * Creates a lightweight test cluster for integration testing
  */
 export function createTestCluster(options: TestClusterOptions): TestCluster {
-  const { size, enableLogging = true } = options;
+  const { size, enableLogging = false } = options; // Default to false for tests
   
   const nodes: ClusterManager[] = [];
   const logs: any[] = [];
   
   // Create simple node IDs
-  const nodeIds: NodeId[] = Array.from({ length: size }, (_, i) => ({
-    id: `test-node-${i}`,
-    address: `127.0.0.1`,
-    port: 3000 + i
-  }));
+  const nodeIds: string[] = Array.from({ length: size }, (_, i) => `test-node-${i}`);
 
   // Create cluster managers with transports
   for (let i = 0; i < size; i++) {
     const nodeId = nodeIds[i];
-    const transport = new InMemoryAdapter(nodeId);
+    const transport = new InMemoryAdapter({
+      id: nodeId,
+      address: '127.0.0.1',
+      port: 3000 + i
+    });
     
     // Use first node as seed for others
-    const seedNodes = i === 0 ? [] : [nodeIds[0].id];
-    const config = new BootstrapConfig(seedNodes, 5000, 1000);
+    const seedNodes = i === 0 ? [] : [nodeIds[0]];
+    const config = new BootstrapConfig(seedNodes, 5000, 1000, enableLogging);
     
-    const manager = new ClusterManager(nodeId.id, transport, config);
+    const nodeMetadata = {
+      region: 'test-region',
+      zone: 'test-zone',
+      role: 'worker',
+      tags: { testCluster: 'true' }
+    };
+    
+    const manager = new ClusterManager(nodeId, transport, config, 100, nodeMetadata);
     
     if (enableLogging) {
-      manager.on('started', () => logs.push({ node: nodeId.id, event: 'started', timestamp: Date.now() }));
-      manager.on('member-joined', (member) => logs.push({ node: nodeId.id, event: 'member-joined', member: member.id, timestamp: Date.now() }));
-      manager.on('join-sent', (target) => logs.push({ node: nodeId.id, event: 'join-sent', target: target, timestamp: Date.now() }));
+      manager.on('started', () => logs.push({ node: nodeId, event: 'started', timestamp: Date.now() }));
+      manager.on('member-joined', (member: any) => logs.push({ node: nodeId, event: 'member-joined', member: member.id, timestamp: Date.now() }));
     }
     
     nodes.push(manager);
