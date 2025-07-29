@@ -38,15 +38,15 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
     const transport = new InMemoryAdapter(nodeId);
     
     // Use first node as seed for others
-    const seedNodes = i === 0 ? [] : [nodeIds[0]];
+    const seedNodes = i === 0 ? [] : [nodeIds[0].id];
     const config = new BootstrapConfig(seedNodes, 5000, 1000);
     
-    const manager = new ClusterManager(nodeId, transport, config);
+    const manager = new ClusterManager(nodeId.id, transport, config);
     
     if (enableLogging) {
       manager.on('started', () => logs.push({ node: nodeId.id, event: 'started', timestamp: Date.now() }));
-      manager.on('member-joined', (member) => logs.push({ node: nodeId.id, event: 'member-joined', member: member.id.id, timestamp: Date.now() }));
-      manager.on('join-sent', (target) => logs.push({ node: nodeId.id, event: 'join-sent', target: target.id, timestamp: Date.now() }));
+      manager.on('member-joined', (member) => logs.push({ node: nodeId.id, event: 'member-joined', member: member.id, timestamp: Date.now() }));
+      manager.on('join-sent', (target) => logs.push({ node: nodeId.id, event: 'join-sent', target: target, timestamp: Date.now() }));
     }
     
     nodes.push(manager);

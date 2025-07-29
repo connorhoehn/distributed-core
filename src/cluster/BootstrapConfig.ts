@@ -1,14 +1,12 @@
-import { NodeId } from '../types';
-
 export interface BootstrapOptions {
-  seedNodes: NodeId[];
+  seedNodes: string[];
   joinTimeout: number;
   gossipInterval: number;
 }
 
 export class BootstrapConfig {
   constructor(
-    public seedNodes: NodeId[] = [],
+    public seedNodes: string[] = [],
     public joinTimeout: number = 5000,
     public gossipInterval: number = 1000
   ) {}
@@ -21,11 +19,11 @@ export class BootstrapConfig {
     );
   }
 
-  addSeedNode(node: NodeId): void {
+  addSeedNode(node: string): void {
     this.seedNodes.push(node);
   }
 
-  getSeedNodes(): NodeId[] {
+  getSeedNodes(): string[] {
     return [...this.seedNodes];
   }
 }
