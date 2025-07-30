@@ -1,7 +1,7 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
 import { FailureDetector } from '../../src/cluster/FailureDetector';
-import { createTestCluster } from '../harness/createTestCluster';
-import { FailureRecoveryHarness } from '../harness/FailureRecoveryHarness';
+import { createTestCluster } from '../harness/create-test-cluster';
+import { FailureRecoveryHarness } from '../harness/failure-recovery-harness';
 
 describe('Failure Detection Integration', () => {
   let harness: FailureRecoveryHarness;

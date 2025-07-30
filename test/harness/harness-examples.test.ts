@@ -1,4 +1,4 @@
-import { createTestCluster } from './createTestCluster';
+import { createTestCluster } from './create-test-cluster';
 import { nodeFixtures } from '../fixtures/nodes';
 import { spyLogger, LogEntry } from '../helpers/spyLogger';
 

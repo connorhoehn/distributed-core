@@ -6,7 +6,7 @@
  * Run this to see the sophisticated cluster coordination system in action
  */
 
-import { ClusterCoordinationHarness } from './ClusterCoordinationHarness';
+import { ClusterCoordinationHarness } from '../cluster-coordination-harness';
 
 async function runClusterDemo(): Promise<void> {
   console.log('🌟 Starting Cluster Coordination Demonstration\n');
