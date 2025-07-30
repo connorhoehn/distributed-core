@@ -33,8 +33,8 @@ describe('Failure Detection Integration', () => {
       const failureResult = await harness.simulateNodeFailure(1);
       expect(failureResult.failedNodeId).toBe('recovery-node-2');
       
-      // Wait for failure detection (minimal)
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Wait for failure detection (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check that other nodes detected the failure
       const membershipAfterFailure = harness.getClusterMembership(0);
@@ -52,8 +52,8 @@ describe('Failure Detection Integration', () => {
       // Simulate failure of node 2
       await harness.simulateNodeFailure(2);
       
-      // Wait for failure detection (minimal)
-      await new Promise(resolve => setTimeout(resolve, 150));
+      // Wait for failure detection (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check that all remaining nodes detected the failure
       for (let i = 0; i < 4; i++) {
@@ -68,7 +68,7 @@ describe('Failure Detection Integration', () => {
     it('should handle false positives', async () => {
       // Setup cluster
       await harness.setupCluster(3);
-      await new Promise(resolve => setTimeout(resolve, 50));  // Reduced from 200ms
+      await new Promise(resolve => setTimeout(resolve, 10));  // In-memory
       
       // Test with gradual network degradation instead of complete failure
       const beforeMembership = harness.getClusterMembership(0);
@@ -76,11 +76,11 @@ describe('Failure Detection Integration', () => {
       
       // Simulate a brief failure and recovery
       await harness.simulateNodeFailure(1);
-      await new Promise(resolve => setTimeout(resolve, 50));  // Reduced from 200ms
+      await new Promise(resolve => setTimeout(resolve, 10));  // In-memory
       
       // Recover the node quickly (simulating false positive scenario)
       await harness.testNodeRecovery(1);
-      await new Promise(resolve => setTimeout(resolve, 100)); // Reduced from 600ms
+      await new Promise(resolve => setTimeout(resolve, 10)); // In-memory
       
       // Check that nodes eventually converge to all ALIVE
       const finalMembership = harness.getClusterMembership(0);
@@ -93,7 +93,7 @@ describe('Failure Detection Integration', () => {
     it('should handle network partitions', async () => {
       // Setup cluster with 4 nodes (reduced from 5)
       await harness.setupCluster(4);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Create network partition using existing method
       const partitionResult = await harness.testNetworkPartition(0.4); // 40% partition
@@ -107,7 +107,7 @@ describe('Failure Detection Integration', () => {
     it('should recover from partition healing', async () => {
       // Setup cluster
       await harness.setupCluster(4);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Create partition
       const partitionResult = await harness.testNetworkPartition(0.5);
@@ -125,11 +125,11 @@ describe('Failure Detection Integration', () => {
     it('should detect node recovery', async () => {
       // Setup cluster
       await harness.setupCluster(3);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Simulate node failure
       await harness.simulateNodeFailure(1);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Simulate node recovery
       const recoveryResult = await harness.testNodeRecovery(1);
@@ -145,15 +145,15 @@ describe('Failure Detection Integration', () => {
     it('should reintegrate recovered nodes', async () => {
       // Setup cluster
       await harness.setupCluster(4);
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Fail node 2
       await harness.simulateNodeFailure(2);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Recover node 2
       const recoveryResult = await harness.testNodeRecovery(2);
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check reintegration - all nodes should see full membership
       expect(recoveryResult.dataConsistency).toBeGreaterThan(0.9);

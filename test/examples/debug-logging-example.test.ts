@@ -3,12 +3,12 @@ import { createTestCluster } from '../harness/create-test-cluster';
 describe('Debug Logging Examples', () => {
   it('should run without any logs (clean output)', async () => {
     // Default behavior - completely clean output for fast CI/CD runs
-    const cluster = createTestCluster({ size: 2, enableLogging: false });
+    const cluster = createTestCluster({ size: 2 });
     
     await cluster.start();
     await cluster.stop();
     
-    // No logs captured when enableLogging: false
+    // No logs captured by default
     const logs = cluster.getLogs();
     expect(logs).toHaveLength(0);
   });

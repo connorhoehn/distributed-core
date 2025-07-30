@@ -17,8 +17,8 @@ describe('Gossip Propagation Integration', () => {
       cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for initial cluster formation (reduced)
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Wait for initial cluster formation (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Verify all nodes have formed the cluster
       for (let i = 0; i < 4; i++) {
@@ -44,8 +44,8 @@ describe('Gossip Propagation Integration', () => {
       cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for cluster formation (reduced)
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Wait for cluster formation (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Simulate concurrent gossip by checking state changes
       const initialMemberships: number[] = [];
@@ -54,8 +54,8 @@ describe('Gossip Propagation Integration', () => {
         initialMemberships.push(node.getMembership().size);
       }
       
-      // Wait for several gossip rounds (reduced)
-      await new Promise(resolve => setTimeout(resolve, 600));
+      // Wait for several gossip rounds (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check that membership is stable (not changing rapidly)
       const finalMemberships: number[] = [];
@@ -74,8 +74,8 @@ describe('Gossip Propagation Integration', () => {
       cluster = createTestCluster({ size: 5, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for convergence (reduced)
-      await new Promise(resolve => setTimeout(resolve, 600));
+      // Wait for convergence (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check membership consistency across all nodes
       const memberships: string[][] = [];
@@ -101,8 +101,8 @@ describe('Gossip Propagation Integration', () => {
       cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for initial gossip propagation (reduced)
-      await new Promise(resolve => setTimeout(resolve, 400));
+      // Wait for initial gossip propagation (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check that each node knows about most other nodes
       let totalAwareness = 0;
@@ -124,8 +124,8 @@ describe('Gossip Propagation Integration', () => {
       cluster = createTestCluster({ size: 6, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for stabilization (reduced)
-      await new Promise(resolve => setTimeout(resolve, 800));
+      // Wait for stabilization (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check that gossip is still effective with more nodes
       const membershipSizes: number[] = [];
@@ -150,8 +150,8 @@ describe('Gossip Propagation Integration', () => {
       cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for cluster formation (reduced)
-      await new Promise(resolve => setTimeout(resolve, 200));
+      // Wait for cluster formation (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Verify nodes can communicate via gossip
       const node0 = cluster.getNode(0);
@@ -180,8 +180,8 @@ describe('Gossip Propagation Integration', () => {
       cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for metadata propagation (reduced)
-      await new Promise(resolve => setTimeout(resolve, 400));
+      // Wait for metadata propagation (in-memory)
+      await new Promise(resolve => setTimeout(resolve, 10));
       
       // Check that nodes have metadata about other nodes
       for (let i = 0; i < 4; i++) {

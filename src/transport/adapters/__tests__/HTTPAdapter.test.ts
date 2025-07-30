@@ -103,7 +103,7 @@ describe('HTTPAdapter', () => {
 
       const response = await adapter1.sendWithResponse(message, node2, 100);
       expect(response).toEqual(responseMessage);
-    }, 1000);
+    }, 500);
 
     it('should timeout on sendWithResponse', async () => {
       const message: Message = {
@@ -117,7 +117,7 @@ describe('HTTPAdapter', () => {
       // Don't set up response handler - should timeout quickly
       await expect(adapter1.sendWithResponse(message, node2, 10))
         .rejects.toThrow('Request msg1 timed out');
-    }, 1000);
+    }, 500);
 
     it('should throw error when sending from stopped adapter', async () => {
       await adapter1.stop();
@@ -172,7 +172,7 @@ describe('HTTPAdapter', () => {
 
       expect(response1.data).toEqual({ response: { request: 1 } });
       expect(response2.data).toEqual({ response: { request: 2 } });
-    }, 1000);
+    }, 500);
 
     it('should remove message listeners', async () => {
       const messageHandler = jest.fn();
@@ -293,7 +293,7 @@ describe('HTTPAdapter', () => {
       
       expect(requestSpy).toHaveBeenCalledWith(message, node2);
       expect(responseSpy).toHaveBeenCalledWith(responseMessage);
-    }, 1000);
+    }, 500);
   });
 
   describe('pending requests', () => {
@@ -334,7 +334,7 @@ describe('HTTPAdapter', () => {
       };
 
       // Start request
-      const responsePromise = adapter1.sendWithResponse(message, node2, 1000);
+      const responsePromise = adapter1.sendWithResponse(message, node2, 500);
       expect((adapter1 as any).pendingRequests.has('msg1')).toBe(true);
 
       // Stop adapter
