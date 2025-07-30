@@ -1,10 +1,13 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
 import { BootstrapConfig } from '../../src/cluster/BootstrapConfig';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
+import { createTestClusterConfig, createTestClusterConfigWithDebug } from '../support/test-config';
 
 export interface TestClusterOptions {
   size: number;
   enableLogging?: boolean;
+  enableDebugLogs?: boolean;  // New option for debug console logs
+  testType?: 'unit' | 'integration' | 'scenario';
 }
 
 export interface TestCluster {
@@ -19,10 +22,16 @@ export interface TestCluster {
  * Creates a lightweight test cluster for integration testing
  */
 export function createTestCluster(options: TestClusterOptions): TestCluster {
-  const { size, enableLogging = false } = options; // Default to false for tests
+  const { size, enableLogging = false, enableDebugLogs, testType = 'unit' } = options;
   
   const nodes: ClusterManager[] = [];
   const logs: any[] = [];
+  
+  // Get optimized test configuration
+  // If enableDebugLogs is explicitly set, use that; otherwise use config default
+  const testConfig = enableDebugLogs === true 
+    ? createTestClusterConfigWithDebug(testType)
+    : createTestClusterConfig(testType);
   
   // Create simple node IDs
   const nodeIds: string[] = Array.from({ length: size }, (_, i) => `test-node-${i}`);
@@ -38,7 +47,12 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
     
     // Use first node as seed for others
     const seedNodes = i === 0 ? [] : [nodeIds[0]];
-    const config = new BootstrapConfig(seedNodes, 5000, 1000, enableLogging);
+    const config = new BootstrapConfig(
+      seedNodes, 
+      testConfig.joinTimeout,      // Fast join timeout
+      testConfig.gossipInterval,   // Fast gossip interval  
+      enableDebugLogs || testConfig.enableLogging  // Use enableDebugLogs for system logging, not enableLogging
+    );
     
     const nodeMetadata = {
       region: 'test-region',
@@ -50,8 +64,8 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
     const manager = new ClusterManager(nodeId, transport, config, 100, nodeMetadata);
     
     if (enableLogging) {
-      manager.on('started', () => logs.push({ node: nodeId, event: 'started', timestamp: Date.now() }));
-      manager.on('member-joined', (member: any) => logs.push({ node: nodeId, event: 'member-joined', member: member.id, timestamp: Date.now() }));
+      (manager as any).on('started', () => logs.push({ node: nodeId, event: 'started', timestamp: Date.now() }));
+      (manager as any).on('member-joined', (member: any) => logs.push({ node: nodeId, event: 'member-joined', member: member.id, timestamp: Date.now() }));
     }
     
     nodes.push(manager);
@@ -68,12 +82,12 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
       // Start all nodes sequentially to avoid race conditions
       for (const node of nodes) {
         await node.start();
-        // Small delay between node starts
-        await new Promise(resolve => setTimeout(resolve, 10));
+        // Small delay between node starts (reduced for tests)
+        await new Promise(resolve => setTimeout(resolve, testConfig.failureDetector.heartbeatInterval / 10));
       }
       
-      // Small delay for cluster formation
-      await new Promise(resolve => setTimeout(resolve, 50));
+      // Small delay for cluster formation (reduced for tests)
+      await new Promise(resolve => setTimeout(resolve, testConfig.gossipInterval));
     },
     
     async stop(): Promise<void> {

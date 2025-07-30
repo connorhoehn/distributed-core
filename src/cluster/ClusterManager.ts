@@ -47,8 +47,8 @@ export class ClusterManager extends EventEmitter {
       this.membership,
       {
         heartbeatInterval: config.gossipInterval || 1000,
-        failureTimeout: 3000,
-        deadTimeout: 6000,
+        failureTimeout: (config.gossipInterval || 1000) * 3,     // 3x gossip interval to SUSPECT
+        deadTimeout: (config.gossipInterval || 1000) * 6,        // 6x gossip interval to DEAD
         enableLogging: config.enableLogging || false
       }
     );

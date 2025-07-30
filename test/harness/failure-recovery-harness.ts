@@ -1,6 +1,7 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
 import { BootstrapConfig } from '../../src/cluster/BootstrapConfig';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
+import { createTestClusterConfig } from '../support/test-config';
 
 /**
  * Failure recovery harness
@@ -10,6 +11,7 @@ export class FailureRecoveryHarness {
   private clusters: ClusterManager[] = [];
   private transports: InMemoryAdapter[] = [];
   private failedNodes: Set<string> = new Set();
+  private testConfig = createTestClusterConfig('unit'); // Use fast unit test config
 
   /**
    * Setup cluster for failure testing
@@ -23,24 +25,31 @@ export class FailureRecoveryHarness {
       this.transports.push(transport);
     }
 
-    // Create cluster managers
+    // Create cluster managers with optimized config
     for (let i = 0; i < nodeCount; i++) {
       const seedNodes = nodeIds.filter((_, idx) => idx !== i);
       const config = BootstrapConfig.create({
         seedNodes,
-        joinTimeout: 3000,
-        gossipInterval: 500
+        joinTimeout: this.testConfig.joinTimeout,    // Fast timeout
+        gossipInterval: this.testConfig.gossipInterval  // Fast gossip
       });
 
-      const cluster = new ClusterManager(nodeIds[i], this.transports[i], config);
+      // Create cluster with standard parameters (failure detector will use fast gossip interval)
+      const cluster = new ClusterManager(
+        nodeIds[i], 
+        this.transports[i], 
+        config, 
+        100, 
+        { region: 'test', zone: 'test', role: 'test' }
+      );
       this.clusters.push(cluster);
     }
 
     // Start all clusters
     await Promise.all(this.clusters.map(c => c.start()));
     
-    // Wait for stabilization
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait for stabilization (minimal for unit tests)
+    await new Promise(resolve => setTimeout(resolve, this.testConfig.gossipInterval));
   }
 
   /**
@@ -51,14 +60,14 @@ export class FailureRecoveryHarness {
     const targetNodeId = targetCluster.getNodeInfo().id;
     const beforeHealth = this.getClusterHealthSnapshot();
     
-    console.log(`Simulating failure of node: ${targetNodeId}`);
+    // console.log(`Simulating failure of node: ${targetNodeId}`); // Disabled for speed
     
     // Stop the target node
     await targetCluster.stop();
     this.failedNodes.add(targetNodeId);
     
-    // Wait for failure detection
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait for failure detection (minimal wait for unit tests)
+    await new Promise(resolve => setTimeout(resolve, this.testConfig.failureDetector.deadTimeout));
     
     const afterHealth = this.getClusterHealthSnapshot();
     
@@ -87,14 +96,14 @@ export class FailureRecoveryHarness {
       const targetNode = activeNodes[0];
       const nodeId = targetNode.getNodeInfo().id;
       
-      console.log(`Cascading failure ${i + 1}: Stopping ${nodeId}`);
+      // console.log(`Cascading failure ${i + 1}: Stopping ${nodeId}`); // Disabled for speed
       
       await targetNode.stop();
       this.failedNodes.add(nodeId);
       failedNodeIds.push(nodeId);
       
-      // Wait for cluster adjustment
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for cluster adjustment (minimal)
+      await new Promise(resolve => setTimeout(resolve, this.testConfig.gossipInterval));
       healthSnapshots.push(this.getClusterHealthSnapshot());
     }
     
@@ -119,14 +128,14 @@ export class FailureRecoveryHarness {
     
     const beforeRecovery = this.getClusterHealthSnapshot();
     
-    console.log(`Recovering node: ${nodeId}`);
+    // console.log(`Recovering node: ${nodeId}`); // Disabled for speed
     
     // Restart the node
     await targetCluster.start();
     this.failedNodes.delete(nodeId);
     
-    // Wait for rejoin and stabilization
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    // Wait for rejoin and stabilization (minimal)
+    await new Promise(resolve => setTimeout(resolve, this.testConfig.joinTimeout));
     
     const afterRecovery = this.getClusterHealthSnapshot();
     
@@ -148,19 +157,18 @@ export class FailureRecoveryHarness {
     const partition1 = this.clusters.slice(0, midpoint);
     const partition2 = this.clusters.slice(midpoint);
     
-    console.log(`Creating split-brain: ${partition1.length} vs ${partition2.length} nodes`);
+    // console.log(`Creating split-brain: ${partition1.length} vs ${partition2.length} nodes`); // Disabled for speed
     
     // Simulate network partition by stopping gossip between partitions
     const beforeSplit = this.getClusterHealthSnapshot();
     
-    // Wait for split detection
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    // Wait for split detection (minimal)
+    await new Promise(resolve => setTimeout(resolve, this.testConfig.failureDetector.failureTimeout));
     
     const duringSplit = this.getClusterHealthSnapshot();
     
-    // Heal the partition
-    console.log('Healing split-brain scenario');
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Heal the partition (minimal)
+    await new Promise(resolve => setTimeout(resolve, this.testConfig.gossipInterval * 2));
     
     const afterHealing = this.getClusterHealthSnapshot();
     
@@ -183,7 +191,7 @@ export class FailureRecoveryHarness {
     const isolatedNodes = this.clusters.slice(0, partitionSize);
     const connectedNodes = this.clusters.slice(partitionSize);
     
-    console.log(`Network partition: ${isolatedNodes.length} isolated, ${connectedNodes.length} connected`);
+    // console.log(`Network partition: ${isolatedNodes.length} isolated, ${connectedNodes.length} connected`); // Disabled for speed
     
     const beforePartition = this.getClusterHealthSnapshot();
     
@@ -193,11 +201,11 @@ export class FailureRecoveryHarness {
       // Here we simulate by stopping gossip
     }
     
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    await new Promise(resolve => setTimeout(resolve, this.testConfig.failureDetector.failureTimeout));
     const duringPartition = this.getClusterHealthSnapshot();
     
-    // Heal partition
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Heal partition (minimal)
+    await new Promise(resolve => setTimeout(resolve, this.testConfig.gossipInterval * 2));
     const afterHealing = this.getClusterHealthSnapshot();
     
     return {

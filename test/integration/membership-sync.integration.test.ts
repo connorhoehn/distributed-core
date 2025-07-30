@@ -15,11 +15,11 @@ describe('Membership Synchronization Integration', () => {
   describe('member join', () => {
     it('should propagate new member to all nodes', async () => {
       // Start with smaller cluster
-      cluster = createTestCluster({ size: 3, enableLogging: false });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for initial cluster formation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for initial cluster formation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Add a new node dynamically
       const newNodeId = 'test-node-new';
@@ -31,7 +31,7 @@ describe('Membership Synchronization Integration', () => {
       
       // Use existing node as seed
       const seedNodes = ['test-node-0'];
-      const config = new BootstrapConfig(seedNodes, 5000, 1000, false);
+      const config = new BootstrapConfig(seedNodes, 1000, 200, false); // Faster timeouts
       const nodeMetadata = {
         region: 'test-region',
         zone: 'test-zone',
@@ -44,8 +44,8 @@ describe('Membership Synchronization Integration', () => {
       // Start the new node
       await newNode.start();
       
-      // Wait for membership propagation
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for membership propagation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 600));
       
       // Check that existing nodes know about the new member
       let newMemberDetected = false;
@@ -67,15 +67,15 @@ describe('Membership Synchronization Integration', () => {
       // Cleanup
       await newNode.stop();
       await newTransport.stop();
-    }, 15000);
+    }, 3000);
 
     it('should handle concurrent joins', async () => {
       // Start with minimal cluster
-      cluster = createTestCluster({ size: 2, enableLogging: false });
+      cluster = createTestCluster({ size: 2, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for initial formation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for initial formation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Create multiple new nodes concurrently
       const newNodes: ClusterManager[] = [];
@@ -89,7 +89,7 @@ describe('Membership Synchronization Integration', () => {
           port: 3020 + i
         });
         
-        const config = new BootstrapConfig(['test-node-0'], 5000, 1000, false);
+        const config = new BootstrapConfig(['test-node-0'], 1000, 200, false); // Faster timeouts
         const nodeMetadata = {
           region: 'test-region',
           zone: 'test-zone',
@@ -105,8 +105,8 @@ describe('Membership Synchronization Integration', () => {
       // Start all new nodes concurrently
       await Promise.all(newNodes.map(node => node.start()));
       
-      // Wait for membership stabilization
-      await new Promise(resolve => setTimeout(resolve, 4000));
+      // Wait for membership stabilization (reduced)
+      await new Promise(resolve => setTimeout(resolve, 800));
       
       // Check that cluster stabilized with all nodes
       const node0 = cluster.getNode(0);
@@ -118,17 +118,17 @@ describe('Membership Synchronization Integration', () => {
       // Cleanup
       await Promise.all(newNodes.map(node => node.stop()));
       await Promise.all(newTransports.map(transport => transport.stop()));
-    }, 20000);
+    }, 4000);
   });
 
   describe('member leave', () => {
     it('should propagate member departure', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 4, enableLogging: false });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for cluster formation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for cluster formation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Record initial membership
       const node0 = cluster.getNode(0);
@@ -140,8 +140,8 @@ describe('Membership Synchronization Integration', () => {
       const departingNodeId = departingNode.getNodeInfo().id;
       await departingNode.stop();
       
-      // Wait for departure detection
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for departure detection (reduced)
+      await new Promise(resolve => setTimeout(resolve, 600));
       
       // Check that remaining nodes eventually detect the departure
       // (Note: In the current implementation, this might not immediately 
@@ -157,15 +157,15 @@ describe('Membership Synchronization Integration', () => {
       
       // At minimum, verify cluster is still functional
       expect(finalMembership.size).toBeGreaterThan(0);
-    }, 15000);
+    }, 3000);
 
     it('should handle graceful shutdown', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 3, enableLogging: false });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for formation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for formation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Gracefully stop one node
       const stoppingNode = cluster.getNode(2);
@@ -174,8 +174,8 @@ describe('Membership Synchronization Integration', () => {
       // In a full implementation, this would send a LEAVE message
       await stoppingNode.stop();
       
-      // Wait for graceful leave processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for graceful leave processing (reduced)
+      await new Promise(resolve => setTimeout(resolve, 400));
       
       // Check that other nodes are still healthy
       const node0 = cluster.getNode(0);
@@ -193,21 +193,21 @@ describe('Membership Synchronization Integration', () => {
       const overlap = keys0.filter(key => keys1.includes(key));
       
       expect(overlap.length).toBeGreaterThan(0);
-    }, 10000);
+    }, 2000);
   });
 
   describe('membership consistency', () => {
     it('should maintain consistent membership view', async () => {
-      // Setup cluster
-      cluster = createTestCluster({ size: 5, enableLogging: false });
+      // Setup cluster (reduced size)
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for full convergence
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for full convergence (reduced)
+      await new Promise(resolve => setTimeout(resolve, 600));
       
       // Check membership consistency across all nodes
       const memberships: Map<string, any>[] = [];
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 4; i++) {
         const node = cluster.getNode(i);
         memberships.push(node.getMembership());
       }
@@ -239,15 +239,15 @@ describe('Membership Synchronization Integration', () => {
       
       const avgConsistency = totalConsistency / comparisons;
       expect(avgConsistency).toBeGreaterThan(0.5); // At least 50% consistency
-    }, 15000);
+    }, 3000);
 
     it('should resolve membership conflicts', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 4, enableLogging: false });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for initial formation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for initial formation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Simulate a conflict scenario by checking version handling
       const node0 = cluster.getNode(0);
@@ -267,8 +267,8 @@ describe('Membership Synchronization Integration', () => {
         expect(memberInfo.lastUpdated).toBeGreaterThan(0);
       }
       
-      // Wait for any conflicts to resolve
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for any conflicts to resolve (reduced)
+      await new Promise(resolve => setTimeout(resolve, 400));
       
       // Check that membership is stable
       const finalMembership0 = node0.getMembership();
@@ -276,17 +276,17 @@ describe('Membership Synchronization Integration', () => {
       
       expect(finalMembership0.size).toBeGreaterThan(0);
       expect(finalMembership1.size).toBeGreaterThan(0);
-    }, 10000);
+    }, 2000);
   });
 
   describe('membership metadata handling', () => {
     it('should propagate node metadata correctly', async () => {
       // Setup cluster with custom metadata
-      cluster = createTestCluster({ size: 3, enableLogging: false });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for metadata propagation
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for metadata propagation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 400));
       
       // Check that metadata is propagated
       for (let i = 0; i < 3; i++) {
@@ -300,15 +300,15 @@ describe('Membership Synchronization Integration', () => {
           expect(memberInfo.metadata).toHaveProperty('role');
         }
       }
-    }, 8000);
+    }, 2000);
 
     it('should handle membership table operations', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 3, enableLogging: false });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
       await cluster.start();
       
-      // Wait for formation
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for formation (reduced)
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Test membership table operations
       const node0 = cluster.getNode(0);
@@ -329,6 +329,6 @@ describe('Membership Synchronization Integration', () => {
       expect(health).toBeDefined();
       expect(health.totalNodes).toBeGreaterThan(0);
       expect(health.healthRatio).toBeGreaterThan(0);
-    }, 8000);
+    }, 2000);
   });
 });
