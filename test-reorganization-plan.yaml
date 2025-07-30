@@ -1,0 +1,319 @@
+# Test Directory Reorganization Plan
+# Execute in order: Phase 1 → Phase 2 → Phase 3 → Phase 4
+
+project: distributed-core-test-reorganization
+version: "1.0"
+created: "2025-07-29"
+
+phases:
+  phase_1_immediate_cleanup:
+    name: "Remove Redundancy & Create Structure"
+    priority: "CRITICAL"
+    estimated_time: "2-3 hours"
+    
+    actions:
+      - name: "Create new directory structure"
+        type: "mkdir"
+        commands:
+          - "mkdir -p test/unit/cluster"
+          - "mkdir -p test/unit/transport" 
+          - "mkdir -p test/unit/common"
+          - "mkdir -p test/integration"
+          - "mkdir -p test/scenarios"
+          - "mkdir -p test/harness/demos"
+          - "mkdir -p test/support/fixtures"
+          - "mkdir -p test/support/helpers"
+          - "mkdir -p test/support/factories"
+
+      - name: "Remove redundant/stub files"
+        type: "remove"
+        files_to_delete:
+          - "test/cluster.test.ts"  # Only has 7 lines, stub test
+          - "test/bootstrap-cluster.test.ts"  # All TODOs, overlaps with cluster-formation
+
+      - name: "Move complete files to new structure"
+        type: "move"
+        moves:
+          - from: "test/harness-example.test.ts"
+            to: "test/harness/harness-examples.test.ts"
+          - from: "test/harness/runClusterDemo.ts" 
+            to: "test/harness/demos/runClusterDemo.ts"
+
+  phase_2_split_mega_file:
+    name: "Split cluster-formation.test.ts into focused files"
+    priority: "HIGH"
+    estimated_time: "3-4 hours"
+    depends_on: ["phase_1_immediate_cleanup"]
+
+    actions:
+      - name: "Extract unit tests from cluster-formation.test.ts"
+        type: "extract"
+        source_file: "test/cluster-formation.test.ts"
+        extractions:
+          - extract_section: "describe('BootstrapConfig'"
+            to_file: "test/unit/cluster/BootstrapConfig.unit.test.ts"
+            lines: "11-44"
+            
+          - extract_section: "describe('MembershipTable'"  
+            to_file: "test/unit/cluster/MembershipTable.unit.test.ts"
+            lines: "45-125"
+            
+          - extract_section: "describe('GossipStrategy'"
+            to_file: "test/unit/cluster/GossipStrategy.unit.test.ts" 
+            lines: "126-217"
+            
+          - extract_section: "describe('ClusterManager Unit Tests'"
+            to_file: "test/unit/cluster/ClusterManager.unit.test.ts"
+            lines: "218-267"
+
+      - name: "Keep integration tests in cluster-formation"
+        type: "refactor"
+        target_file: "test/cluster-formation.test.ts"
+        new_file: "test/integration/cluster-formation.integration.test.ts"
+        keep_sections:
+          - "describe('Test Cluster Integration'"  # lines 268-335
+          - "describe('Mock Transport Validation'"  # lines 336-373
+        remove_sections:
+          - "All unit test describes"  # Will be moved to unit/ folder
+
+  phase_3_implement_todo_tests:
+    name: "Implement high-priority TODO tests"
+    priority: "HIGH" 
+    estimated_time: "1-2 weeks"
+    depends_on: ["phase_2_split_mega_file"]
+
+    actions:
+      - name: "Implement failure detection tests"
+        type: "implement"
+        source_file: "test/failure-detection.test.ts"
+        target_file: "test/integration/failure-detection.integration.test.ts"
+        tests_to_implement:
+          - "should detect unresponsive nodes"
+          - "should propagate failure information" 
+          - "should handle false positives"
+          - "should handle network partitions"
+          - "should recover from partition healing"
+          - "should detect node recovery"
+          - "should reintegrate recovered nodes"
+
+      - name: "Implement gossip flow tests"
+        type: "implement"
+        source_file: "test/gossip-flow.test.ts"
+        target_file: "test/integration/gossip-propagation.integration.test.ts"
+        tests_to_implement:
+          - "should propagate state across all nodes"
+          - "should handle concurrent gossip rounds"
+          - "should converge to consistent state"
+          - "should reach all nodes within expected rounds"
+          - "should maintain efficiency with large clusters"
+
+      - name: "Implement membership sync tests"
+        type: "implement" 
+        source_file: "test/membership-sync.test.ts"
+        target_file: "test/integration/membership-sync.integration.test.ts"
+        tests_to_implement:
+          - "should synchronize membership across nodes"
+          - "should handle concurrent membership changes"
+          - "should resolve membership conflicts"
+          - "should maintain eventual consistency"
+
+  phase_4_create_support_infrastructure:
+    name: "Create test utilities and factories"
+    priority: "MEDIUM"
+    estimated_time: "1 week"
+    depends_on: ["phase_3_implement_todo_tests"]
+
+    actions:
+      - name: "Create test factories"
+        type: "create"
+        files:
+          - path: "test/support/factories/ClusterFactory.ts"
+            content: |
+              // Factory for creating test clusters with common configurations
+              export class ClusterFactory {
+                static createSmall(options = {}) { return createTestCluster({ size: 3, ...options }); }
+                static createMedium(options = {}) { return createTestCluster({ size: 5, ...options }); }
+                static createLarge(options = {}) { return createTestCluster({ size: 10, ...options }); }
+              }
+
+          - path: "test/support/factories/NodeFactory.ts" 
+            content: |
+              // Factory for creating test nodes with metadata
+              export class NodeFactory {
+                static createWorker(id: string, zone = 'test-zone') { return { id, zone, role: 'worker' }; }
+                static createSeed(id: string) { return { id, role: 'seed', zone: 'test-zone' }; }
+              }
+
+          - path: "test/support/helpers/ClusterAssertions.ts"
+            content: |
+              // Custom Jest matchers for cluster testing
+              expect.extend({
+                toHaveHealthyCluster(cluster) { /* impl */ },
+                toHaveConvergedMembership(nodes) { /* impl */ },
+                toDetectFailureWithin(cluster, timeout) { /* impl */ }
+              });
+
+      - name: "Create test configuration"
+        type: "create" 
+        files:
+          - path: "test/support/TestConfig.ts"
+            content: |
+              export const TestConfig = {
+                timeouts: { unit: 5000, integration: 30000, scenario: 60000 },
+                clusters: {
+                  small: { size: 3, timeout: 5000 },
+                  medium: { size: 5, timeout: 10000 },
+                  large: { size: 10, timeout: 20000 }
+                },
+                logging: { enableTestLogging: false }
+              };
+
+  phase_5_implement_remaining_tests:
+    name: "Implement remaining TODO tests"
+    priority: "MEDIUM"
+    estimated_time: "1-2 weeks"
+    depends_on: ["phase_4_create_support_infrastructure"]
+
+    actions:
+      - name: "Implement transport layer tests"
+        type: "implement"
+        source_file: "test/transport-layer.test.ts"
+        target_file: "test/unit/transport/transport-layer.unit.test.ts"
+
+      - name: "Implement metrics collection tests"
+        type: "implement"
+        source_file: "test/metrics-collection.test.ts"
+        target_file: "test/integration/metrics-collection.integration.test.ts"
+
+      - name: "Implement state persistence tests"
+        type: "implement"
+        source_file: "test/state-persistence.test.ts" 
+        target_file: "test/integration/state-persistence.integration.test.ts"
+
+  phase_6_advanced_scenarios:
+    name: "Create scenario/e2e tests"
+    priority: "LOW"
+    estimated_time: "1 week"
+    depends_on: ["phase_5_implement_remaining_tests"]
+
+    actions:
+      - name: "Implement chaos testing scenarios"
+        type: "implement"
+        source_file: "test/chaos-testing.test.ts"
+        target_file: "test/scenarios/chaos-recovery.scenario.test.ts"
+
+      - name: "Create performance test scenarios"
+        type: "create"
+        files:
+          - path: "test/scenarios/cluster-scaling.scenario.test.ts"
+            content: "// Test cluster scaling from 3→10→3 nodes"
+          - path: "test/scenarios/network-partition.scenario.test.ts" 
+            content: "// Test split-brain scenarios and recovery"
+          - path: "test/scenarios/performance.scenario.test.ts"
+            content: "// Test throughput and latency under load"
+
+# File mapping for moves/renames
+file_mappings:
+  current_structure:
+    - "test/cluster-formation.test.ts (373 lines) ✅ COMPREHENSIVE"
+    - "test/harness-example.test.ts (114 lines) ✅ GOOD"
+    - "test/cluster.test.ts (7 lines) ❌ STUB"
+    - "test/bootstrap-cluster.test.ts (49 lines) ❌ ALL TODOs"
+    - "test/failure-detection.test.ts (49 lines) ❌ ALL TODOs"
+    - "test/gossip-flow.test.ts (40 lines) ❌ ALL TODOs"
+    - "test/membership-sync.test.ts (44 lines) ❌ ALL TODOs"
+    - "test/metrics-collection.test.ts (55 lines) ❌ ALL TODOs"
+    - "test/state-persistence.test.ts (47 lines) ❌ ALL TODOs"
+    - "test/transport-layer.test.ts (55 lines) ❌ ALL TODOs"
+    - "test/chaos-testing.test.ts (51 lines) ❌ ALL TODOs"
+
+  target_structure:
+    unit_tests:
+      - "test/unit/cluster/BootstrapConfig.unit.test.ts"
+      - "test/unit/cluster/ClusterManager.unit.test.ts"
+      - "test/unit/cluster/MembershipTable.unit.test.ts"
+      - "test/unit/cluster/GossipStrategy.unit.test.ts"
+      - "test/unit/transport/transport-layer.unit.test.ts"
+      - "test/unit/common/Node.unit.test.ts"
+
+    integration_tests:
+      - "test/integration/cluster-formation.integration.test.ts"
+      - "test/integration/failure-detection.integration.test.ts"
+      - "test/integration/gossip-propagation.integration.test.ts"
+      - "test/integration/membership-sync.integration.test.ts"
+      - "test/integration/metrics-collection.integration.test.ts"
+      - "test/integration/state-persistence.integration.test.ts"
+
+    scenario_tests:
+      - "test/scenarios/chaos-recovery.scenario.test.ts"
+      - "test/scenarios/cluster-scaling.scenario.test.ts"
+      - "test/scenarios/network-partition.scenario.test.ts"
+      - "test/scenarios/performance.scenario.test.ts"
+
+    harness_files:
+      - "test/harness/ClusterCoordinationHarness.ts ✅ KEEP"
+      - "test/harness/FailureRecoveryHarness.ts ✅ KEEP"
+      - "test/harness/LoadDistributionHarness.ts ✅ KEEP"
+      - "test/harness/MultiNodeHarness.ts ✅ KEEP"
+      - "test/harness/demos/runClusterDemo.ts"
+      - "test/harness/harness-examples.test.ts"
+
+    support_files:
+      - "test/support/factories/ClusterFactory.ts"
+      - "test/support/factories/NodeFactory.ts"
+      - "test/support/helpers/ClusterAssertions.ts"
+      - "test/support/helpers/TimingHelpers.ts"
+      - "test/support/TestConfig.ts"
+
+# Jest configuration updates needed
+jest_config_updates:
+  - name: "Update test patterns"
+    file: "jest.config.js"
+    changes:
+      - "Add testMatch patterns for *.unit.test.ts, *.integration.test.ts, *.scenario.test.ts"
+      - "Add separate timeout configurations per test type"
+      - "Add test environment setup for harness utilities"
+
+# Package.json script updates
+package_json_scripts:
+  test_scripts:
+    - "test:unit: jest --testPathPattern=unit"
+    - "test:integration: jest --testPathPattern=integration --timeout=30000"
+    - "test:scenarios: jest --testPathPattern=scenarios --timeout=60000"
+    - "test:all: jest --passWithNoTests"
+    - "test:watch: jest --watch --testPathPattern=unit"
+
+# Success criteria
+success_criteria:
+  - "✅ All redundant files removed"
+  - "✅ Clear separation: unit/integration/scenario tests"
+  - "✅ All TODO tests implemented with real test cases"
+  - "✅ Consistent naming: *.unit.test.ts, *.integration.test.ts, *.scenario.test.ts"
+  - "✅ Shared utilities available in test/support/"
+  - "✅ Jest can run test suites by category"
+  - "✅ Test coverage above 80% for core components"
+  - "✅ All tests pass in CI/CD pipeline"
+
+# Migration commands (execute in order)
+execution_commands:
+  phase_1:
+    - "mkdir -p test/{unit/{cluster,transport,common},integration,scenarios,harness/demos,support/{fixtures,helpers,factories}}"
+    - "rm test/cluster.test.ts test/bootstrap-cluster.test.ts"
+    - "mv test/harness-example.test.ts test/harness/harness-examples.test.ts"
+    - "mv test/harness/runClusterDemo.ts test/harness/demos/runClusterDemo.ts"
+
+  phase_2:
+    - "# Extract sections from cluster-formation.test.ts (manual process)"
+    - "# Split into unit tests in test/unit/cluster/"
+    - "# Keep integration tests in test/integration/"
+
+  phase_3:
+    - "# Implement TODO tests one by one"
+    - "# Use existing createTestCluster utility"
+    - "# Follow ClusterCoordinationHarness patterns"
+
+  validation:
+    - "npm test"
+    - "npm run test:unit"
+    - "npm run test:integration"
+    - "npm run test:scenarios"

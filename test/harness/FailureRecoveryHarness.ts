@@ -314,6 +314,23 @@ export class FailureRecoveryHarness {
     this.transports = [];
     this.failedNodes.clear();
   }
+
+  /**
+   * Get cluster membership from a specific node
+   */
+  getClusterMembership(nodeIndex: number): Array<{id: string, status: string}> {
+    if (nodeIndex >= this.clusters.length) {
+      return [];
+    }
+    
+    const cluster = this.clusters[nodeIndex];
+    const membership = cluster.getMembership();
+    
+    return Array.from(membership.values()).map(entry => ({
+      id: entry.id,
+      status: entry.status
+    }));
+  }
 }
 
 export interface ClusterHealthSnapshot {

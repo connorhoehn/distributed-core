@@ -1,6 +1,6 @@
-import { createTestCluster } from './harness/createTestCluster';
-import { nodeFixtures } from './fixtures/nodes';
-import { spyLogger, LogEntry } from './helpers/spyLogger';
+import { createTestCluster } from './createTestCluster';
+import { nodeFixtures } from '../fixtures/nodes';
+import { spyLogger, LogEntry } from '../helpers/spyLogger';
 
 describe('Test Harness Example', () => {
   describe('createTestCluster', () => {
