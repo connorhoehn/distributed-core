@@ -4,10 +4,10 @@ This document explains how to control logging output in tests for optimal debugg
 
 ## Overview
 
-The test suite supports two types of logging:
+The test suite uses a single `enableLogging` flag that controls:
 
-1. **Test Harness Logging** (`enableLogging`): Captures test events and cluster formation events in a logs array for assertions
-2. **Debug Console Logging** (`enableDebugLogs`): Controls console.log output from system components like FailureDetector
+1. **Test Harness Logging**: Captures test events and cluster formation events in a logs array for assertions
+2. **Debug Console Logging**: Controls console.log output from system components like FailureDetector
 
 ## Default Behavior
 
@@ -24,13 +24,12 @@ By default, most tests run with clean output (no console logs) for faster CI/CD 
 
 ```typescript
 // Clean output (default)
-const cluster = createTestCluster({ size: 3, enableLogging: true });
+const cluster = createTestCluster({ size: 3, enableLogging: false });
 
-// With debug console logs
+// With both test harness logs AND debug console logs
 const cluster = createTestCluster({ 
   size: 3, 
-  enableLogging: true,
-  enableDebugLogs: true 
+  enableLogging: true 
 });
 ```
 
@@ -59,7 +58,7 @@ const cluster = createTestCluster({
 
 ## What Debug Logs Show
 
-When `enableDebugLogs: true`, you'll see console output like:
+When `enableLogging: true`, you'll see console output like:
 
 ```
 FailureDetector started for node test-node-0
@@ -75,8 +74,8 @@ This helps debug:
 
 ## Best Practices
 
-1. **Default to clean output** for fast test execution
-2. **Enable debug logs temporarily** when troubleshooting specific issues
+1. **Default to clean output** for fast test execution (`enableLogging: false`)
+2. **Enable logging temporarily** when troubleshooting specific issues (`enableLogging: true`)
 3. **Use scenario/production configs** for comprehensive testing with full logging
 4. **Keep integration tests clean** for CI/CD performance
 

@@ -5,8 +5,8 @@ import { createTestClusterConfig, createTestClusterConfigWithDebug } from '../su
 
 export interface TestClusterOptions {
   size: number;
-  enableLogging?: boolean;
-  enableDebugLogs?: boolean;  // New option for debug console logs
+  enableLogging?: boolean;  // Controls both test harness logs AND debug console logs
+  enableTestHarnessOnly?: boolean;  // Only test harness logs, no debug console logs
   testType?: 'unit' | 'integration' | 'scenario';
 }
 
@@ -22,14 +22,17 @@ export interface TestCluster {
  * Creates a lightweight test cluster for integration testing
  */
 export function createTestCluster(options: TestClusterOptions): TestCluster {
-  const { size, enableLogging = false, enableDebugLogs, testType = 'unit' } = options;
+  const { size, enableLogging = false, enableTestHarnessOnly = false, testType = 'unit' } = options;
   
   const nodes: ClusterManager[] = [];
   const logs: any[] = [];
   
+  // Determine what type of logging to enable
+  const enableDebugConsole = enableLogging && !enableTestHarnessOnly;
+  const enableTestEvents = enableLogging || enableTestHarnessOnly;
+  
   // Get optimized test configuration
-  // If enableDebugLogs is explicitly set, use that; otherwise use config default
-  const testConfig = enableDebugLogs === true 
+  const testConfig = enableDebugConsole 
     ? createTestClusterConfigWithDebug(testType)
     : createTestClusterConfig(testType);
   
@@ -51,7 +54,7 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
       seedNodes, 
       testConfig.joinTimeout,      // Fast join timeout
       testConfig.gossipInterval,   // Fast gossip interval  
-      enableDebugLogs || testConfig.enableLogging  // Use enableDebugLogs for system logging, not enableLogging
+      enableDebugConsole || testConfig.enableLogging  // Only enable system debug logs when explicitly requested
     );
     
     const nodeMetadata = {
@@ -63,7 +66,7 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
     
     const manager = new ClusterManager(nodeId, transport, config, 100, nodeMetadata);
     
-    if (enableLogging) {
+    if (enableTestEvents) {
       (manager as any).on('started', () => logs.push({ node: nodeId, event: 'started', timestamp: Date.now() }));
       (manager as any).on('member-joined', (member: any) => logs.push({ node: nodeId, event: 'member-joined', member: member.id, timestamp: Date.now() }));
     }
@@ -75,7 +78,7 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
     nodes,
     
     async start(): Promise<void> {
-      if (enableLogging) {
+      if (enableTestEvents) {
         logs.push({ message: 'Starting test cluster', timestamp: Date.now() });
       }
       
@@ -91,7 +94,7 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
     },
     
     async stop(): Promise<void> {
-      if (enableLogging) {
+      if (enableTestEvents) {
         logs.push({ message: 'Stopping test cluster', timestamp: Date.now() });
       }
       

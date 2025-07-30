@@ -2,15 +2,14 @@
  * Test configuration with optimized timeouts for faster test execution
  * 
  * Logging Configuration:
- * - enableDebugLogs: Controls console.log output from FailureDetector and other system components
- * - Set to false by default for clean test output
- * - Set to true for scenario/production tests for detailed debugging
+ * - enableLogging: false (default) - Completely clean output
+ * - enableTestHarnessOnly: true - Test event logs only, no console debug noise  
+ * - enableLogging: true - Full logging including debug console output
  * 
- * To enable debug logs for a specific test:
- * const cluster = createTestCluster({ size: 3, enableDebugLogs: true });
- * 
- * To enable debug logs for all tests of a type, modify the logging.enableDebugLogs 
- * setting in the appropriate test configuration below.
+ * Examples:
+ * const cluster = createTestCluster({ size: 3 }); // Clean output
+ * const cluster = createTestCluster({ size: 3, enableTestHarnessOnly: true }); // Test logs only
+ * const cluster = createTestCluster({ size: 3, enableLogging: true }); // Full debug output
  */
 
 export const TestConfig = {

@@ -33,7 +33,7 @@ describe('Test Harness Example', () => {
     });
 
     it('should capture logs when enabled', async () => {
-      const cluster = createTestCluster({ size: 1, enableLogging: true });
+      const cluster = createTestCluster({ size: 1, enableTestHarnessOnly: true });
       
       await cluster.start();
       await cluster.stop();

@@ -13,7 +13,7 @@ describe('Cluster Formation Integration', () => {
     });
 
     it('should start and stop cluster nodes', async () => {
-      const cluster = createTestCluster({ size: 3, enableLogging: true });
+      const cluster = createTestCluster({ size: 3, enableTestHarnessOnly: true });
       
       await cluster.start();
       
@@ -32,7 +32,7 @@ describe('Cluster Formation Integration', () => {
     }, 5000);
 
     it('should form cluster with 5 nodes via gossip', async () => {
-      const cluster = createTestCluster({ size: 5, enableLogging: true });
+      const cluster = createTestCluster({ size: 5, enableTestHarnessOnly: true });
       
       await cluster.start();
       
