@@ -5,6 +5,7 @@ import { MembershipTable } from './MembershipTable';
 import { GossipStrategy } from './GossipStrategy';
 import { ConsistentHashRing } from './ConsistentHashRing';
 import { BootstrapConfig } from './BootstrapConfig';
+import { FailureDetector } from './FailureDetector';
 import { 
   NodeInfo, 
   ClusterMessage, 
@@ -22,6 +23,7 @@ export class ClusterManager extends EventEmitter {
   private membership: MembershipTable;
   private gossipStrategy: GossipStrategy;
   private hashRing: ConsistentHashRing;
+  private failureDetector: FailureDetector;
   private isStarted = false;
   private gossipTimer?: NodeJS.Timeout;
   private recentUpdates: NodeInfo[] = [];
@@ -39,6 +41,17 @@ export class ClusterManager extends EventEmitter {
     this.membership = new MembershipTable(localNodeId);
     this.gossipStrategy = new GossipStrategy(localNodeId, transport, config.gossipInterval, config.enableLogging);
     this.hashRing = new ConsistentHashRing(virtualNodesPerNode);
+    this.failureDetector = new FailureDetector(
+      localNodeId,
+      transport,
+      this.membership,
+      {
+        heartbeatInterval: config.gossipInterval || 1000,
+        failureTimeout: 3000,
+        deadTimeout: 6000,
+        enableLogging: config.enableLogging || false
+      }
+    );
     
         // Connect membership events
     this.membership.on('member-joined', (nodeInfo: NodeInfo) => this.emit('member-joined', nodeInfo));
@@ -69,6 +82,9 @@ export class ClusterManager extends EventEmitter {
     // Start periodic gossip
     this.startGossipTimer();
 
+    // Start failure detection
+    this.failureDetector.start();
+
     this.isStarted = true;
     this.emit('started');
   }
@@ -80,6 +96,9 @@ export class ClusterManager extends EventEmitter {
     if (this.gossipTimer) {
       clearInterval(this.gossipTimer);
     }
+
+    // Stop failure detection
+    this.failureDetector.stop();
 
     await this.transport.stop();
     this.membership.clear();
@@ -128,6 +147,9 @@ export class ClusterManager extends EventEmitter {
   private handleMessage(message: Message): void {
     try {
       const clusterMessage = message.data as ClusterMessage;
+      
+      // Record activity for failure detection
+      this.failureDetector.recordNodeActivity(message.sender.id);
       
       switch (clusterMessage.type) {
         case 'JOIN':
@@ -622,5 +644,12 @@ export class ClusterManager extends EventEmitter {
     }
     
     return Math.abs(hash).toString(16);
+  }
+
+  /**
+   * Get failure detector instance (for testing)
+   */
+  getFailureDetector(): FailureDetector {
+    return this.failureDetector;
   }
 }
