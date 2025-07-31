@@ -2,17 +2,14 @@ import { EventEmitter } from 'eventemitter3';
 import { 
   EntityRegistry, 
   EntityRecord, 
-  EntityUpdate, 
-  EntitySnapshot, 
-  WALConfig,
-  WALWriter,
-  WALReader
+  EntitySnapshot
 } from './types';
-import { WALWriterImpl } from './WAL/WALWriter';
-import { WALReaderImpl } from './WAL/WALReader';
-import { CheckpointWriterImpl } from './checkpoint/CheckpointWriter';
-import { CheckpointReaderImpl } from './checkpoint/CheckpointReader';
-import { CheckpointConfig, EntityState } from './checkpoint/types';
+import { EntityUpdate, WALConfig, WALWriter, WALReader } from '../../persistence/wal/types';
+import { WALWriterImpl } from '../../persistence/wal/WALWriter';
+import { WALReaderImpl } from '../../persistence/wal/WALReader';
+import { CheckpointWriterImpl } from '../../persistence/checkpoint/CheckpointWriter';
+import { CheckpointReaderImpl } from '../../persistence/checkpoint/CheckpointReader';
+import { CheckpointConfig, EntityState } from '../../persistence/checkpoint/types';
 
 export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityRegistry {
   private entities: Map<string, EntityRecord> = new Map();

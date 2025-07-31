@@ -1,4 +1,9 @@
 // Core entity types for distributed entity management
+// Import and re-export WAL types from unified persistence layer
+import { EntityUpdate } from '../../persistence/wal/types';
+
+export { EntityUpdate };
+
 export interface EntityRecord {
   entityId: string;
   ownerNodeId: string;
@@ -8,37 +13,11 @@ export interface EntityRecord {
   metadata?: Record<string, any>;
 }
 
-export interface EntityUpdate {
-  entityId: string;
-  ownerNodeId?: string;
-  version: number;
-  timestamp: number;
-  operation: 'CREATE' | 'UPDATE' | 'DELETE' | 'TRANSFER';
-  metadata?: Record<string, any>;
-  previousVersion?: number;
-}
-
 export interface EntitySnapshot {
   timestamp: number;
   version: number;
   entities: Record<string, EntityRecord>;
   nodeId: string;
-}
-
-// WAL specific types
-export interface WALEntry {
-  logSequenceNumber: number;
-  timestamp: number;
-  checksum: string;
-  data: EntityUpdate;
-}
-
-export interface WALConfig {
-  filePath?: string;
-  maxFileSize?: number;
-  syncInterval?: number;
-  compressionEnabled?: boolean;
-  checksumEnabled?: boolean;
 }
 
 // Entity Registry interface
@@ -75,33 +54,4 @@ export interface EntityRegistry {
 }
 
 // WAL specific interfaces
-export interface WALWriter {
-  append(update: EntityUpdate): Promise<number>;
-  flush(): Promise<void>;
-  sync(): Promise<void>;
-  close(): Promise<void>;
-}
-
-export interface WALReader {
-  readFrom(logSequenceNumber: number): AsyncIterableIterator<WALEntry>;
-  readAll(): Promise<WALEntry[]>;
-  getLastSequenceNumber(): Promise<number>;
-  replay(handler: (entry: WALEntry) => Promise<void>): Promise<void>;
-}
-
-export interface WALFile {
-  append(entry: WALEntry): Promise<void>;
-  readEntries(startLSN?: number, endLSN?: number): Promise<WALEntry[]>;
-  truncate(beforeLSN: number): Promise<void>;
-  getSize(): Promise<number>;
-  getLastLSN(): Promise<number>;
-  close(): Promise<void>;
-}
-
-export interface WALCoordinator {
-  getCurrentLSN(): number;
-  getNextLSN(): number;
-  calculateChecksum(data: any): string;
-  validateEntry(entry: WALEntry): boolean;
-  createEntry(update: EntityUpdate): WALEntry;
-}
+// Note: WAL interfaces moved to src/persistence/wal/types.ts

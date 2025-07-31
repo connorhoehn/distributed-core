@@ -1,7 +1,7 @@
-import { CheckpointWriterImpl } from '../../../src/cluster/entity/checkpoint/CheckpointWriter';
-import { CheckpointReaderImpl } from '../../../src/cluster/entity/checkpoint/CheckpointReader';
+import { CheckpointWriterImpl } from '../../../src/persistence/checkpoint/CheckpointWriter';
+import { CheckpointReaderImpl } from '../../../src/persistence/checkpoint/CheckpointReader';
 import { WriteAheadLogEntityRegistry } from '../../../src/cluster/entity/WriteAheadLogEntityRegistry';
-import { EntityState } from '../../../src/cluster/entity/checkpoint/types';
+import { EntityState } from '../../../src/persistence/checkpoint/types';
 import { promises as fs } from 'fs';
 
 describe('Checkpoint Recovery Tests', () => {

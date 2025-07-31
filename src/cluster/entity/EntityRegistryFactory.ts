@@ -1,4 +1,6 @@
-import { EntityRegistry, WALConfig } from './types';
+import { EntityRegistry } from './types';
+import { WALConfig } from '../../persistence/wal/types';
+import { CheckpointConfig } from '../../persistence/checkpoint/types';
 import { WriteAheadLogEntityRegistry } from './WriteAheadLogEntityRegistry';
 import { InMemoryEntityRegistry } from './InMemoryEntityRegistry';
 
@@ -8,6 +10,7 @@ export interface EntityRegistryFactoryConfig {
   type: EntityRegistryType;
   nodeId: string;
   walConfig?: WALConfig;
+  checkpointConfig?: CheckpointConfig;
   logConfig?: { enableTestMode?: boolean };
   // Future: etcdConfig, zkConfig, crdtConfig, etc.
 }
