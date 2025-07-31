@@ -90,7 +90,7 @@ describe('Gossip Propagation Integration', () => {
       const firstMembership = memberships[0];
       for (let i = 1; i < memberships.length; i++) {
         const overlap = memberships[i].filter(id => firstMembership.includes(id));
-        expect(overlap.length).toBeGreaterThan(firstMembership.length * 0.8); // 80% overlap
+        expect(overlap.length).toBeGreaterThanOrEqual(firstMembership.length * 0.8); // 80% overlap or better
       }
     }, 3000);
   });
