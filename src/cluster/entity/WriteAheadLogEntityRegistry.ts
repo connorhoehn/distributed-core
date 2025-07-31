@@ -10,20 +10,45 @@ import {
 } from './types';
 import { WALWriterImpl } from './WAL/WALWriter';
 import { WALReaderImpl } from './WAL/WALReader';
+import { CheckpointWriterImpl } from './checkpoint/CheckpointWriter';
+import { CheckpointReaderImpl } from './checkpoint/CheckpointReader';
+import { CheckpointConfig, EntityState } from './checkpoint/types';
 
 export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityRegistry {
   private entities: Map<string, EntityRecord> = new Map();
   private walWriter: WALWriter;
   private walReader: WALReader;
+  private checkpointWriter: CheckpointWriterImpl;
+  private checkpointReader: CheckpointReaderImpl;
   private nodeId: string;
   private isRunning: boolean = false;
   private globalVersion: number = 0;
+  private checkpointTimer: NodeJS.Timeout | null = null;
+  private lastCheckpointLSN: number = 0;
+  private config: WALConfig & CheckpointConfig;
 
-  constructor(nodeId: string, config: WALConfig = {}) {
+  constructor(nodeId: string, config: WALConfig & CheckpointConfig = {}) {
     super();
     this.nodeId = nodeId;
-    this.walWriter = new WALWriterImpl(config);
-    this.walReader = new WALReaderImpl(config.filePath || './data/entity.wal');
+    this.config = {
+      // WAL defaults
+      filePath: config.filePath || './data/entity.wal',
+      maxFileSize: config.maxFileSize || 100 * 1024 * 1024,
+      syncInterval: config.syncInterval !== undefined ? config.syncInterval : 1000,
+      compressionEnabled: config.compressionEnabled || false,
+      checksumEnabled: config.checksumEnabled || true,
+      // Checkpoint defaults
+      checkpointPath: config.checkpointPath || './data/checkpoints',
+      interval: config.interval !== undefined ? config.interval : 60000, // 1 minute
+      lsnThreshold: config.lsnThreshold !== undefined ? config.lsnThreshold : 1000,
+      keepHistory: config.keepHistory || 5,
+      ...config
+    };
+    
+    this.walWriter = new WALWriterImpl(this.config);
+    this.walReader = new WALReaderImpl(this.config.filePath!);
+    this.checkpointWriter = new CheckpointWriterImpl(this.config);
+    this.checkpointReader = new CheckpointReaderImpl(this.config);
   }
 
   async start(): Promise<void> {
@@ -33,8 +58,14 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
     await (this.walWriter as WALWriterImpl).initialize();
     await (this.walReader as WALReaderImpl).initialize();
 
-    // Replay WAL to restore state
+    // Try to restore from checkpoint first
+    await this.restoreFromCheckpoint();
+
+    // Replay WAL entries after checkpoint
     await this.replayWAL();
+
+    // Setup periodic checkpointing
+    this.setupCheckpointTimer();
 
     this.isRunning = true;
     // console.log(`[EntityRegistry] Started for node ${this.nodeId}`);
@@ -42,6 +73,12 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
 
   async stop(): Promise<void> {
     if (!this.isRunning) return;
+
+    // Stop checkpoint timer
+    if (this.checkpointTimer) {
+      clearInterval(this.checkpointTimer);
+      this.checkpointTimer = null;
+    }
 
     await this.walWriter.close();
     await (this.walReader as WALReaderImpl).close();
@@ -82,6 +119,9 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
     // Apply to local state
     await this.applyUpdate(update);
 
+    // Check if we need to create a checkpoint
+    await this.checkNeedsCheckpoint();
+
     this.emit('entity:created', record);
     return record;
   }
@@ -121,6 +161,9 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
     // Apply to local state
     await this.applyUpdate(update);
 
+    // Check if we need to create a checkpoint
+    await this.checkNeedsCheckpoint();
+
     this.emit('entity:deleted', entity);
   }
 
@@ -151,6 +194,9 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
     
     // Apply to local state
     await this.applyUpdate(update);
+
+    // Check if we need to create a checkpoint
+    await this.checkNeedsCheckpoint();
 
     const updatedEntity = this.entities.get(entityId)!;
     this.emit('entity:updated', updatedEntity);
@@ -184,6 +230,9 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
     
     // Apply to local state
     await this.applyUpdate(update);
+
+    // Check if we need to create a checkpoint
+    await this.checkNeedsCheckpoint();
 
     const transferredEntity = this.entities.get(entityId)!;
     this.emit('entity:transferred', transferredEntity);
@@ -254,11 +303,17 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
   private async replayWAL(): Promise<void> {
     // console.log('[EntityRegistry] Starting WAL replay...');
     
+    // Start replay from after the last checkpoint
+    const startLSN = this.lastCheckpointLSN + 1;
+    
     await this.walReader.replay(async (entry) => {
-      await this.applyUpdate(entry.data);
+      // Only replay entries after the checkpoint
+      if (entry.logSequenceNumber >= startLSN) {
+        await this.applyUpdate(entry.data);
+      }
     });
     
-    // console.log(`[EntityRegistry] WAL replay completed. Loaded ${this.entities.size} entities`);
+    // console.log(`[EntityRegistry] WAL replay completed from LSN ${startLSN}. Loaded ${this.entities.size} entities`);
   }
 
   private async applyUpdate(update: EntityUpdate): Promise<void> {
@@ -334,5 +389,92 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
 
   async truncateWALBefore(lsn: number): Promise<void> {
     await (this.walWriter as WALWriterImpl).truncateBefore(lsn);
+  }
+
+  // Checkpoint-related methods
+  private async restoreFromCheckpoint(): Promise<void> {
+    const snapshot = await this.checkpointReader.readLatest();
+    if (snapshot) {
+      // Restore entities from snapshot
+      this.entities.clear();
+      for (const [entityId, entityState] of Object.entries(snapshot.entities)) {
+        const record: EntityRecord = {
+          entityId: entityState.id,
+          ownerNodeId: entityState.hostNodeId,
+          version: entityState.version,
+          createdAt: entityState.lastModified,
+          lastUpdated: entityState.lastModified,
+          metadata: entityState.data || {}
+        };
+        this.entities.set(entityId, record);
+      }
+      
+      this.lastCheckpointLSN = snapshot.lsn;
+      this.globalVersion = Math.max(...Object.values(snapshot.entities).map(e => e.version), 0);
+      
+      // console.log(`[EntityRegistry] Restored from checkpoint at LSN ${snapshot.lsn}, ${this.entities.size} entities`);
+    }
+  }
+
+  private setupCheckpointTimer(): void {
+    if (this.config.interval && this.config.interval > 0) {
+      this.checkpointTimer = setInterval(async () => {
+        try {
+          await this.createCheckpoint();
+        } catch (error) {
+          console.error('[EntityRegistry] Checkpoint failed:', error);
+        }
+      }, this.config.interval);
+      
+      // Prevent timer from keeping process alive
+      this.checkpointTimer.unref();
+    }
+  }
+
+  async createCheckpoint(): Promise<void> {
+    const currentLSN = await this.getCurrentLSN();
+    
+    // Check if we should create a checkpoint based on LSN threshold
+    if (this.config.lsnThreshold && this.config.lsnThreshold > 0) {
+      const lsnDiff = currentLSN - this.lastCheckpointLSN;
+      if (lsnDiff < this.config.lsnThreshold) {
+        return; // Not enough new entries
+      }
+    }
+
+    // Convert entities to checkpoint format
+    const entities: Record<string, EntityState> = {};
+    for (const [entityId, record] of this.entities) {
+      entities[entityId] = {
+        id: record.entityId,
+        type: 'entity', // Could be extended for different entity types
+        data: record.metadata,
+        version: record.version,
+        hostNodeId: record.ownerNodeId,
+        lastModified: record.lastUpdated
+      };
+    }
+
+    await this.checkpointWriter.writeSnapshot(currentLSN, entities);
+    this.lastCheckpointLSN = currentLSN;
+    
+    this.emit('checkpoint:created', { lsn: currentLSN, entityCount: this.entities.size });
+    
+    // Optionally truncate WAL after successful checkpoint
+    // await this.truncateWALBefore(currentLSN);
+  }
+
+  async forceCheckpoint(): Promise<void> {
+    await this.createCheckpoint();
+  }
+
+  // Check if we need to create checkpoint after each write
+  private async checkNeedsCheckpoint(): Promise<void> {
+    if (this.config.lsnThreshold && this.config.lsnThreshold > 0) {
+      const currentLSN = await this.getCurrentLSN();
+      if (currentLSN % this.config.lsnThreshold === 0) {
+        await this.createCheckpoint();
+      }
+    }
   }
 }

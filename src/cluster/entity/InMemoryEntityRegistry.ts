@@ -19,7 +19,7 @@ export class InMemoryEntityRegistry extends EventEmitter implements EntityRegist
     this.nodeId = nodeId;
     this.logger = new FrameworkLogger({ 
       enableFrameworkLogs: true,
-      enableTestMode: logConfig?.enableTestMode ?? false
+      enableTestMode: logConfig?.enableTestMode // Let it auto-detect if not specified
     });
   }
 

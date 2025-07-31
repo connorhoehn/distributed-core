@@ -1,14 +1,17 @@
 import { WALReader, WALFile, WALEntry, WALCoordinator } from '../types';
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
+import { FrameworkLogger } from '../../../common/logger';
 
 export class WALReaderImpl implements WALReader {
   private walFile: WALFile;
   private coordinator: WALCoordinator;
+  private logger: FrameworkLogger;
 
   constructor(filePath: string) {
     this.walFile = new WALFileImpl(filePath);
     this.coordinator = new WALCoordinatorImpl();
+    this.logger = new FrameworkLogger({ enableFrameworkLogs: true });
   }
 
   async initialize(): Promise<void> {
@@ -49,7 +52,7 @@ export class WALReaderImpl implements WALReader {
   async replay(handler: (entry: WALEntry) => Promise<void>): Promise<void> {
     const entries = await this.readAll();
     
-    console.log(`[WALReader] Replaying ${entries.length} entries`);
+    this.logger.framework(`[WALReader] Replaying ${entries.length} entries`);
     
     let processed = 0;
     let errors = 0;
@@ -67,7 +70,7 @@ export class WALReaderImpl implements WALReader {
       }
     }
     
-    console.log(`[WALReader] Replay completed: ${processed} processed, ${errors} errors`);
+    this.logger.framework(`[WALReader] Replay completed: ${processed} processed, ${errors} errors`);
     
     if (errors > 0) {
       console.warn(`[WALReader] ${errors} entries failed during replay - check logs for details`);

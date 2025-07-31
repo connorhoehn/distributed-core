@@ -11,7 +11,12 @@ export interface LoggingConfig {
 }
 
 export class FrameworkLogger {
-  constructor(private config: LoggingConfig = {}) {}
+  constructor(private config: LoggingConfig = {}) {
+    // Auto-detect test mode if not explicitly set
+    if (this.config.enableTestMode === undefined) {
+      this.config.enableTestMode = process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID !== undefined;
+    }
+  }
 
   /**
    * Log framework-level messages
