@@ -19,7 +19,9 @@ import {
   ClusterHealth,
   ClusterMetadata,
   ClusterTopology,
-  DistributionStrategy
+  DistributionStrategy,
+  QuorumOptions,
+  PartitionInfo
 } from './types';
 
 export class ClusterManager extends EventEmitter {
@@ -823,5 +825,123 @@ export class ClusterManager extends EventEmitter {
     
     const result = KeyManager.verify(message, signature, publicKey);
     return result.isValid;
+  }
+
+  // Quorum and Partition Handling Methods
+
+  /**
+   * Check if cluster has quorum based on specified options
+   */
+  hasQuorum(opts: QuorumOptions): boolean {
+    const aliveMembers = this.getAliveMembers();
+    
+    // Check minimum node count
+    if (opts.minNodeCount && aliveMembers.length < opts.minNodeCount) {
+      return false;
+    }
+
+    // Check service-specific quorum
+    if (opts.service) {
+      const serviceMembers = aliveMembers.filter(member => 
+        member.metadata?.role === opts.service || 
+        member.metadata?.tags?.service === opts.service
+      );
+      
+      if (serviceMembers.length < Math.ceil(aliveMembers.length / 2)) {
+        return false;
+      }
+    }
+
+    // Check region distribution if required
+    if (opts.requiredRegionCount) {
+      const regions = new Set(
+        aliveMembers
+          .map(member => member.metadata?.region)
+          .filter(region => region !== undefined)
+      );
+      
+      if (regions.size < opts.requiredRegionCount) {
+        return false;
+      }
+    }
+
+    // Default majority quorum
+    const totalMembers = this.membership.getAllMembers().length;
+    const requiredForQuorum = Math.ceil(totalMembers / 2);
+    
+    return aliveMembers.length >= requiredForQuorum;
+  }
+
+  /**
+   * Trigger anti-entropy synchronization cycle
+   * Forces gossip to all known members to resolve inconsistencies
+   */
+  runAntiEntropyCycle(): void {
+    if (!this.isStarted) {
+      if (this.config.enableLogging) {
+        console.warn('[ClusterManager] Cannot run anti-entropy: cluster not started');
+      }
+      return;
+    }
+
+    const aliveMembers = this.getAliveMembers();
+    if (aliveMembers.length <= 1) {
+      return; // No other nodes to sync with
+    }
+
+    if (this.config.enableLogging) {
+      console.log(`[ClusterManager] Running anti-entropy cycle with ${aliveMembers.length} members`);
+    }
+
+    // Force immediate gossip to all members (not just random subset)
+    this.gossipStrategy.sendPeriodicGossip(aliveMembers, this.recentUpdates);
+    
+    // Increment local version to trigger updates
+    this.incrementVersion();
+    
+    this.emit('anti-entropy-triggered', {
+      timestamp: Date.now(),
+      memberCount: aliveMembers.length
+    });
+  }
+
+  /**
+   * Detect potential network partitions based on membership views
+   */
+  detectPartition(): PartitionInfo | null {
+    const aliveMembers = this.getAliveMembers();
+    const totalMembers = this.membership.getAllMembers().length;
+    
+    // If we have less than majority, we might be in a partition
+    if (aliveMembers.length < Math.ceil(totalMembers / 2)) {
+      return {
+        isPartitioned: true,
+        visibleNodes: aliveMembers.length,
+        totalNodes: totalMembers,
+        partitionRatio: aliveMembers.length / totalMembers,
+        timestamp: Date.now()
+      };
+    }
+
+    // Check for zone-based partitions
+    const zones = new Map<string, number>();
+    aliveMembers.forEach(member => {
+      const zone = member.metadata?.zone || 'unknown';
+      zones.set(zone, (zones.get(zone) || 0) + 1);
+    });
+
+    // If all visible nodes are in same zone, might be partition
+    if (zones.size === 1 && totalMembers > aliveMembers.length) {
+      return {
+        isPartitioned: true,
+        visibleNodes: aliveMembers.length,
+        totalNodes: totalMembers,
+        partitionRatio: aliveMembers.length / totalMembers,
+        timestamp: Date.now(),
+        partitionType: 'zone-based'
+      };
+    }
+
+    return null;
   }
 }

@@ -98,3 +98,24 @@ export interface ClusterMetadata {
   tags: Record<string, string[]>;
   created: number;
 }
+
+/**
+ * Options for quorum checking
+ */
+export interface QuorumOptions {
+  service?: string;
+  requiredRegionCount?: number;
+  minNodeCount?: number;
+}
+
+/**
+ * Partition detection information
+ */
+export interface PartitionInfo {
+  isPartitioned: boolean;
+  visibleNodes: number;
+  totalNodes: number;
+  partitionRatio: number;
+  timestamp: number;
+  partitionType?: 'zone-based' | 'network-split' | 'unknown';
+}
