@@ -33,7 +33,12 @@ describe('KeyManager Unit Tests', () => {
     });
 
     it('should accept pre-generated keys', () => {
-      const testKeyManager = new KeyManager();
+      // Use fast EC keys for generating test keys to improve performance
+      const testKeyManager = new KeyManager({ 
+        algorithm: 'ec', 
+        curve: 'secp256k1', 
+        enableLogging: false 
+      });
       const testPublicKey = testKeyManager.getPublicKey();
       const testPrivateKey = testKeyManager.getPrivateKey();
       
@@ -83,7 +88,12 @@ describe('KeyManager Unit Tests', () => {
 
     it('should reject signatures from wrong public key', () => {
       const message = 'Hello, cluster!';
-      const otherKeyManager = new KeyManager({ enableLogging: false });
+      // Use fast EC keys for the other KeyManager to improve performance
+      const otherKeyManager = new KeyManager({ 
+        algorithm: 'ec', 
+        curve: 'secp256k1', 
+        enableLogging: false 
+      });
       
       const signatureResult = keyManager.sign(message);
       const verificationResult = KeyManager.verify(
@@ -197,7 +207,12 @@ describe('KeyManager Unit Tests', () => {
       const nodeId = 'test-node-1';
       const publicKey = keyManager.getPublicKey();
       
-      const otherKeyManager = new KeyManager({ enableLogging: false });
+      // Use fast EC keys for the other KeyManager to improve performance
+      const otherKeyManager = new KeyManager({ 
+        algorithm: 'ec', 
+        curve: 'secp256k1', 
+        enableLogging: false 
+      });
       const wrongPublicKey = otherKeyManager.getPublicKey();
       
       keyManager.pinCertificate(nodeId, publicKey);
