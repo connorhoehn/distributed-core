@@ -1,8 +1,20 @@
+export interface FailureDetectorOptions {
+  heartbeatInterval?: number;
+  failureTimeout?: number;
+  deadTimeout?: number;
+  pingTimeout?: number;
+  maxMissedHeartbeats?: number;
+  maxMissedPings?: number;
+  enableActiveProbing?: boolean;
+  enableLogging?: boolean;
+}
+
 export interface BootstrapOptions {
   seedNodes: string[];
   joinTimeout: number;
   gossipInterval: number;
   enableLogging: boolean;
+  failureDetector?: FailureDetectorOptions;
 }
 
 export class BootstrapConfig {
@@ -10,7 +22,8 @@ export class BootstrapConfig {
     public seedNodes: string[] = [],
     public joinTimeout: number = 5000,
     public gossipInterval: number = 1000,
-    public enableLogging: boolean = false
+    public enableLogging: boolean = false,
+    public failureDetector: FailureDetectorOptions = {}
   ) {}
 
   static create(options: Partial<BootstrapOptions> = {}): BootstrapConfig {
@@ -18,7 +31,8 @@ export class BootstrapConfig {
       options.seedNodes || [],
       options.joinTimeout || 5000,
       options.gossipInterval || 1000,
-      options.enableLogging || false
+      options.enableLogging || false,
+      options.failureDetector || {}
     );
   }
 

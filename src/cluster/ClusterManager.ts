@@ -38,19 +38,24 @@ export class ClusterManager extends EventEmitter {
   ) {
     super();
     
+    // Create local node info
+    const localNode = {
+      id: localNodeId,
+      address: 'localhost', // Default address, should be configurable
+      port: 8080             // Default port, should be configurable
+    };
+    
     this.membership = new MembershipTable(localNodeId);
     this.gossipStrategy = new GossipStrategy(localNodeId, transport, config.gossipInterval, config.enableLogging);
     this.hashRing = new ConsistentHashRing(virtualNodesPerNode);
+    
+    // Initialize failure detector
     this.failureDetector = new FailureDetector(
-      localNodeId,
+      this.localNodeId,
+      localNode,
       transport,
       this.membership,
-      {
-        heartbeatInterval: config.gossipInterval || 1000,
-        failureTimeout: (config.gossipInterval || 1000) * 3,     // 3x gossip interval to SUSPECT
-        deadTimeout: (config.gossipInterval || 1000) * 6,        // 6x gossip interval to DEAD
-        enableLogging: config.enableLogging || false
-      }
+      config.failureDetector
     );
     
         // Connect membership events

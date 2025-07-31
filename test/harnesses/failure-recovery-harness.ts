@@ -30,8 +30,10 @@ export class FailureRecoveryHarness {
       const seedNodes = nodeIds.filter((_, idx) => idx !== i);
       const config = BootstrapConfig.create({
         seedNodes,
-        joinTimeout: this.testConfig.joinTimeout,    // Fast timeout
-        gossipInterval: this.testConfig.gossipInterval  // Fast gossip
+        joinTimeout: this.testConfig.joinTimeout,
+        gossipInterval: this.testConfig.gossipInterval,
+        enableLogging: this.testConfig.enableLogging,
+        failureDetector: this.testConfig.failureDetector
       });
 
       // Create cluster with standard parameters (failure detector will use fast gossip interval)
