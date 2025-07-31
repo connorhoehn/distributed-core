@@ -33,7 +33,8 @@ export class FailureRecoveryHarness {
         joinTimeout: this.testConfig.joinTimeout,
         gossipInterval: this.testConfig.gossipInterval,
         enableLogging: this.testConfig.enableLogging,
-        failureDetector: this.testConfig.failureDetector
+        failureDetector: this.testConfig.failureDetector,
+        keyManager: this.testConfig.keyManager  // Add fast EC key configuration
       });
 
       // Create cluster with standard parameters (failure detector will use fast gossip interval)

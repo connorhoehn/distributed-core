@@ -109,6 +109,13 @@ export function createTestClusterConfig(testType: 'unit' | 'integration' | 'scen
     enableLogging: config.logging.enableDebugLogs, // Use centralized logging control
     seedNodes: [],
     
+    // Fast KeyManager config for tests (EC keys are 10x faster than RSA)
+    keyManager: {
+      algorithm: 'ec' as const,
+      curve: 'secp256k1',
+      enableLogging: config.logging.enableDebugLogs
+    },
+    
     // Failure detector config
     failureDetector: {
       heartbeatInterval: config.cluster.heartbeatInterval,
@@ -128,6 +135,10 @@ export function createTestClusterConfigWithDebug(testType: 'unit' | 'integration
   return {
     ...config,
     enableLogging: true,
+    keyManager: {
+      ...config.keyManager,
+      enableLogging: true
+    },
     failureDetector: {
       ...config.failureDetector,
       enableLogging: true

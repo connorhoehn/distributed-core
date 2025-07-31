@@ -54,7 +54,9 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
       seedNodes, 
       testConfig.joinTimeout,      // Fast join timeout
       testConfig.gossipInterval,   // Fast gossip interval  
-      enableDebugConsole || testConfig.enableLogging  // Only enable system debug logs when explicitly requested
+      enableDebugConsole || testConfig.enableLogging,  // Only enable system debug logs when explicitly requested
+      testConfig.failureDetector,  // Failure detector config
+      testConfig.keyManager        // Fast EC key configuration for tests
     );
     
     const nodeMetadata = {
