@@ -143,21 +143,27 @@ describe('Node Integration Tests', () => {
         role: 'worker'
       });
 
-      await coordinatorNode.start();
-      await workerNode.start();
+      try {
+        await coordinatorNode.start();
+        await workerNode.start();
 
-      // Same cluster but different services and roles
-      expect(coordinatorNode.metadata.clusterId).toBe(workerNode.metadata.clusterId);
-      expect(coordinatorNode.metadata.service).not.toBe(workerNode.metadata.service);
-      
-      // Different public keys for access control
-      expect(coordinatorNode.metadata.pubKey).not.toBe(workerNode.metadata.pubKey);
-      expect(coordinatorNode.metadata.pubKey).toBeDefined();
-      expect(workerNode.metadata.pubKey).toBeDefined();
-
-      // Cleanup
-      await coordinatorNode.stop();
-      await workerNode.stop();
+        // Same cluster but different services and roles
+        expect(coordinatorNode.metadata.clusterId).toBe(workerNode.metadata.clusterId);
+        expect(coordinatorNode.metadata.service).not.toBe(workerNode.metadata.service);
+        
+        // Different public keys for access control
+        expect(coordinatorNode.metadata.pubKey).not.toBe(workerNode.metadata.pubKey);
+        expect(coordinatorNode.metadata.pubKey).toBeDefined();
+        expect(workerNode.metadata.pubKey).toBeDefined();
+      } finally {
+        // Guaranteed cleanup even if test fails
+        if (coordinatorNode.isRunning()) {
+          await coordinatorNode.stop();
+        }
+        if (workerNode.isRunning()) {
+          await workerNode.stop();
+        }
+      }
     });
 
     it('should track incarnation for failure detection', async () => {

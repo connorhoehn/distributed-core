@@ -551,7 +551,8 @@ export class ClusterManager extends EventEmitter {
 
       // Wait for departure announcements with timeout
       const timeoutPromise = new Promise<void>((resolve) => {
-        setTimeout(resolve, timeout);
+        const timer = setTimeout(resolve, timeout);
+        timer.unref(); // Prevent timer from keeping process alive
       });
 
       await Promise.race([
