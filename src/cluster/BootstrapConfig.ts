@@ -15,6 +15,16 @@ export interface BootstrapOptions {
   gossipInterval: number;
   enableLogging: boolean;
   failureDetector?: FailureDetectorOptions;
+  keyManager?: KeyManagerOptions;
+}
+
+export interface KeyManagerOptions {
+  privateKeyPem?: string;
+  publicKeyPem?: string;
+  keySize?: number;
+  algorithm?: 'rsa' | 'ec';
+  curve?: string;
+  enableLogging?: boolean;
 }
 
 export class BootstrapConfig {
@@ -23,7 +33,8 @@ export class BootstrapConfig {
     public joinTimeout: number = 5000,
     public gossipInterval: number = 1000,
     public enableLogging: boolean = false,
-    public failureDetector: FailureDetectorOptions = {}
+    public failureDetector: FailureDetectorOptions = {},
+    public keyManager: KeyManagerOptions = {}
   ) {}
 
   static create(options: Partial<BootstrapOptions> = {}): BootstrapConfig {
@@ -32,7 +43,8 @@ export class BootstrapConfig {
       options.joinTimeout || 5000,
       options.gossipInterval || 1000,
       options.enableLogging || false,
-      options.failureDetector || {}
+      options.failureDetector || {},
+      options.keyManager || {}
     );
   }
 

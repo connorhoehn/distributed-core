@@ -6,6 +6,7 @@ import { GossipStrategy } from './GossipStrategy';
 import { ConsistentHashRing } from './ConsistentHashRing';
 import { BootstrapConfig } from './BootstrapConfig';
 import { FailureDetector } from './FailureDetector';
+import { KeyManager, KeyManagerConfig } from '../identity/KeyManager';
 import { 
   NodeInfo, 
   ClusterMessage, 
@@ -24,6 +25,7 @@ export class ClusterManager extends EventEmitter {
   private gossipStrategy: GossipStrategy;
   private hashRing: ConsistentHashRing;
   private failureDetector: FailureDetector;
+  private keyManager: KeyManager;
   private isStarted = false;
   private gossipTimer?: NodeJS.Timeout;
   private recentUpdates: NodeInfo[] = [];
@@ -48,6 +50,12 @@ export class ClusterManager extends EventEmitter {
     this.membership = new MembershipTable(localNodeId);
     this.gossipStrategy = new GossipStrategy(localNodeId, transport, config.gossipInterval, config.enableLogging);
     this.hashRing = new ConsistentHashRing(virtualNodesPerNode);
+    
+    // Initialize key manager for secure communications
+    this.keyManager = new KeyManager({
+      ...config.keyManager,
+      enableLogging: config.enableLogging
+    });
     
     // Initialize failure detector
     this.failureDetector = new FailureDetector(
@@ -122,11 +130,14 @@ export class ClusterManager extends EventEmitter {
       if (seedNode !== this.localNodeId) {
         try {
           const localNodeInfo = this.getLocalNodeInfo();
-          const joinData: JoinMessage = {
+          let joinData: JoinMessage = {
             type: 'JOIN',
             nodeInfo: localNodeInfo,
             isResponse: false
           };
+
+          // Sign the join message
+          joinData = this.keyManager.signClusterPayload(joinData);
 
           const transportMessage: Message = {
             id: `join-${Date.now()}-${Math.random()}`,
@@ -153,6 +164,25 @@ export class ClusterManager extends EventEmitter {
     try {
       const clusterMessage = message.data as ClusterMessage;
       
+      // Verify message signature if present
+      if (this.hasSignature(clusterMessage)) {
+        if (!this.keyManager.verifyClusterPayload(clusterMessage)) {
+          if (this.config.enableLogging) {
+            console.warn(`[ClusterManager] Rejecting message from ${message.sender.id}: invalid signature`);
+          }
+          return;
+        }
+        
+        // Check certificate pinning if enabled
+        const signedBy = (clusterMessage as any).signedBy;
+        if (signedBy && !this.keyManager.verifyPinnedCertificate(message.sender.id, signedBy)) {
+          if (this.config.enableLogging) {
+            console.warn(`[ClusterManager] Rejecting message from ${message.sender.id}: certificate pinning failed`);
+          }
+          return;
+        }
+      }
+      
       // Record activity for failure detection
       this.failureDetector.recordNodeActivity(message.sender.id);
       
@@ -169,6 +199,13 @@ export class ClusterManager extends EventEmitter {
         console.error('Error handling cluster message:', error);
       }
     }
+  }
+
+  /**
+   * Check if a cluster message has a signature
+   */
+  private hasSignature(message: any): boolean {
+    return message.signature && message.signedBy;
   }
 
   /**
@@ -208,12 +245,15 @@ export class ClusterManager extends EventEmitter {
       const localNodeInfo = this.getLocalNodeInfo();
       const aliveMembers = this.membership.getAliveMembers();
       
-      const joinResponse: JoinMessage = {
+      let joinResponse: JoinMessage = {
         type: 'JOIN',
         nodeInfo: localNodeInfo,
         isResponse: true,
         membershipSnapshot: aliveMembers.slice(0, 10) // Limit snapshot size
       };
+
+      // Sign the join response
+      joinResponse = this.keyManager.signClusterPayload(joinResponse);
 
       const transportMessage: Message = {
         id: `join-response-${Date.now()}-${Math.random()}`,
@@ -656,5 +696,60 @@ export class ClusterManager extends EventEmitter {
    */
   getFailureDetector(): FailureDetector {
     return this.failureDetector;
+  }
+
+  // Key Management API
+
+  /**
+   * Get key manager instance (for testing)
+   */
+  getKeyManager(): KeyManager {
+    return this.keyManager;
+  }
+
+  /**
+   * Get the public key of this node
+   */
+  getPublicKey(): string {
+    return this.keyManager.getPublicKey();
+  }
+
+  /**
+   * Pin a certificate for a specific node (for certificate pinning)
+   */
+  pinNodeCertificate(nodeId: string, publicKey: string): void {
+    this.keyManager.pinCertificate(nodeId, publicKey);
+  }
+
+  /**
+   * Remove pinned certificate for a node
+   */
+  unpinNodeCertificate(nodeId: string): boolean {
+    return this.keyManager.unpinCertificate(nodeId);
+  }
+
+  /**
+   * Get all pinned certificates
+   */
+  getPinnedCertificates(): Map<string, string> {
+    return this.keyManager.getPinnedCertificates();
+  }
+
+  /**
+   * Verify a message signature from a specific node
+   */
+  verifyNodeMessage(message: string, signature: string, nodeId: string): boolean {
+    const pinnedCerts = this.keyManager.getPinnedCertificates();
+    const publicKey = pinnedCerts.get(nodeId);
+    
+    if (!publicKey) {
+      if (this.config.enableLogging) {
+        console.warn(`[ClusterManager] No pinned certificate for node ${nodeId}`);
+      }
+      return false;
+    }
+    
+    const result = KeyManager.verify(message, signature, publicKey);
+    return result.isValid;
   }
 }
