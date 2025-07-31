@@ -1,4 +1,4 @@
-import { GossipStrategy } from '../../../src/cluster/GossipStrategy';
+import { GossipStrategy } from '../../../src/cluster/gossip/GossipStrategy';
 import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
 import { MembershipEntry } from '../../../src/cluster/types';
 import { MessageType } from '../../../src/types';

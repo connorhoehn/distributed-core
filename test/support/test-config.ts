@@ -25,7 +25,9 @@ export const TestConfig = {
       joinTimeout: 100,         // 100ms join timeout (ludicrous speed)
       failureTimeout: 50,       // 50ms to SUSPECT (ludicrous speed)
       deadTimeout: 100,         // 100ms to DEAD (ludicrous speed)
-      heartbeatInterval: 10     // 10ms heartbeats (ludicrous speed)
+      heartbeatInterval: 10,    // 10ms heartbeats (ludicrous speed)
+      shutdownTimeout: 500,     // 500ms shutdown timeout for tests
+      maxShutdownWait: 200      // 200ms max shutdown wait for tests
     },
     logging: {
       enableDebugLogs: false    // Disable debug logs for clean output
@@ -44,7 +46,9 @@ export const TestConfig = {
       joinTimeout: 2000,        // 2s join timeout
       failureTimeout: 800,      // 800ms to SUSPECT
       deadTimeout: 1500,        // 1.5s to DEAD
-      heartbeatInterval: 200    // 200ms heartbeats
+      heartbeatInterval: 200,   // 200ms heartbeats
+      shutdownTimeout: 1000,    // 1s shutdown timeout for integration
+      maxShutdownWait: 500      // 500ms max shutdown wait for integration
     },
     logging: {
       enableDebugLogs: false    // Disable debug logs for clean output
@@ -63,7 +67,9 @@ export const TestConfig = {
       joinTimeout: 3000,        // 3s join timeout
       failureTimeout: 2000,     // 2s to SUSPECT
       deadTimeout: 4000,        // 4s to DEAD
-      heartbeatInterval: 500    // 500ms heartbeats
+      heartbeatInterval: 500,   // 500ms heartbeats
+      shutdownTimeout: 3000,    // 3s shutdown timeout for scenarios
+      maxShutdownWait: 1000     // 1s max shutdown wait for scenarios
     },
     logging: {
       enableDebugLogs: true     // Enable debug logs for detailed analysis
@@ -82,7 +88,9 @@ export const TestConfig = {
       joinTimeout: 5000,        // 5s join timeout
       failureTimeout: 3000,     // 3s to SUSPECT
       deadTimeout: 6000,        // 6s to DEAD
-      heartbeatInterval: 1000   // 1s heartbeats
+      heartbeatInterval: 1000,  // 1s heartbeats
+      shutdownTimeout: 10000,   // 10s shutdown timeout for production
+      maxShutdownWait: 5000     // 5s max shutdown wait for production
     },
     logging: {
       enableDebugLogs: true     // Enable debug logs for production testing
@@ -122,6 +130,16 @@ export function createTestClusterConfig(testType: 'unit' | 'integration' | 'scen
       failureTimeout: config.cluster.failureTimeout,
       deadTimeout: config.cluster.deadTimeout,
       enableLogging: config.logging.enableDebugLogs  // Use centralized logging control
+    },
+    
+    // Lifecycle config for fast test shutdown
+    lifecycle: {
+      shutdownTimeout: config.cluster.shutdownTimeout,
+      drainTimeout: config.cluster.shutdownTimeout / 2,  // Half of shutdown timeout
+      enableAutoRebalance: false,  // Disabled for tests to avoid complications
+      rebalanceThreshold: 0.1,
+      enableGracefulShutdown: true,
+      maxShutdownWait: config.cluster.maxShutdownWait
     }
   };
 }

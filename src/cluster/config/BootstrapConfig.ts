@@ -9,6 +9,15 @@ export interface FailureDetectorOptions {
   enableLogging?: boolean;
 }
 
+export interface LifecycleOptions {
+  shutdownTimeout?: number;
+  drainTimeout?: number;
+  enableAutoRebalance?: boolean;
+  rebalanceThreshold?: number;
+  enableGracefulShutdown?: boolean;
+  maxShutdownWait?: number;
+}
+
 export interface BootstrapOptions {
   seedNodes: string[];
   joinTimeout: number;
@@ -16,6 +25,7 @@ export interface BootstrapOptions {
   enableLogging: boolean;
   failureDetector?: FailureDetectorOptions;
   keyManager?: KeyManagerOptions;
+  lifecycle?: LifecycleOptions;
 }
 
 export interface KeyManagerOptions {
@@ -34,7 +44,8 @@ export class BootstrapConfig {
     public gossipInterval: number = 1000,
     public enableLogging: boolean = false,
     public failureDetector: FailureDetectorOptions = {},
-    public keyManager: KeyManagerOptions = {}
+    public keyManager: KeyManagerOptions = {},
+    public lifecycle: LifecycleOptions = {}
   ) {}
 
   static create(options: Partial<BootstrapOptions> = {}): BootstrapConfig {
@@ -44,7 +55,8 @@ export class BootstrapConfig {
       options.gossipInterval || 1000,
       options.enableLogging || false,
       options.failureDetector || {},
-      options.keyManager || {}
+      options.keyManager || {},
+      options.lifecycle || {}
     );
   }
 

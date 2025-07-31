@@ -1,4 +1,4 @@
-import { MembershipTable } from '../../../src/cluster/MembershipTable';
+import { MembershipTable } from '../../../src/cluster/membership/MembershipTable';
 import { NodeInfo } from '../../../src/cluster/types';
 
 describe('MembershipTable', () => {

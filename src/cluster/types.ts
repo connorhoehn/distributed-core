@@ -1,4 +1,4 @@
-export type NodeStatus = 'ALIVE' | 'SUSPECT' | 'DEAD';
+export type NodeStatus = 'ALIVE' | 'SUSPECT' | 'DEAD' | 'LEAVING' | 'DRAINING';
 
 export interface NodeInfo {
   id: string;

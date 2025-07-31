@@ -1,13 +1,12 @@
 import { EventEmitter } from 'events';
 import { Transport } from '../transport/Transport';
 import { Message, MessageType } from '../types';
-import { MembershipTable } from './MembershipTable';
-import { GossipStrategy } from './GossipStrategy';
-import { ConsistentHashRing } from './ConsistentHashRing';
-import { BootstrapConfig } from './BootstrapConfig';
-import { FailureDetector } from './FailureDetector';
+import { MembershipTable } from './membership/MembershipTable';
+import { GossipStrategy } from './gossip/GossipStrategy';
+import { ConsistentHashRing } from './routing/ConsistentHashRing';
+import { BootstrapConfig } from './config/BootstrapConfig';
+import { FailureDetector } from './monitoring/FailureDetector';
 import { KeyManager, KeyManagerConfig } from '../identity/KeyManager';
-import { shuffleArray } from '../common/utils';
 import { 
   NodeInfo, 
   ClusterMessage, 
@@ -24,25 +23,60 @@ import {
   PartitionInfo
 } from './types';
 
-export class ClusterManager extends EventEmitter {
-  private membership: MembershipTable;
-  private gossipStrategy: GossipStrategy;
-  private hashRing: ConsistentHashRing;
-  private failureDetector: FailureDetector;
-  private keyManager: KeyManager;
+// Import new modular components
+import { IClusterManagerContext } from './core/IClusterManagerContext';
+import { ClusterLifecycle } from './lifecycle/ClusterLifecycle';
+import { ClusterCommunication } from './communication/ClusterCommunication';
+import { ClusterIntrospection } from './introspection/ClusterIntrospection';
+import { ClusterSecurity } from './keys/ClusterSecurity';
+import { ClusterQuorum } from './quorum/ClusterQuorum';
+import { ClusterRouting } from './routing/ClusterRouting';
+
+export class ClusterManager extends EventEmitter implements IClusterManagerContext {
+  // Core components (exposed via IClusterManagerContext)
+  readonly membership: MembershipTable;
+  readonly gossipStrategy: GossipStrategy;
+  readonly hashRing: ConsistentHashRing;
+  readonly failureDetector: FailureDetector;
+  readonly keyManager: KeyManager;
+  readonly transport: Transport;
+  readonly config: BootstrapConfig;
+  readonly localNodeId: string;
+  
+  // Internal state
   private isStarted = false;
-  private gossipTimer?: NodeJS.Timeout;
-  private recentUpdates: NodeInfo[] = [];
+  recentUpdates: NodeInfo[] = [];
   private localVersion = 1;
 
+  // Modular components
+  private lifecycle: ClusterLifecycle;
+  private communication: ClusterCommunication;
+  private introspection: ClusterIntrospection;
+  private security: ClusterSecurity;
+  private quorum: ClusterQuorum;
+  private routing: ClusterRouting;
+
   constructor(
-    private localNodeId: string,
-    private transport: Transport,
-    private config: BootstrapConfig,
+    localNodeId: string,
+    transport: Transport,
+    config: BootstrapConfig,
     virtualNodesPerNode: number = 100,
-    private nodeMetadata: { region?: string; zone?: string; role?: string; tags?: Record<string, string> } = {}
+    private nodeMetadata: { region?: string; zone?: string; role?: string; tags?: Record<string, string> } = {},
+    lifecycleConfig?: {
+      shutdownTimeout?: number;
+      drainTimeout?: number;
+      enableAutoRebalance?: boolean;
+      rebalanceThreshold?: number;
+      enableGracefulShutdown?: boolean;
+      maxShutdownWait?: number;
+    }
   ) {
     super();
+    
+    // Initialize readonly properties
+    this.localNodeId = localNodeId;
+    this.transport = transport;
+    this.config = config;
     
     // Create local node info
     const localNode = {
@@ -69,6 +103,42 @@ export class ClusterManager extends EventEmitter {
       this.membership,
       config.failureDetector
     );
+
+        // Initialize modular components - prefer explicit lifecycleConfig over config.lifecycle
+    const effectiveLifecycleConfig = lifecycleConfig || config.lifecycle || {};
+    this.lifecycle = new ClusterLifecycle({
+      shutdownTimeout: effectiveLifecycleConfig.shutdownTimeout || 10000,
+      drainTimeout: effectiveLifecycleConfig.drainTimeout || 30000,
+      enableAutoRebalance: effectiveLifecycleConfig.enableAutoRebalance ?? true,
+      rebalanceThreshold: effectiveLifecycleConfig.rebalanceThreshold || 0.1,
+      enableGracefulShutdown: effectiveLifecycleConfig.enableGracefulShutdown ?? true,
+      maxShutdownWait: effectiveLifecycleConfig.maxShutdownWait || 5000
+    });
+    this.lifecycle.setContext(this);
+
+    this.communication = new ClusterCommunication({
+      gossipInterval: config.gossipInterval,
+      gossipFanout: 3,
+      joinTimeout: 5000,
+      antiEntropy: {
+        enabled: true,
+        interval: 30000,
+        forceFullSync: false
+      }
+    });
+    this.communication.setContext(this);
+
+    this.introspection = new ClusterIntrospection();
+    this.introspection.setContext(this);
+
+    this.security = new ClusterSecurity();
+    this.security.setContext(this);
+
+    this.quorum = new ClusterQuorum();
+    this.quorum.setContext(this);
+
+    this.routing = new ClusterRouting();
+    this.routing.setContext(this);
     
         // Connect membership events
     this.membership.on('member-joined', (nodeInfo: NodeInfo) => this.emit('member-joined', nodeInfo));
@@ -83,24 +153,17 @@ export class ClusterManager extends EventEmitter {
   async start(): Promise<void> {
     if (this.isStarted) return;
 
-    // Add self to membership using proper node info with metadata
-    const localNode = this.getLocalNodeInfo();
-    
-    this.membership.addLocalNode(localNode);
-    this.rebuildHashRing();
+    // Set up message handling delegation to communication module
+    this.transport.onMessage((message: Message) => {
+      this.communication.handleMessage(message);
+    });
 
-    // Set up transport message handling
-    this.transport.onMessage(this.handleMessage.bind(this));
-    await this.transport.start();
+    // Use lifecycle module for startup
+    await this.lifecycle.start();
 
-    // Join via seed nodes
-    await this.joinCluster();
-
-    // Start periodic gossip
-    this.startGossipTimer();
-
-    // Start failure detection
-    this.failureDetector.start();
+    // Start communication (gossip and join cluster)
+    this.communication.startGossipTimer();
+    await this.communication.joinCluster();
 
     this.isStarted = true;
     this.emit('started');
@@ -109,232 +172,20 @@ export class ClusterManager extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.isStarted) return;
 
-    // Stop gossip timer
-    if (this.gossipTimer) {
-      clearInterval(this.gossipTimer);
-    }
+    // Stop communication first
+    this.communication.stopGossipTimer();
 
-    // Stop failure detection
-    this.failureDetector.stop();
+    // Use lifecycle module for shutdown
+    await this.lifecycle.stop();
 
-    await this.transport.stop();
-    this.membership.clear();
-    this.hashRing.rebuild([]);
     this.isStarted = false;
     this.emit('stopped');
   }
 
   /**
-   * Join cluster via seed nodes
+   * Get local node info (required by IClusterManagerContext)
    */
-  private async joinCluster(): Promise<void> {
-    const seedNodes = this.config.getSeedNodes();
-    
-    for (const seedNode of seedNodes) {
-      if (seedNode !== this.localNodeId) {
-        try {
-          const localNodeInfo = this.getLocalNodeInfo();
-          let joinData: JoinMessage = {
-            type: 'JOIN',
-            nodeInfo: localNodeInfo,
-            isResponse: false
-          };
-
-          // Sign the join message
-          joinData = this.keyManager.signClusterPayload(joinData);
-
-          const transportMessage: Message = {
-            id: `join-${Date.now()}-${Math.random()}`,
-            type: MessageType.JOIN,
-            data: joinData,
-            sender: { id: this.localNodeId, address: '', port: 0 },
-            timestamp: Date.now()
-          };
-          
-          await this.transport.send(transportMessage, { id: seedNode, address: '', port: 0 });
-        } catch (error) {
-          if (this.config.enableLogging) {
-            console.debug(`Failed to join via seed node ${seedNode}:`, error);
-          }
-        }
-      }
-    }
-  }
-
-  /**
-   * Handle incoming transport messages
-   */
-  private handleMessage(message: Message): void {
-    try {
-      const clusterMessage = message.data as ClusterMessage;
-      
-      // Verify message signature if present
-      if (this.hasSignature(clusterMessage)) {
-        if (!this.keyManager.verifyClusterPayload(clusterMessage)) {
-          if (this.config.enableLogging) {
-            console.warn(`[ClusterManager] Rejecting message from ${message.sender.id}: invalid signature`);
-          }
-          return;
-        }
-        
-        // Check certificate pinning if enabled
-        const signedBy = (clusterMessage as any).signedBy;
-        if (signedBy && !this.keyManager.verifyPinnedCertificate(message.sender.id, signedBy)) {
-          if (this.config.enableLogging) {
-            console.warn(`[ClusterManager] Rejecting message from ${message.sender.id}: certificate pinning failed`);
-          }
-          return;
-        }
-      }
-      
-      // Record activity for failure detection
-      this.failureDetector.recordNodeActivity(message.sender.id);
-      
-      switch (clusterMessage.type) {
-        case 'JOIN':
-          this.handleJoinMessage(clusterMessage, message.sender.id);
-          break;
-        case 'GOSSIP':
-          this.handleGossipMessage(clusterMessage);
-          break;
-      }
-    } catch (error) {
-      if (this.config.enableLogging) {
-        console.error('Error handling cluster message:', error);
-      }
-    }
-  }
-
-  /**
-   * Check if a cluster message has a signature
-   */
-  private hasSignature(message: any): boolean {
-    return message.signature && message.signedBy;
-  }
-
-  /**
-   * Handle JOIN messages
-   */
-  private handleJoinMessage(joinMessage: JoinMessage, senderId: string): void {
-    // Update membership with sender info
-    if (senderId !== this.localNodeId) {
-      const updated = this.membership.updateNode(joinMessage.nodeInfo);
-      
-      if (updated) {
-        this.addToRecentUpdates(joinMessage.nodeInfo);
-      }
-
-      // Handle membership snapshot in response
-      if (joinMessage.isResponse && joinMessage.membershipSnapshot) {
-        for (const nodeInfo of joinMessage.membershipSnapshot) {
-          const snapshotUpdated = this.membership.updateNode(nodeInfo);
-          if (snapshotUpdated) {
-            this.addToRecentUpdates(nodeInfo);
-          }
-        }
-      }
-
-      // Send response if this was initial join (not a response)
-      if (!joinMessage.isResponse) {
-        this.sendJoinResponse(senderId);
-      }
-    }
-  }
-
-  /**
-   * Send JOIN response with local info and membership snapshot
-   */
-  private async sendJoinResponse(targetNodeId: string): Promise<void> {
-    try {
-      const localNodeInfo = this.getLocalNodeInfo();
-      const aliveMembers = this.membership.getAliveMembers();
-      
-      let joinResponse: JoinMessage = {
-        type: 'JOIN',
-        nodeInfo: localNodeInfo,
-        isResponse: true,
-        membershipSnapshot: aliveMembers.slice(0, 10) // Limit snapshot size
-      };
-
-      // Sign the join response
-      joinResponse = this.keyManager.signClusterPayload(joinResponse);
-
-      const transportMessage: Message = {
-        id: `join-response-${Date.now()}-${Math.random()}`,
-        type: MessageType.JOIN,
-        data: joinResponse,
-        sender: { id: this.localNodeId, address: '', port: 0 },
-        timestamp: Date.now()
-      };
-
-      await this.transport.send(transportMessage, { id: targetNodeId, address: '', port: 0 });
-    } catch (error) {
-      if (this.config.enableLogging) {
-        console.debug(`Failed to send join response to ${targetNodeId}:`, error);
-      }
-    }
-  }
-
-  /**
-   * Handle GOSSIP messages
-   */
-  private handleGossipMessage(gossipMessage: GossipMessage): void {
-    this.emit('gossip-received', gossipMessage);
-
-    // Handle single node info
-    if (gossipMessage.nodeInfo) {
-      const updated = this.membership.updateNode(gossipMessage.nodeInfo);
-      if (updated) {
-        this.addToRecentUpdates(gossipMessage.nodeInfo);
-      }
-    }
-
-    // Handle membership diff
-    if (gossipMessage.membershipDiff) {
-      for (const nodeInfo of gossipMessage.membershipDiff) {
-        const updated = this.membership.updateNode(nodeInfo);
-        if (updated) {
-          this.addToRecentUpdates(nodeInfo);
-        }
-      }
-    }
-  }
-
-  /**
-   * Start periodic gossip timer
-   */
-  private startGossipTimer(): void {
-    this.gossipTimer = setInterval(async () => {
-      try {
-        const aliveMembers = this.membership.getAliveMembers();
-        
-        if (aliveMembers.length > 1) { // Don't gossip if alone
-          await this.gossipStrategy.sendPeriodicGossip(aliveMembers, this.recentUpdates);
-          this.recentUpdates = []; // Clear after sending
-        }
-      } catch (error) {
-        if (this.config.enableLogging) {
-          console.debug('Error during periodic gossip:', error);
-        }
-      }
-    }, this.config.gossipInterval);
-    
-    // Prevent timer from keeping process alive
-    this.gossipTimer.unref();
-  }
-
-  /**
-   * Rebuild consistent hash ring from current membership
-   */
-  private rebuildHashRing(): void {
-    const aliveMembers = this.membership.getAliveMembers();
-    this.hashRing.rebuild(aliveMembers);
-  }
-
-  /**
-   * Get local node info
-   */
-  private getLocalNodeInfo(): NodeInfo {
+  getLocalNodeInfo(): NodeInfo {
     return {
       id: this.localNodeId,
       status: 'ALIVE',
@@ -352,9 +203,9 @@ export class ClusterManager extends EventEmitter {
   }
 
   /**
-   * Add node info to recent updates buffer
+   * Add node info to recent updates buffer (required by IClusterManagerContext)
    */
-  private addToRecentUpdates(nodeInfo: NodeInfo): void {
+  addToRecentUpdates(nodeInfo: NodeInfo): void {
     this.recentUpdates.push(nodeInfo);
     
     // Keep buffer size reasonable
@@ -363,114 +214,57 @@ export class ClusterManager extends EventEmitter {
     }
   }
 
-  // Public API methods
-
   /**
-   * Get current membership
+   * Check if cluster is bootstrapped (required by IClusterManagerContext)
    */
-  getMembership(): Map<string, MembershipEntry> {
-    return new Map(this.membership.getAllMembers().map((member: MembershipEntry) => [member.id, member]));
+  isBootstrapped(): boolean {
+    return this.isStarted && this.membership.getAllMembers().length > 0;
   }
 
   /**
-   * Get member count
+   * Get cluster size (required by IClusterManagerContext)
    */
-  getMemberCount(): number {
+  getClusterSize(): number {
     return this.membership.getAllMembers().length;
   }
 
   /**
-   * Get current node info
+   * Rebuild consistent hash ring from current membership
    */
+  rebuildHashRing(): void {
+    const aliveMembers = this.membership.getAliveMembers();
+    this.hashRing.rebuild(aliveMembers);
+  }
+
+  // Public API methods
+  getMembership(): Map<string, MembershipEntry> {
+    return new Map(this.membership.getAllMembers().map((member: MembershipEntry) => [member.id, member]));
+  }
+  getMemberCount(): number { return this.membership.getAllMembers().length; }
   getNodeInfo(): NodeInfo {
     const members = this.membership.getAllMembers();
     const localMember = members.find((member: MembershipEntry) => member.id === this.localNodeId);
     if (!localMember) {
-      // Return a default node info if not found in membership yet
       return {
         id: this.localNodeId,
         status: 'ALIVE',
         lastSeen: Date.now(),
         version: 0,
-        metadata: {
-          address: 'localhost',
-          port: 0
-        }
+        metadata: { address: 'localhost', port: 0 }
       };
     }
     return localMember;
   }
-
-  /**
-   * Get alive members
-   */
-  getAliveMembers(): MembershipEntry[] {
-    return this.membership.getAliveMembers();
-  }
+  getAliveMembers(): MembershipEntry[] { return this.membership.getAliveMembers(); }
 
   // Consistent Hashing API
-
-  /**
-   * Get primary node responsible for key
-   */
-  getNodeForKey(key: string): string | null {
-    return this.hashRing.getNode(key);
-  }
-
-  /**
-   * Get replica nodes for key (including primary)
-   * @param key - The key to route
-   * @param replicaCount - Number of replicas (default: 3)
-   */
-  getReplicaNodes(key: string, replicaCount: number = 3): string[] {
-    return this.hashRing.getNodes(key, replicaCount);
-  }
-
-  /**
-   * Get N nodes responsible for key with advanced routing options
-   * @param key - The key to route
-   * @param options - Routing options with strategy and preferences
-   */
+  getNodeForKey(key: string): string | null { return this.routing.getNodeForKey(key); }
+  getReplicaNodes(key: string, replicaCount: number = 3): string[] { return this.routing.getReplicaNodes(key, replicaCount); }
   getNodesForKey(key: string, options: any = { 
     strategy: 'CONSISTENT_HASH', 
     replicationFactor: 3, 
     preferLocalZone: false 
-  }): string[] {
-    switch (options.strategy) {
-      case 'CONSISTENT_HASH':
-        return this.hashRing.getNodes(key, options.replicationFactor);
-      case 'ROUND_ROBIN':
-        return this.getAliveMembers().map(member => member.id);
-      case 'RANDOM':
-        const members = this.getAliveMembers().map(member => member.id);
-        return shuffleArray([...members]).slice(0, options.replicationFactor);
-      case 'LOCALITY_AWARE':
-        return this.getLocalityAwareNodes(key, options);
-      default:
-        return this.hashRing.getNodes(key, options.replicationFactor);
-    }
-  }
-
-  /**
-   * Get nodes with locality awareness
-   */
-  private getLocalityAwareNodes(key: string, options: any): string[] {
-    const allNodes = this.getAliveMembers();
-    const localNode = this.getNodeInfo();
-    
-    if (options.preferLocalZone && localNode.metadata?.zone) {
-      const localZoneNodes = allNodes.filter(node => 
-        node.metadata?.zone === localNode.metadata?.zone
-      );
-      
-      if (localZoneNodes.length >= options.replicationFactor) {
-        return localZoneNodes.slice(0, options.replicationFactor).map(n => n.id);
-      }
-    }
-    
-    // Fallback to consistent hashing
-    return this.hashRing.getNodes(key, options.replicationFactor);
-  }
+  }): string[] { return this.routing.getNodesForKey(key, options); }
 
   /**
    * Increment local version (for reincarnation)
@@ -484,464 +278,50 @@ export class ClusterManager extends EventEmitter {
     this.addToRecentUpdates(updatedLocalInfo);
   }
 
-  /**
-   * Mark node as suspect
-   */
-  markNodeSuspect(nodeId: string): boolean {
-    return this.membership.markSuspect(nodeId);
-  }
-
-  /**
-   * Mark node as dead
-   */
-  markNodeDead(nodeId: string): boolean {
-    return this.membership.markDead(nodeId);
-  }
-
-  /**
-   * Prune old dead nodes
-   */
-  pruneDeadNodes(maxAge: number = 30000): number {
-    return this.membership.pruneDeadNodes(maxAge);
-  }
-
-  /**
-   * Gracefully leave the cluster
-   * Announces departure to other nodes and cleans up local state
-   */
-  async leave(timeout: number = 5000): Promise<void> {
-    if (!this.isStarted) {
-      return; // Already stopped or never started
-    }
-
-    try {
-      // Get local node info for departure message
-      const localNode = this.membership.getMember(this.localNodeId);
-      if (!localNode) {
-        throw new Error(`Local node ${this.localNodeId} not found in membership table`);
-      }
-
-      // Broadcast departure message to all cluster members
-      const departureMessage: LeaveMessage = {
-        type: 'LEAVE',
-        nodeInfo: {
-          ...localNode,
-          status: 'DEAD', // Mark as dead in the departure message
-          version: this.localVersion++,
-          lastSeen: Date.now()
-        },
-        reason: 'graceful_shutdown'
-      };
-
-      // Send departure message to all known members
-      const members = Array.from(this.membership.getAliveMembers().values());
-      const departurePromises = members
-        .filter(member => member.id !== this.localNodeId)
-        .map(async (member) => {
-          try {
-            // Note: This will need proper Transport integration for actual message sending
-            // For now, we just mark our intent to leave
-            if (this.config.enableLogging) {
-              console.log(`[ClusterManager] Announcing departure to ${member.id}`);
-            }
-          } catch (error) {
-            if (this.config.enableLogging) {
-              console.warn(`[ClusterManager] Failed to notify ${member.id} of departure:`, error);
-            }
-          }
-        });
-
-      // Wait for departure announcements with timeout
-      const timeoutPromise = new Promise<void>((resolve) => {
-        const timer = setTimeout(resolve, timeout);
-        timer.unref(); // Prevent timer from keeping process alive
-      });
-
-      await Promise.race([
-        Promise.allSettled(departurePromises),
-        timeoutPromise
-      ]);
-
-      // Remove self from membership table
-      this.membership.markDead(this.localNodeId);
-
-      // Stop gossip timer to prevent further gossip
-      if (this.gossipTimer) {
-        clearInterval(this.gossipTimer);
-        this.gossipTimer = undefined;
-      }
-
-      if (this.config.enableLogging) {
-        console.log(`[ClusterManager] Successfully left the cluster`);
-      }
-
-    } catch (error) {
-      if (this.config.enableLogging) {
-        console.error(`[ClusterManager] Error during graceful leave:`, error);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Get cluster metadata summary
-   */
-  getMetadata(): ClusterMetadata {
-    const members = this.getAliveMembers();
-    const roles = new Set<string>();
-    const tags = new Map<string, Set<string>>();
-
-    members.forEach(member => {
-      if (member.metadata?.role) {
-        roles.add(member.metadata.role);
-      }
-      
-      if (member.metadata?.tags) {
-        Object.entries(member.metadata.tags).forEach(([key, value]) => {
-          if (!tags.has(key)) tags.set(key, new Set<string>());
-          tags.get(key)!.add(value as string);
-        });
-      }
-    });
-
-    return {
-      nodeCount: members.length,
-      roles: Array.from(roles) as string[],
-      tags: Object.fromEntries(Array.from(tags.entries()).map(([key, values]) => [key, Array.from(values)])),
-      version: this.localVersion,
-      clusterId: this.generateClusterId(),
-      created: Date.now()
-    };
-  }
+  // Membership Management
+  markNodeSuspect(nodeId: string): boolean { return this.membership.markSuspect(nodeId); }
+  markNodeDead(nodeId: string): boolean { return this.membership.markDead(nodeId); }
+  pruneDeadNodes(maxAge: number = 30000): number { return this.membership.pruneDeadNodes(maxAge); }
+  async leave(timeout?: number): Promise<void> { return this.lifecycle.leave(); }
 
   // Cluster Health & Analytics
-
-  /**
-   * Get cluster health metrics
-   */
-  getClusterHealth(): ClusterHealth {
-    const members = this.membership.getAllMembers();
-    const alive = members.filter((m: MembershipEntry) => m.status === 'ALIVE');
-    const suspect = members.filter((m: MembershipEntry) => m.status === 'SUSPECT');
-    const dead = members.filter((m: MembershipEntry) => m.status === 'DEAD');
-
-    return {
-      totalNodes: members.length,
-      aliveNodes: alive.length,
-      suspectNodes: suspect.length,
-      deadNodes: dead.length,
-      healthRatio: members.length > 0 ? alive.length / members.length : 0,
-      isHealthy: alive.length >= Math.ceil(members.length * 0.5), // Majority alive
-      ringCoverage: 1.0, // Simplified for now, could enhance with actual ring analysis
-      partitionCount: 0 // TODO: Implement partition detection
-    };
-  }
-
-  /**
-   * Get cluster topology information
-   */
-  getTopology(): ClusterTopology {
-    const members = this.getAliveMembers();
-    const zones = new Map<string, MembershipEntry[]>();
-    const regions = new Map<string, MembershipEntry[]>();
-
-    members.forEach(member => {
-      const zone = member.metadata?.zone || 'unknown';
-      const region = member.metadata?.region || 'unknown';
-
-      if (!zones.has(zone)) zones.set(zone, []);
-      if (!regions.has(region)) regions.set(region, []);
-
-      zones.get(zone)!.push(member);
-      regions.get(region)!.push(member);
-    });
-
-    return {
-      totalAliveNodes: members.length,
-      rings: members.map(member => ({ nodeId: member.id, virtualNodes: 100 })), // Use default virtual nodes
-      zones: Object.fromEntries(Array.from(zones.entries()).map(([zone, nodes]) => [zone, nodes.length])),
-      regions: Object.fromEntries(Array.from(regions.entries()).map(([region, nodes]) => [region, nodes.length])),
-      averageLoadBalance: this.calculateLoadBalance(),
-      replicationFactor: 3 // Default replication factor
-    };
-  }
-
-  /**
-   * Calculate load balance across the ring
-   */
-  private calculateLoadBalance(): number {
-    const members = this.getAliveMembers();
-    if (members.length <= 1) return 1.0;
-
-    // Simple heuristic: perfect balance would be 1.0
-    // For now, return a simplified metric based on node count
-    return Math.min(1.0, members.length / 10); // Assume optimal around 10 nodes
-  }
-
-  /**
-   * Check if cluster can handle node failures
-   */
-  canHandleFailures(nodeCount: number): boolean {
-    const alive = this.getAliveMembers().length;
-    return alive > nodeCount && alive - nodeCount >= Math.ceil(alive * 0.5);
-  }
+  getMetadata(): ClusterMetadata { return this.introspection.getMetadata(); }
+  getClusterHealth(): ClusterHealth { return this.introspection.getClusterHealth(); }
+  getTopology(): ClusterTopology { return this.introspection.getTopology(); }
+  canHandleFailures(nodeCount: number): boolean { return this.quorum.canHandleFailures(nodeCount); }
 
   // Advanced Cluster Operations
-
-  /**
-   * Gracefully drain a node from the cluster
-   */
   async drainNode(nodeId: string, timeout: number = 30000): Promise<boolean> {
-    if (nodeId === this.localNodeId) {
-      throw new Error('Cannot drain local node');
+    try {
+      await this.lifecycle.drainNode(nodeId);
+      return true;
+    } catch (error) {
+      return false;
     }
-
-    // Mark node as suspect to start draining traffic
-    const marked = this.markNodeSuspect(nodeId);
-    if (!marked) return false;
-
-    // Wait for traffic to drain
-    await new Promise(resolve => setTimeout(resolve, Math.min(timeout, 5000)));
-
-    // Mark as dead to complete removal
-    return this.markNodeDead(nodeId);
   }
 
-  /**
-   * Rebalance the cluster by rebuilding the hash ring
-   */
-  rebalanceCluster(): void {
-    this.rebuildHashRing();
-    this.emit('cluster-rebalanced', {
-      timestamp: Date.now(),
-      nodeCount: this.getAliveMembers().length
-    });
-  }
+  rebalanceCluster(): void { this.lifecycle.rebalanceCluster(); }
 
   /**
-   * Get cluster metadata summary
+   * Get cluster metadata summary (alternative method name)
    */
   getClusterMetadata(): ClusterMetadata {
-    const members = this.getAliveMembers();
-    const roles = new Set(members.map(m => m.metadata?.role).filter(Boolean));
-    const tags = new Map<string, Set<string>>();
-
-    members.forEach(member => {
-      if (member.metadata?.tags) {
-        Object.entries(member.metadata.tags).forEach(([key, value]) => {
-          if (!tags.has(key)) tags.set(key, new Set<string>());
-          tags.get(key)!.add(value as string);
-        });
-      }
-    });
-
-    return {
-      nodeCount: members.length,
-      roles: Array.from(roles) as string[],
-      tags: Object.fromEntries(Array.from(tags.entries()).map(([key, values]) => [key, Array.from(values)])),
-      version: this.localVersion,
-      clusterId: this.generateClusterId(),
-      created: Date.now()
-    };
+    return this.introspection.getMetadata();
   }
 
-  /**
-   * Generate a deterministic cluster ID based on membership
-   */
-  private generateClusterId(): string {
-    const sortedNodeIds = this.getAliveMembers()
-      .map(m => m.id)
-      .sort()
-      .join(',');
-    
-    // Simple hash of sorted node IDs
-    let hash = 0;
-    for (let i = 0; i < sortedNodeIds.length; i++) {
-      const char = sortedNodeIds.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    
-    return Math.abs(hash).toString(16);
-  }
+  // Testing & Debugging API
+  getFailureDetector(): FailureDetector { return this.failureDetector; }
+  getKeyManager(): KeyManager { return this.keyManager; }
 
-  /**
-   * Get failure detector instance (for testing)
-   */
-  getFailureDetector(): FailureDetector {
-    return this.failureDetector;
-  }
+  // Security & Key Management API
+  getPublicKey(): string { return this.security.getPublicKey(); }
+  pinNodeCertificate(nodeId: string, publicKey: string): void { this.security.pinNodeCertificate(nodeId, publicKey); }
+  unpinNodeCertificate(nodeId: string): boolean { return this.security.unpinNodeCertificate(nodeId); }
+  getPinnedCertificates(): Map<string, string> { return this.security.getPinnedCertificates(); }
+  verifyNodeMessage(message: string, signature: string, nodeId: string): boolean { return this.security.verifyNodeMessage(message, signature, nodeId); }
 
-  // Key Management API
-
-  /**
-   * Get key manager instance (for testing)
-   */
-  getKeyManager(): KeyManager {
-    return this.keyManager;
-  }
-
-  /**
-   * Get the public key of this node
-   */
-  getPublicKey(): string {
-    return this.keyManager.getPublicKey();
-  }
-
-  /**
-   * Pin a certificate for a specific node (for certificate pinning)
-   */
-  pinNodeCertificate(nodeId: string, publicKey: string): void {
-    this.keyManager.pinCertificate(nodeId, publicKey);
-  }
-
-  /**
-   * Remove pinned certificate for a node
-   */
-  unpinNodeCertificate(nodeId: string): boolean {
-    return this.keyManager.unpinCertificate(nodeId);
-  }
-
-  /**
-   * Get all pinned certificates
-   */
-  getPinnedCertificates(): Map<string, string> {
-    return this.keyManager.getPinnedCertificates();
-  }
-
-  /**
-   * Verify a message signature from a specific node
-   */
-  verifyNodeMessage(message: string, signature: string, nodeId: string): boolean {
-    const pinnedCerts = this.keyManager.getPinnedCertificates();
-    const publicKey = pinnedCerts.get(nodeId);
-    
-    if (!publicKey) {
-      if (this.config.enableLogging) {
-        console.warn(`[ClusterManager] No pinned certificate for node ${nodeId}`);
-      }
-      return false;
-    }
-    
-    const result = KeyManager.verify(message, signature, publicKey);
-    return result.isValid;
-  }
-
-  // Quorum and Partition Handling Methods
-
-  /**
-   * Check if cluster has quorum based on specified options
-   */
-  hasQuorum(opts: QuorumOptions): boolean {
-    const aliveMembers = this.getAliveMembers();
-    
-    // Check minimum node count
-    if (opts.minNodeCount && aliveMembers.length < opts.minNodeCount) {
-      return false;
-    }
-
-    // Check service-specific quorum
-    if (opts.service) {
-      const serviceMembers = aliveMembers.filter(member => 
-        member.metadata?.role === opts.service || 
-        member.metadata?.tags?.service === opts.service
-      );
-      
-      if (serviceMembers.length < Math.ceil(aliveMembers.length / 2)) {
-        return false;
-      }
-    }
-
-    // Check region distribution if required
-    if (opts.requiredRegionCount) {
-      const regions = new Set(
-        aliveMembers
-          .map(member => member.metadata?.region)
-          .filter(region => region !== undefined)
-      );
-      
-      if (regions.size < opts.requiredRegionCount) {
-        return false;
-      }
-    }
-
-    // Default majority quorum
-    const totalMembers = this.membership.getAllMembers().length;
-    const requiredForQuorum = Math.ceil(totalMembers / 2);
-    
-    return aliveMembers.length >= requiredForQuorum;
-  }
-
-  /**
-   * Trigger anti-entropy synchronization cycle
-   * Forces gossip to all known members to resolve inconsistencies
-   */
-  runAntiEntropyCycle(): void {
-    if (!this.isStarted) {
-      if (this.config.enableLogging) {
-        console.warn('[ClusterManager] Cannot run anti-entropy: cluster not started');
-      }
-      return;
-    }
-
-    const aliveMembers = this.getAliveMembers();
-    if (aliveMembers.length <= 1) {
-      return; // No other nodes to sync with
-    }
-
-    if (this.config.enableLogging) {
-      console.log(`[ClusterManager] Running anti-entropy cycle with ${aliveMembers.length} members`);
-    }
-
-    // Force immediate gossip to all members (not just random subset)
-    this.gossipStrategy.sendPeriodicGossip(aliveMembers, this.recentUpdates);
-    
-    // Increment local version to trigger updates
-    this.incrementVersion();
-    
-    this.emit('anti-entropy-triggered', {
-      timestamp: Date.now(),
-      memberCount: aliveMembers.length
-    });
-  }
-
-  /**
-   * Detect potential network partitions based on membership views
-   */
-  detectPartition(): PartitionInfo | null {
-    const aliveMembers = this.getAliveMembers();
-    const totalMembers = this.membership.getAllMembers().length;
-    
-    // If we have less than majority, we might be in a partition
-    if (aliveMembers.length < Math.ceil(totalMembers / 2)) {
-      return {
-        isPartitioned: true,
-        visibleNodes: aliveMembers.length,
-        totalNodes: totalMembers,
-        partitionRatio: aliveMembers.length / totalMembers,
-        timestamp: Date.now()
-      };
-    }
-
-    // Check for zone-based partitions
-    const zones = new Map<string, number>();
-    aliveMembers.forEach(member => {
-      const zone = member.metadata?.zone || 'unknown';
-      zones.set(zone, (zones.get(zone) || 0) + 1);
-    });
-
-    // If all visible nodes are in same zone, might be partition
-    if (zones.size === 1 && totalMembers > aliveMembers.length) {
-      return {
-        isPartitioned: true,
-        visibleNodes: aliveMembers.length,
-        totalNodes: totalMembers,
-        partitionRatio: aliveMembers.length / totalMembers,
-        timestamp: Date.now(),
-        partitionType: 'zone-based'
-      };
-    }
-
-    return null;
-  }
+  // Quorum & Partition Handling
+  hasQuorum(opts: QuorumOptions): boolean { return this.quorum.hasQuorum(opts); }
+  runAntiEntropyCycle(): void { this.communication.runAntiEntropyCycle(); }
+  detectPartition(): PartitionInfo | null { return this.quorum.detectPartition(); }
 }

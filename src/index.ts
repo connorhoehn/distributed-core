@@ -20,10 +20,10 @@ export {
 
 // Cluster modules
 export * from './cluster/ClusterManager';
-export * from './cluster/MembershipTable';
-export * from './cluster/GossipStrategy';
-export * from './cluster/FailureDetector';
-export * from './cluster/BootstrapConfig';
+export * from './cluster/membership/MembershipTable';
+export * from './cluster/gossip/GossipStrategy';
+export * from './cluster/monitoring/FailureDetector';
+export * from './cluster/config/BootstrapConfig';
 
 // Transport modules
 export * from './transport/Transport';

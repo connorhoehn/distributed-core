@@ -1,4 +1,4 @@
-import { MembershipEntry } from './types';
+import { MembershipEntry } from '../types';
 
 export interface VirtualNode {
   nodeId: string;

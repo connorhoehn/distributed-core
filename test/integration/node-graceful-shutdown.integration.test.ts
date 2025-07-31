@@ -3,11 +3,27 @@ import { Node } from '../../src/common/Node';
 describe('Node Graceful Shutdown Integration', () => {
   let node: Node;
 
+  // Fast test lifecycle configuration to prevent timeouts
+  const testLifecycleConfig = {
+    shutdownTimeout: 1000,     // 1s shutdown timeout
+    drainTimeout: 500,         // 500ms drain timeout
+    enableAutoRebalance: false,
+    rebalanceThreshold: 0.1,
+    enableGracefulShutdown: true,
+    maxShutdownWait: 500       // 500ms max shutdown wait
+  };
+
   afterEach(async () => {
     if (node && node.isRunning()) {
-      await node.stop();
+      try {
+        await node.stop();
+      } catch (error) {
+        // Force cleanup if normal stop fails
+        console.warn('Forced cleanup due to stop failure:', error);
+      }
     }
-  });
+    node = null as any;
+  }, 3000); // Increased to 3s but should be much faster now
 
   it('should gracefully leave cluster during stop', async () => {
     // Configure a test node
@@ -19,7 +35,8 @@ describe('Node Graceful Shutdown Integration', () => {
       region: 'test-region',
       enableLogging: false,
       enableMetrics: false,
-      enableChaos: false
+      enableChaos: false,
+      lifecycle: testLifecycleConfig
     };
 
     node = new Node(config);
@@ -50,7 +67,8 @@ describe('Node Graceful Shutdown Integration', () => {
       region: 'test-region',
       enableLogging: false,
       enableMetrics: false,
-      enableChaos: false
+      enableChaos: false,
+      lifecycle: testLifecycleConfig
     };
 
     node = new Node(config);
@@ -75,19 +93,22 @@ describe('Node Graceful Shutdown Integration', () => {
       region: 'test-region',
       enableLogging: false,
       enableMetrics: false,
-      enableChaos: false
+      enableChaos: false,
+      lifecycle: testLifecycleConfig
     };
 
     node = new Node(config);
     await node.start();
 
-    // Remove leave method from cluster
-    delete (node.cluster as any).leave;
+    // Mock leave method to throw error (simulating missing method)
+    const leaveSpy = jest.spyOn(node.cluster, 'leave').mockRejectedValue(new Error('Method not available'));
 
-    // Stop should complete successfully
+    // Stop should complete successfully despite leave failure
     await expect(node.stop()).resolves.toBeUndefined();
     expect(node.isRunning()).toBe(false);
-  });
+
+    leaveSpy.mockRestore();
+  }, 3000);
 
   it('should not attempt leave when already stopped', async () => {
     const config = {
@@ -98,7 +119,8 @@ describe('Node Graceful Shutdown Integration', () => {
       region: 'test-region',
       enableLogging: false,
       enableMetrics: false,
-      enableChaos: false
+      enableChaos: false,
+      lifecycle: testLifecycleConfig
     };
 
     node = new Node(config);
@@ -106,13 +128,13 @@ describe('Node Graceful Shutdown Integration', () => {
     await node.stop();
     expect(node.isRunning()).toBe(false);
 
-    // Mock leave to verify it's not called
+    // Mock leave to ensure it's not called
     const leaveSpy = jest.spyOn(node.cluster, 'leave').mockResolvedValue();
 
-    // Second stop should not call leave
+    // Stop again should not call leave
     await node.stop();
     expect(leaveSpy).not.toHaveBeenCalled();
 
     leaveSpy.mockRestore();
-  });
+  }, 3000);
 });

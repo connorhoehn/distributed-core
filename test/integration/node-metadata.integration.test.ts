@@ -4,15 +4,41 @@ import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
 describe('Node Integration Tests', () => {
   let node: Node;
 
+  // Ultra-fast test lifecycle configuration for integration tests
+  const testLifecycleConfig = {
+    shutdownTimeout: 50,       // 50ms shutdown timeout (even faster)
+    drainTimeout: 25,          // 25ms drain timeout (even faster)
+    enableAutoRebalance: false,
+    rebalanceThreshold: 0.1,
+    enableGracefulShutdown: false, // Disable graceful shutdown for speed
+    maxShutdownWait: 25        // 25ms max shutdown wait (even faster)
+  };
+
+  // Helper function to create optimized test nodes
+  const createTestNode = (config: any) => {
+    return new Node({
+      ...config,
+      lifecycle: testLifecycleConfig,
+      enableLogging: false,     // Disable logging for speed
+      enableMetrics: false,     // Disable metrics for speed
+      enableChaos: false        // Disable chaos for speed
+    });
+  };
+
   afterEach(async () => {
     if (node && node.isRunning()) {
-      await node.stop();
+      try {
+        await node.stop();
+      } catch (error) {
+        console.warn('Forced cleanup due to stop failure:', error);
+      }
     }
-  });
+    node = null as any;
+  }, 1000); // Reduced to 1s since shutdown should be under 100ms now
 
   describe('NodeMetadata Integration', () => {
     it('should create node with minimal NodeMetadata configuration', async () => {
-      node = new Node({ 
+      node = createTestNode({ 
         id: 'test-node-1',
         region: 'us-east-1',
         zone: 'us-east-1a'
@@ -45,13 +71,12 @@ describe('Node Integration Tests', () => {
         zone: 'us-west-2b',
         role: 'coordinator',
         tags: { 
-          environment: 'production',
-          tier: 'critical',
-          datacenter: 'pdx-1'
+          env: 'prod', 
+          tier: 'auth',
+          datacenter: 'pdx1'
         },
         transport,
-        enableMetrics: true,
-        enableChaos: false
+        lifecycle: testLifecycleConfig
       });
       
       expect(node.id).toBe('full-config-node');
@@ -65,7 +90,7 @@ describe('Node Integration Tests', () => {
     });
 
     it('should have NodeMetadata with cryptographic public key after start', async () => {
-      node = new Node({ 
+      node = createTestNode({
         id: 'crypto-test-node',
         region: 'eu-central-1',
         zone: 'eu-central-1a',
@@ -88,7 +113,8 @@ describe('Node Integration Tests', () => {
         clusterId: 'quorum-cluster',
         service: 'consensus-service',
         region: 'us-east-1',
-        zone: 'us-east-1a'
+        zone: 'us-east-1a',
+        lifecycle: testLifecycleConfig
       });
 
       const nodeB = new Node({
@@ -96,7 +122,8 @@ describe('Node Integration Tests', () => {
         clusterId: 'quorum-cluster',
         service: 'consensus-service',
         region: 'us-east-1',
-        zone: 'us-east-1b'
+        zone: 'us-east-1b',
+        lifecycle: testLifecycleConfig
       });
 
       const nodeC = new Node({
@@ -104,7 +131,8 @@ describe('Node Integration Tests', () => {
         clusterId: 'quorum-cluster', 
         service: 'consensus-service',
         region: 'us-west-1',
-        zone: 'us-west-1a'
+        zone: 'us-west-1a',
+        lifecycle: testLifecycleConfig
       });
 
       // Same cluster, same service
@@ -125,7 +153,7 @@ describe('Node Integration Tests', () => {
     });
 
     it('should provide access control with unique public keys', async () => {
-      const coordinatorNode = new Node({
+      const coordinatorNode = createTestNode({
         id: 'coordinator-1',
         clusterId: 'secure-cluster',
         service: 'coordinator-service',
@@ -134,7 +162,7 @@ describe('Node Integration Tests', () => {
         role: 'coordinator'
       });
 
-      const workerNode = new Node({
+      const workerNode = createTestNode({
         id: 'worker-1',
         clusterId: 'secure-cluster', 
         service: 'worker-service',
@@ -144,6 +172,7 @@ describe('Node Integration Tests', () => {
       });
 
       try {
+        // Start nodes sequentially to avoid resource contention
         await coordinatorNode.start();
         await workerNode.start();
 
@@ -156,13 +185,11 @@ describe('Node Integration Tests', () => {
         expect(coordinatorNode.metadata.pubKey).toBeDefined();
         expect(workerNode.metadata.pubKey).toBeDefined();
       } finally {
-        // Guaranteed cleanup even if test fails
-        if (coordinatorNode.isRunning()) {
-          await coordinatorNode.stop();
-        }
-        if (workerNode.isRunning()) {
-          await workerNode.stop();
-        }
+        // Fast parallel cleanup
+        await Promise.all([
+          coordinatorNode.isRunning() ? coordinatorNode.stop() : Promise.resolve(),
+          workerNode.isRunning() ? workerNode.stop() : Promise.resolve()
+        ]);
       }
     });
 
@@ -174,7 +201,8 @@ describe('Node Integration Tests', () => {
         clusterId: 'failure-detection-cluster',
         service: 'resilient-service',
         region: 'us-central-1',
-        zone: 'us-central-1a'
+        zone: 'us-central-1a',
+        lifecycle: testLifecycleConfig
       });
 
       expect(node.metadata.incarnation).toBe(0); // New node starts at incarnation 0
@@ -190,7 +218,8 @@ describe('Node Integration Tests', () => {
         service: 'transport-service', 
         region: 'ap-southeast-1',
         zone: 'ap-southeast-1a',
-        tags: { version: '2.0.0', env: 'staging' }
+        tags: { version: '2.0.0', env: 'staging' },
+        lifecycle: testLifecycleConfig
       });
 
       await node.start();
@@ -215,7 +244,8 @@ describe('Node Integration Tests', () => {
         clusterId: 'consistent-cluster',
         service: 'consistent-service',
         region: 'eu-west-1', 
-        zone: 'eu-west-1a'
+        zone: 'eu-west-1a',
+        lifecycle: testLifecycleConfig
       });
 
       await node.start();

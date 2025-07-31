@@ -1,6 +1,6 @@
-import { Transport } from '../transport/Transport';
-import { MembershipEntry, GossipMessage, NodeInfo } from './types';
-import { Message, MessageType } from '../types';
+import { Transport } from '../../transport/Transport';
+import { MembershipEntry, GossipMessage, NodeInfo } from '../types';
+import { Message, MessageType } from '../../types';
 
 export class GossipStrategy {
   constructor(

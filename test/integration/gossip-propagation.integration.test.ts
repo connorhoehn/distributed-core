@@ -1,6 +1,6 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
 import { createTestCluster } from '../harnesses/create-test-cluster';
-import { GossipStrategy } from '../../src/cluster/GossipStrategy';
+import { GossipStrategy } from '../../src/cluster/gossip/GossipStrategy';
 
 describe('Gossip Propagation Integration', () => {
   let cluster: any;

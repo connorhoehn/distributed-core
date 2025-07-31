@@ -50,7 +50,7 @@
  */
 
 import { ClusterManager } from '../cluster/ClusterManager';
-import { BootstrapConfig } from '../cluster/BootstrapConfig';
+import { BootstrapConfig } from '../cluster/config/BootstrapConfig';
 import { Router } from '../messaging/Router';
 import { RoutedMessage, MessageHandler } from '../messaging/types';
 import { ConnectionManager } from '../connections/ConnectionManager';
@@ -75,6 +75,16 @@ export interface NodeConfig {
   enableMetrics?: boolean;
   enableChaos?: boolean;
   enableLogging?: boolean;
+  
+  // Lifecycle configuration for shutdown behavior
+  lifecycle?: {
+    shutdownTimeout?: number;
+    drainTimeout?: number;
+    enableAutoRebalance?: boolean;
+    rebalanceThreshold?: number;
+    enableGracefulShutdown?: boolean;
+    maxShutdownWait?: number;
+  };
 }
 
 export class Node {
@@ -116,7 +126,7 @@ export class Node {
       role: config.role,
       tags: config.tags
     };
-    this.cluster = new ClusterManager(config.id, this.transport, bootstrapConfig, 100, nodeMetadata);
+    this.cluster = new ClusterManager(config.id, this.transport, bootstrapConfig, 100, nodeMetadata, config.lifecycle);
 
     // Initialize proper NodeMetadata with all required fields
     const clusterManager = this.cluster as any; // Access cluster manager to get public key

@@ -1,4 +1,4 @@
-import { BootstrapConfig } from '../../../src/cluster/BootstrapConfig';
+import { BootstrapConfig } from '../../../src/cluster/config/BootstrapConfig';
 
 describe('BootstrapConfig', () => {
   it('should create config with default values', () => {

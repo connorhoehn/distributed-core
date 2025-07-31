@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { NodeInfo, MembershipEntry, NodeStatus } from './types';
+import { NodeInfo, MembershipEntry, NodeStatus } from '../types';
 
 export class MembershipTable extends EventEmitter {
   private members = new Map<string, MembershipEntry>();

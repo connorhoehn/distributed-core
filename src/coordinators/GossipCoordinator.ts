@@ -9,7 +9,7 @@ import {
   ClusterFrameworkEvents
 } from './types';
 import { ClusterManager } from '../cluster/ClusterManager';
-import { BootstrapConfig } from '../cluster/BootstrapConfig';
+import { BootstrapConfig } from '../cluster/config/BootstrapConfig';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
 import { NodeInfo } from '../cluster/types';
 import { NodeId } from '../types';

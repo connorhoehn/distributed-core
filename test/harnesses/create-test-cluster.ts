@@ -1,5 +1,5 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { BootstrapConfig } from '../../src/cluster/BootstrapConfig';
+import { BootstrapConfig } from '../../src/cluster/config/BootstrapConfig';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
 import { createTestClusterConfig, createTestClusterConfigWithDebug } from '../support/test-config';
 
@@ -56,7 +56,8 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
       testConfig.gossipInterval,   // Fast gossip interval  
       enableDebugConsole || testConfig.enableLogging,  // Only enable system debug logs when explicitly requested
       testConfig.failureDetector,  // Failure detector config
-      testConfig.keyManager        // Fast EC key configuration for tests
+      testConfig.keyManager,       // Fast EC key configuration for tests
+      testConfig.lifecycle          // Fast lifecycle configuration for tests
     );
     
     const nodeMetadata = {
@@ -66,7 +67,13 @@ export function createTestCluster(options: TestClusterOptions): TestCluster {
       tags: { testCluster: 'true' }
     };
     
-    const manager = new ClusterManager(nodeId, transport, config, 100, nodeMetadata);
+    const manager = new ClusterManager(
+      nodeId, 
+      transport, 
+      config, 
+      100, 
+      nodeMetadata
+    );
     
     if (enableTestEvents) {
       (manager as any).on('started', () => logs.push({ node: nodeId, event: 'started', timestamp: Date.now() }));
