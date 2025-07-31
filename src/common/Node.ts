@@ -64,6 +64,8 @@ import { NodeInfo, ClusterHealth, ClusterTopology, ClusterMetadata } from '../cl
 
 export interface NodeConfig {
   id: string;
+  clusterId?: string;        // For NodeMetadata
+  service?: string;          // For NodeMetadata
   region?: string;
   zone?: string;
   role?: string;
@@ -93,9 +95,6 @@ export class Node {
   constructor(config: NodeConfig) {
     this.id = config.id;
     this.enableLogging = config.enableLogging ?? false;
-    
-    // Initialize node metadata - using empty constructor for now since NodeMetadata is not implemented
-    this.metadata = new NodeMetadata();
 
     // Initialize transport (default to InMemoryAdapter if not provided)
     this.transport = config.transport || new InMemoryAdapter({
@@ -118,6 +117,19 @@ export class Node {
       tags: config.tags
     };
     this.cluster = new ClusterManager(config.id, this.transport, bootstrapConfig, 100, nodeMetadata);
+
+    // Initialize proper NodeMetadata with all required fields
+    const clusterManager = this.cluster as any; // Access cluster manager to get public key
+    const pubKey = clusterManager.keyManager ? clusterManager.keyManager.getPublicKey() : 'temp-key';
+    
+    this.metadata = new NodeMetadata(
+      config.id,
+      config.clusterId || 'default-cluster',
+      config.service || 'distributed-core',
+      config.zone || 'default-zone',
+      config.region || 'default-region',
+      pubKey
+    );
 
     // Initialize other subsystems
     this.router = new Router();
