@@ -186,6 +186,21 @@ export class Node {
     }
 
     try {
+      // First, gracefully leave the cluster to notify other nodes
+      try {
+        if (this.cluster && typeof this.cluster.leave === 'function') {
+          if (this.enableLogging) {
+            console.log(`[Node ${this.id}] gracefully leaving cluster...`);
+          }
+          await this.cluster.leave(5000); // 5 second timeout for departure
+        }
+      } catch (leaveError) {
+        if (this.enableLogging) {
+          console.warn(`[Node ${this.id}] graceful cluster leave failed:`, leaveError);
+        }
+        // Continue with shutdown even if graceful leave fails
+      }
+
       // Stop subsystems in reverse order
       // Note: MetricsTracker doesn't have start/stop methods yet - skip for now
       // if (this.metrics) {

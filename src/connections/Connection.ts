@@ -161,6 +161,9 @@ export class Connection extends EventEmitter {
         this.ping();
       }
     }, this.config.heartbeatInterval);
+    
+    // Prevent timer from keeping process alive
+    this.heartbeatTimer?.unref();
 
     this.resetTimeout();
   }

@@ -34,7 +34,13 @@ export interface GossipMessage {
   membershipDiff?: NodeInfo[];
 }
 
-export type ClusterMessage = JoinMessage | GossipMessage;
+export interface LeaveMessage {
+  type: 'LEAVE';
+  nodeInfo: NodeInfo;
+  reason?: string;
+}
+
+export type ClusterMessage = JoinMessage | GossipMessage | LeaveMessage;
 
 export interface ClusterEvents {
   'member-joined': [NodeInfo];

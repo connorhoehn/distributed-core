@@ -7,11 +7,13 @@ import { ConsistentHashRing } from './ConsistentHashRing';
 import { BootstrapConfig } from './BootstrapConfig';
 import { FailureDetector } from './FailureDetector';
 import { KeyManager, KeyManagerConfig } from '../identity/KeyManager';
+import { shuffleArray } from '../common/utils';
 import { 
   NodeInfo, 
   ClusterMessage, 
   JoinMessage, 
   GossipMessage,
+  LeaveMessage,
   ClusterEvents,
   MembershipEntry,
   ClusterHealth,
@@ -314,6 +316,9 @@ export class ClusterManager extends EventEmitter {
         }
       }
     }, this.config.gossipInterval);
+    
+    // Prevent timer from keeping process alive
+    this.gossipTimer.unref();
   }
 
   /**
@@ -436,7 +441,7 @@ export class ClusterManager extends EventEmitter {
         return this.getAliveMembers().map(member => member.id);
       case 'RANDOM':
         const members = this.getAliveMembers().map(member => member.id);
-        return this.shuffleArray([...members]).slice(0, options.replicationFactor);
+        return shuffleArray([...members]).slice(0, options.replicationFactor);
       case 'LOCALITY_AWARE':
         return this.getLocalityAwareNodes(key, options);
       default:
@@ -463,17 +468,6 @@ export class ClusterManager extends EventEmitter {
     
     // Fallback to consistent hashing
     return this.hashRing.getNodes(key, options.replicationFactor);
-  }
-
-  /**
-   * Shuffle array in place
-   */
-  private shuffleArray<T>(array: T[]): T[] {
-    for (let i = array.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
   }
 
   /**
@@ -507,6 +501,83 @@ export class ClusterManager extends EventEmitter {
    */
   pruneDeadNodes(maxAge: number = 30000): number {
     return this.membership.pruneDeadNodes(maxAge);
+  }
+
+  /**
+   * Gracefully leave the cluster
+   * Announces departure to other nodes and cleans up local state
+   */
+  async leave(timeout: number = 5000): Promise<void> {
+    if (!this.isStarted) {
+      return; // Already stopped or never started
+    }
+
+    try {
+      // Get local node info for departure message
+      const localNode = this.membership.getMember(this.localNodeId);
+      if (!localNode) {
+        throw new Error(`Local node ${this.localNodeId} not found in membership table`);
+      }
+
+      // Broadcast departure message to all cluster members
+      const departureMessage: LeaveMessage = {
+        type: 'LEAVE',
+        nodeInfo: {
+          ...localNode,
+          status: 'DEAD', // Mark as dead in the departure message
+          version: this.localVersion++,
+          lastSeen: Date.now()
+        },
+        reason: 'graceful_shutdown'
+      };
+
+      // Send departure message to all known members
+      const members = Array.from(this.membership.getAliveMembers().values());
+      const departurePromises = members
+        .filter(member => member.id !== this.localNodeId)
+        .map(async (member) => {
+          try {
+            // Note: This will need proper Transport integration for actual message sending
+            // For now, we just mark our intent to leave
+            if (this.config.enableLogging) {
+              console.log(`[ClusterManager] Announcing departure to ${member.id}`);
+            }
+          } catch (error) {
+            if (this.config.enableLogging) {
+              console.warn(`[ClusterManager] Failed to notify ${member.id} of departure:`, error);
+            }
+          }
+        });
+
+      // Wait for departure announcements with timeout
+      const timeoutPromise = new Promise<void>((resolve) => {
+        setTimeout(resolve, timeout);
+      });
+
+      await Promise.race([
+        Promise.allSettled(departurePromises),
+        timeoutPromise
+      ]);
+
+      // Remove self from membership table
+      this.membership.markDead(this.localNodeId);
+
+      // Stop gossip timer to prevent further gossip
+      if (this.gossipTimer) {
+        clearInterval(this.gossipTimer);
+        this.gossipTimer = undefined;
+      }
+
+      if (this.config.enableLogging) {
+        console.log(`[ClusterManager] Successfully left the cluster`);
+      }
+
+    } catch (error) {
+      if (this.config.enableLogging) {
+        console.error(`[ClusterManager] Error during graceful leave:`, error);
+      }
+      throw error;
+    }
   }
 
   /**

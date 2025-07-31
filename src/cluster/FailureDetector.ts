@@ -234,6 +234,9 @@ export class FailureDetector extends EventEmitter {
     this.monitoringTimer = setInterval(() => {
       this.checkForFailures();
     }, this.config.heartbeatInterval);
+    
+    // Prevent timer from keeping process alive
+    this.monitoringTimer.unref();
   }
 
   /**
@@ -287,6 +290,9 @@ export class FailureDetector extends EventEmitter {
     this.heartbeatTimer = setInterval(() => {
       this.broadcastHeartbeat();
     }, this.config.heartbeatInterval);
+    
+    // Prevent timer from keeping process alive
+    this.heartbeatTimer.unref();
 
     // Send initial heartbeat immediately
     this.broadcastHeartbeat();
@@ -355,6 +361,9 @@ export class FailureDetector extends EventEmitter {
     const pingTimer = setTimeout(() => {
       this.handlePingTimeout(nodeId, sequenceNumber);
     }, this.config.pingTimeout);
+    
+    // Prevent timer from keeping process alive
+    pingTimer.unref();
 
     this.pingTimers.set(nodeId, pingTimer);
 
