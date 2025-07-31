@@ -1,5 +1,5 @@
-import { createClusterNode, createRangeHandler } from '../src/coordinators';
-import { ChatHandler } from './fixtures/ChatHandler';
+import { createClusterNode, createRangeHandler } from '../../../src/coordinators';
+import { ChatHandler } from '../../fixtures/ChatHandler';
 
 describe('Cluster Framework', () => {
   let coordinator: any;

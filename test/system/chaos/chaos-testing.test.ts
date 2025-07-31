@@ -1,6 +1,6 @@
-import { ChaosInjector } from '../src/diagnostics/ChaosInjector';
-import { ClusterManager } from '../src/cluster/ClusterManager';
-import { FailureDetector } from '../src/cluster/FailureDetector';
+import { ChaosInjector } from '../../../src/diagnostics/ChaosInjector';
+import { ClusterManager } from '../../../src/cluster/ClusterManager';
+import { FailureDetector } from '../../../src/cluster/FailureDetector';
 
 describe('Chaos Testing Integration', () => {
   let chaosInjector: ChaosInjector;

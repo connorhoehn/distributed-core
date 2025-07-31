@@ -1,6 +1,6 @@
-import { Transport } from '../src/transport/Transport';
-import { Encryption } from '../src/transport/Encryption';
-import { MessageCache } from '../src/transport/MessageCache';
+import { Transport } from '../../../src/transport/Transport';
+import { Encryption } from '../../../src/transport/Encryption';
+import { MessageCache } from '../../../src/transport/MessageCache';
 
 describe('Transport Layer Integration', () => {
   let transport: Transport;

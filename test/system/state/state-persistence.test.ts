@@ -1,6 +1,6 @@
-import { StateStore } from '../src/persistence/StateStore';
-import { WriteAheadLog } from '../src/persistence/WriteAheadLog';
-import { ClusterManager } from '../src/cluster/ClusterManager';
+import { StateStore } from '../../../src/persistence/StateStore';
+import { WriteAheadLog } from '../../../src/persistence/WriteAheadLog';
+import { ClusterManager } from '../../../src/cluster/ClusterManager';
 
 describe('State Persistence Integration', () => {
   let stateStore: StateStore;

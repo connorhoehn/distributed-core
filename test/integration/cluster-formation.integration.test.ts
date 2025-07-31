@@ -1,4 +1,4 @@
-import { createTestCluster } from '../harness/create-test-cluster';
+import { createTestCluster } from '../harnesses/create-test-cluster';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
 import { NodeId, MessageType } from '../../src/types';
 

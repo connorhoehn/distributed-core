@@ -1,6 +1,6 @@
-import { MetricsTracker } from '../src/metrics/MetricsTracker';
-import { MetricsExporter } from '../src/metrics/MetricsExporter';
-import { ClusterManager } from '../src/cluster/ClusterManager';
+import { MetricsTracker } from '../../../src/metrics/MetricsTracker';
+import { MetricsExporter } from '../../../src/metrics/MetricsExporter';
+import { ClusterManager } from '../../../src/cluster/ClusterManager';
 
 describe('Metrics Collection Integration', () => {
   let metricsTracker: MetricsTracker;

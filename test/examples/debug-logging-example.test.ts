@@ -1,4 +1,4 @@
-import { createTestCluster } from '../harness/create-test-cluster';
+import { createTestCluster } from '../harnesses/create-test-cluster';
 
 describe('Debug Logging Examples', () => {
   it('should run without any logs (clean output)', async () => {

@@ -1,5 +1,5 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { createTestCluster } from '../harness/create-test-cluster';
+import { createTestCluster } from '../harnesses/create-test-cluster';
 import { GossipStrategy } from '../../src/cluster/GossipStrategy';
 
 describe('Gossip Propagation Integration', () => {
