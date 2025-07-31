@@ -41,7 +41,7 @@ export class PerformanceBenchmarkHarness {
     await Promise.all(this.clusters.map(c => c.start()));
     
     // Wait for stabilization
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 
   /**

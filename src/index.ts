@@ -3,6 +3,21 @@
 // Types
 export * from './types';
 
+// Cluster Framework (New Range-based Coordination)
+export { 
+  createClusterNode, 
+  createRangeHandler,
+  RangeCoordinator,
+  type ClusterNodeConfig,
+  type RangeHandler as FrameworkRangeHandler,
+  type ClusterMessage as FrameworkClusterMessage,
+  type ClusterInfo,
+  type RangeId,
+  type RingId,
+  type CoordinatorType,
+  type TransportType
+} from './coordinators';
+
 // Cluster modules
 export * from './cluster/ClusterManager';
 export * from './cluster/MembershipTable';
