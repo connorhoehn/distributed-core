@@ -19,7 +19,14 @@ export interface PerformanceMetrics {
 }
 
 /**
- * Logical service tracking interface
+ * Vector clock for causal ordering
+ */
+export interface VectorClock {
+  [nodeId: string]: number;
+}
+
+/**
+ * Logical service tracking interface (enhanced for anti-entropy)
  */
 export interface LogicalService {
   id: string;
@@ -29,6 +36,23 @@ export interface LogicalService {
   metadata: Record<string, any>;
   stats: Record<string, number>;
   lastUpdated: number;
+  // Anti-entropy fields
+  vectorClock: VectorClock;
+  version: number;
+  checksum: string;
+  conflictPolicy?: string;
+}
+
+/**
+ * State conflict detection
+ */
+export interface StateConflict {
+  serviceId: string;
+  conflictType: 'version' | 'stats' | 'metadata' | 'missing';
+  nodes: string[];
+  values: Map<string, any>;
+  resolutionStrategy: string;
+  severity: 'low' | 'medium' | 'high';
 }
 
 /**
@@ -130,14 +154,67 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
   }
 
   /**
+   * Generate checksum for service data
+   */
+  private generateChecksum(service: Omit<LogicalService, 'checksum' | 'vectorClock' | 'version'>): string {
+    const data = JSON.stringify({
+      metadata: service.metadata,
+      stats: service.stats,
+      lastUpdated: service.lastUpdated
+    });
+    // Simple hash function - in production use crypto.createHash
+    let hash = 0;
+    for (let i = 0; i < data.length; i++) {
+      const char = data.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString(16);
+  }
+
+  /**
+   * Initialize vector clock for new service
+   */
+  private initializeVectorClock(): VectorClock {
+    if (!this.context) {
+      throw new Error('ClusterIntrospection not initialized with context');
+    }
+    const clock: VectorClock = {};
+    clock[this.context.localNodeId] = 1;
+    return clock;
+  }
+
+  /**
+   * Increment vector clock for service update
+   */
+  private incrementVectorClock(service: LogicalService): VectorClock {
+    if (!this.context) {
+      throw new Error('ClusterIntrospection not initialized with context');
+    }
+    const nodeId = this.context.localNodeId;
+    const newClock = { ...service.vectorClock };
+    newClock[nodeId] = (newClock[nodeId] || 0) + 1;
+    return newClock;
+  }
+
+  /**
    * Register a logical service (e.g., chat rooms, game sessions)
    */
-  registerLogicalService(service: LogicalService): void {
-    this.logicalServices.set(service.id, {
+  registerLogicalService(service: Omit<LogicalService, 'vectorClock' | 'version' | 'checksum'>): void {
+    const enhancedService: LogicalService = {
       ...service,
-      lastUpdated: Date.now()
-    });
-    this.emit('service-registered', service);
+      lastUpdated: Date.now(),
+      vectorClock: this.initializeVectorClock(),
+      version: 1,
+      checksum: '',
+      conflictPolicy: service.conflictPolicy || 'last-writer-wins'
+    };
+    
+    // Generate checksum after all fields are set
+    enhancedService.checksum = this.generateChecksum(enhancedService);
+    
+    this.logicalServices.set(enhancedService.id, enhancedService);
+    this.emit('service-registered', enhancedService);
   }
 
   /**
@@ -157,11 +234,18 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
   updateLogicalService(serviceId: string, stats: Record<string, number>, metadata?: Record<string, any>): void {
     const service = this.logicalServices.get(serviceId);
     if (service) {
+      // Update data
       service.stats = { ...service.stats, ...stats };
       if (metadata) {
         service.metadata = { ...service.metadata, ...metadata };
       }
       service.lastUpdated = Date.now();
+      
+      // Update anti-entropy fields
+      service.vectorClock = this.incrementVectorClock(service);
+      service.version += 1;
+      service.checksum = this.generateChecksum(service);
+      
       this.emit('service-updated', service);
     }
   }

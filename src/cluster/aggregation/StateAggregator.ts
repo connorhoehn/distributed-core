@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { ClusterManager } from '../ClusterManager';
-import { ClusterState, LogicalService, PerformanceMetrics } from '../introspection/ClusterIntrospection';
+import { ClusterState, LogicalService, PerformanceMetrics, StateConflict, VectorClock } from '../introspection/ClusterIntrospection';
 import { ClusterHealth, ClusterTopology, ClusterMetadata } from '../types';
 import { Message, MessageType } from '../../types';
 
@@ -37,6 +37,10 @@ export interface StateAggregatorConfig {
   enableConsistencyChecks: boolean;
   maxStaleTime: number; // maximum age of data to consider fresh
   aggregationInterval: number; // how often to collect state
+  // Anti-entropy configuration
+  enableConflictDetection: boolean;
+  autoResolve: boolean;
+  conflictDetectionInterval: number;
 }
 
 /**
@@ -66,6 +70,9 @@ export class StateAggregator extends EventEmitter {
       enableConsistencyChecks: true,
       maxStaleTime: 30000,
       aggregationInterval: 10000,
+      enableConflictDetection: false, // Start disabled by default
+      autoResolve: false,
+      conflictDetectionInterval: 60000, // Check for conflicts every minute
       ...config
     };
 
@@ -131,6 +138,18 @@ export class StateAggregator extends EventEmitter {
 
     // Aggregate the collected states
     const aggregatedState = this.aggregateStates(nodeStates);
+    
+    // Auto-detect conflicts if enabled
+    if (this.config.enableConflictDetection) {
+      try {
+        const conflicts = await this.detectConflicts(aggregatedState);
+        if (conflicts.length > 0) {
+          this.emit('conflicts-detected', conflicts);
+        }
+      } catch (error) {
+        this.emit('conflict-detection-error', error);
+      }
+    }
     
     this.lastAggregatedState = aggregatedState;
     this.emit('state-aggregated', aggregatedState);
@@ -444,5 +463,151 @@ export class StateAggregator extends EventEmitter {
     }
 
     return totalChecks > 0 ? consistencyPoints / totalChecks : 1.0;
+  }
+
+  /**
+   * Detect conflicts in logical services across nodes
+   */
+  async detectConflicts(aggregatedState?: AggregatedClusterState): Promise<StateConflict[]> {
+    if (!this.config.enableConflictDetection) {
+      return [];
+    }
+
+    const state = aggregatedState || await this.collectClusterState();
+    const conflicts: StateConflict[] = [];
+    
+    // Group services by ID to detect conflicts
+    const serviceGroups = new Map<string, LogicalService[]>();
+    
+    for (const [nodeId, nodeState] of state.nodeStates) {
+      for (const service of nodeState.logicalServices) {
+        if (!serviceGroups.has(service.id)) {
+          serviceGroups.set(service.id, []);
+        }
+        serviceGroups.get(service.id)!.push(service);
+      }
+    }
+
+    // Analyze each service group for conflicts
+    for (const [serviceId, services] of serviceGroups) {
+      const serviceConflicts = this.analyzeServiceConflicts(serviceId, services);
+      conflicts.push(...serviceConflicts);
+    }
+
+    if (conflicts.length > 0) {
+      this.emit('conflicts-detected', conflicts);
+    }
+
+    return conflicts;
+  }
+
+  /**
+   * Analyze a group of services with the same ID for conflicts
+   */
+  private analyzeServiceConflicts(serviceId: string, services: LogicalService[]): StateConflict[] {
+    const conflicts: StateConflict[] = [];
+
+    if (services.length <= 1) {
+      return conflicts; // No conflicts with single or no services
+    }
+
+    // Check for version conflicts
+    const versions = new Set(services.map(s => s.version));
+    if (versions.size > 1) {
+      conflicts.push({
+        serviceId,
+        conflictType: 'version',
+        nodes: services.map(s => s.nodeId),
+        values: new Map(services.map(s => [s.nodeId, s.version])),
+        resolutionStrategy: 'max-value',
+        severity: 'medium'
+      });
+    }
+
+    // Check for stats conflicts (significant differences)
+    const statKeys = new Set<string>();
+    services.forEach(s => Object.keys(s.stats).forEach(key => statKeys.add(key)));
+    
+    for (const statKey of statKeys) {
+      const statValues = services
+        .filter(s => s.stats[statKey] !== undefined)
+        .map(s => ({ nodeId: s.nodeId, value: s.stats[statKey] }));
+      
+      if (statValues.length > 1) {
+        const values = statValues.map(sv => sv.value);
+        const avg = values.reduce((sum, val) => sum + val, 0) / values.length;
+        const maxDiff = Math.max(...values) - Math.min(...values);
+        
+        // Consider it a conflict if difference is > 20% of average or > 10 absolute
+        if (maxDiff > avg * 0.2 || maxDiff > 10) {
+          conflicts.push({
+            serviceId: `${serviceId}.${statKey}`,
+            conflictType: 'stats',
+            nodes: statValues.map(sv => sv.nodeId),
+            values: new Map(statValues.map(sv => [sv.nodeId, sv.value])),
+            resolutionStrategy: 'max-value',
+            severity: 'low'
+          });
+        }
+      }
+    }
+
+    // Check for metadata conflicts
+    const metadataKeys = new Set<string>();
+    services.forEach(s => Object.keys(s.metadata).forEach(key => metadataKeys.add(key)));
+    
+    for (const metaKey of metadataKeys) {
+      const metaValues = services
+        .filter(s => s.metadata[metaKey] !== undefined)
+        .map(s => ({ nodeId: s.nodeId, value: s.metadata[metaKey] }));
+      
+      if (metaValues.length > 1) {
+        const uniqueValues = new Set(metaValues.map(mv => JSON.stringify(mv.value)));
+        
+        if (uniqueValues.size > 1) {
+          conflicts.push({
+            serviceId: `${serviceId}.${metaKey}`,
+            conflictType: 'metadata',
+            nodes: metaValues.map(mv => mv.nodeId),
+            values: new Map(metaValues.map(mv => [mv.nodeId, mv.value])),
+            resolutionStrategy: 'last-writer-wins',
+            severity: 'medium'
+          });
+        }
+      }
+    }
+
+    return conflicts;
+  }
+
+  /**
+   * Check if vector clock A happened before vector clock B
+   */
+  private happenedBefore(clockA: VectorClock, clockB: VectorClock): boolean {
+    let hasSmaller = false;
+    
+    // Get all node IDs from both clocks
+    const allNodes = new Set([...Object.keys(clockA), ...Object.keys(clockB)]);
+    
+    for (const nodeId of allNodes) {
+      const valueA = clockA[nodeId] || 0;
+      const valueB = clockB[nodeId] || 0;
+      
+      if (valueA > valueB) {
+        return false; // A is not before B
+      }
+      if (valueA < valueB) {
+        hasSmaller = true;
+      }
+    }
+    
+    return hasSmaller;
+  }
+
+  /**
+   * Configure conflict detection settings
+   */
+  configureConflictDetection(config: Partial<Pick<StateAggregatorConfig, 'enableConflictDetection' | 'autoResolve' | 'conflictDetectionInterval'>>): void {
+    this.config = { ...this.config, ...config };
   }
 }

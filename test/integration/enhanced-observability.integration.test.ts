@@ -176,7 +176,20 @@ describe('Enhanced Cluster Observability Integration', () => {
       };
       
       introspection.registerLogicalService(gameSession);
-      expect(serviceRegistered).toEqual(gameSession);
+      
+      // Check that the service was registered with anti-entropy fields added
+      expect(serviceRegistered).toBeDefined();
+      expect(serviceRegistered.id).toBe(gameSession.id);
+      expect(serviceRegistered.type).toBe(gameSession.type);
+      expect(serviceRegistered.nodeId).toBe(gameSession.nodeId);
+      expect(serviceRegistered.metadata).toEqual(gameSession.metadata);
+      expect(serviceRegistered.stats).toEqual(gameSession.stats);
+      
+      // Check that anti-entropy fields were added
+      expect(serviceRegistered.version).toBe(1);
+      expect(serviceRegistered.vectorClock).toBeDefined();
+      expect(serviceRegistered.checksum).toBeDefined();
+      expect(serviceRegistered.conflictPolicy).toBe('last-writer-wins');
       
       // Update service stats
       introspection.updateLogicalService('game-session-abc', 
@@ -321,26 +334,23 @@ describe('Enhanced Cluster Observability Integration', () => {
       const introspection = cluster.getIntrospection();
       
       // Register various services to simulate a real system
-      const services: LogicalService[] = [
-        {
-          id: 'auth-service',
-          type: 'authentication',
-          nodeId: cluster.getNodeInfo().id,
-          metadata: { version: '2.1.0', region: 'us-east' },
-          stats: { activeTokens: 1500, requestsPerSec: 45 },
-          lastUpdated: Date.now()
-        },
-        {
-          id: 'user-session-pool',
-          type: 'session-pool',
-          nodeId: cluster.getNodeInfo().id,
-          metadata: { poolSize: 1000, timeout: 3600 },
-          stats: { activeSessions: 750, sessionsCreated: 2500 },
-          lastUpdated: Date.now()
-        }
-      ];
+      introspection.registerLogicalService({
+        id: 'auth-service',
+        type: 'authentication',
+        nodeId: cluster.getNodeInfo().id,
+        metadata: { version: '2.1.0', region: 'us-east' },
+        stats: { activeTokens: 1500, requestsPerSec: 45 },
+        lastUpdated: Date.now()
+      });
       
-      services.forEach(service => introspection.registerLogicalService(service));
+      introspection.registerLogicalService({
+        id: 'user-session-pool',
+        type: 'session-pool',
+        nodeId: cluster.getNodeInfo().id,
+        metadata: { poolSize: 1000, timeout: 3600 },
+        stats: { activeSessions: 750, sessionsCreated: 2500 },
+        lastUpdated: Date.now()
+      });
       
       // Get complete state that would be sent to external dashboard
       const dashboardState = {
