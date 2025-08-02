@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { WALEntry, EntityUpdate, WALCoordinator } from '../types';
+import { WALEntry, EntityUpdate, WALCoordinator } from '../../../persistence/wal/types';
 
 export class WALCoordinatorImpl implements WALCoordinator {
   private currentLSN: number = 0;

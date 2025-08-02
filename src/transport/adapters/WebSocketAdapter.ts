@@ -1,523 +1,432 @@
-import { Transport } from '../Transport';
-import { Message, NodeId } from '../../types';
+import * as WebSocket from 'ws';
 import { EventEmitter } from 'events';
-import { Server as WebSocketServer, WebSocket, RawData } from 'ws';
+import * as http from 'http';
+import { Transport } from '../Transport';
+import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
+import { GossipMessage } from '../GossipMessage';
 
-export interface WebSocketAdapterConfig {
+interface WebSocketConnection {
+  ws: WebSocket;
+  nodeId: NodeId;
+  isActive: boolean;
+  lastActivity: number;
+  isAlive: boolean;
+}
+
+interface WebSocketAdapterOptions {
   port?: number;
   host?: string;
   maxConnections?: number;
   pingInterval?: number;
   pongTimeout?: number;
-  compression?: boolean;
-  enablePerMessageDeflate?: boolean;
-  heartbeatInterval?: number;
-  connectionTimeout?: number;
-  enableLogging?: boolean;
+  upgradeTimeout?: number;
+  enableCompression?: boolean;
 }
 
-export interface WebSocketConnection {
-  id: string;
-  socket: WebSocket;
-  nodeId?: string;
-  lastPing: number;
-  lastPong: number;
-  isAlive: boolean;
-  connectedAt: number;
-  messageCount: number;
-}
-
+/**
+ * WebSocket transport adapter for real-time bi-directional communication
+ * Provides low-latency messaging with automatic reconnection and heartbeat monitoring
+ */
 export class WebSocketAdapter extends Transport {
-  private readonly config: Required<WebSocketAdapterConfig>;
-  private server: WebSocketServer | null = null;
+  private readonly nodeId: NodeId;
+  private readonly options: Required<WebSocketAdapterOptions>;
+  private server?: http.Server;
+  private wss?: WebSocket.Server;
   private connections = new Map<string, WebSocketConnection>();
-  private isRunning = false;
-  private messageHandler?: (message: Message) => void;
+  private isStarted = false;
   private circuitBreaker: CircuitBreaker;
   private retryManager: RetryManager;
   private heartbeatTimer?: NodeJS.Timeout;
-  private stats = {
-    messagesReceived: 0,
-    messagesSent: 0,
-    connectionsEstablished: 0,
-    connectionsDropped: 0,
-    pingsSent: 0,
-    pongsReceived: 0,
-    errors: 0
-  };
 
-  constructor(
-    private readonly nodeInfo: { id: string; address: string; port: number },
-    config: WebSocketAdapterConfig = {}
-  ) {
+  constructor(nodeId: NodeId, options: WebSocketAdapterOptions = {}) {
     super();
-    
-    this.config = {
-      port: config.port ?? nodeInfo.port,
-      host: config.host ?? nodeInfo.address,
-      maxConnections: config.maxConnections ?? 100,
-      pingInterval: config.pingInterval ?? 30000,
-      pongTimeout: config.pongTimeout ?? 5000,
-      compression: config.compression ?? true,
-      enablePerMessageDeflate: config.enablePerMessageDeflate ?? true,
-      heartbeatInterval: config.heartbeatInterval ?? 10000,
-      connectionTimeout: config.connectionTimeout ?? 30000,
-      enableLogging: config.enableLogging ?? true
+    this.nodeId = nodeId;
+    this.options = {
+      port: options.port || 8080,
+      host: options.host || '0.0.0.0',
+      maxConnections: options.maxConnections || 200,
+      pingInterval: options.pingInterval || 30000, // 30 seconds
+      pongTimeout: options.pongTimeout || 5000, // 5 seconds
+      upgradeTimeout: options.upgradeTimeout || 10000, // 10 seconds
+      enableCompression: options.enableCompression !== false
     };
 
     this.circuitBreaker = new CircuitBreaker({
+      name: `websocket-adapter-${nodeId.id}`,
       failureThreshold: 5,
-      resetTimeout: 30000,
-      timeout: 5000,
-      enableLogging: this.config.enableLogging
+      timeout: 15000
     });
 
     this.retryManager = new RetryManager({
-      maxRetries: 3,
-      baseDelay: 1000,
-      maxDelay: 10000,
-      backoffFactor: 2,
-      enableLogging: this.config.enableLogging
+      maxRetries: 5,
+      baseDelay: 2000,
+      maxDelay: 30000,
+      enableLogging: false
     });
+
+    this.setupEventHandlers();
   }
 
   async start(): Promise<void> {
-    if (this.isRunning) {
-      throw new Error('WebSocket adapter is already running');
-    }
+    if (this.isStarted) return;
 
     try {
-      this.server = new WebSocketServer({
-        port: this.config.port,
-        host: this.config.host,
-        perMessageDeflate: this.config.enablePerMessageDeflate,
-        maxPayload: 1024 * 1024, // 1MB max payload
-        clientTracking: true
-      });
-
-      this.server.on('connection', this.handleConnection.bind(this));
-      this.server.on('error', this.handleServerError.bind(this));
-      this.server.on('listening', () => {
-        this.emit('started', { port: this.config.port, host: this.config.host });
-      });
-
-      this.isRunning = true;
-      this.startHeartbeat();
-
-      // Wait for server to start listening
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('WebSocket server start timeout'));
-        }, 5000);
-
-        this.server!.once('listening', () => {
-          clearTimeout(timeout);
-          resolve();
+      await this.circuitBreaker.execute(async () => {
+        // Create HTTP server
+        this.server = http.createServer();
+        
+        // Create WebSocket server
+        this.wss = new WebSocket.Server({
+          server: this.server,
+          clientTracking: true,
+          maxPayload: 64 * 1024, // 64KB
+          perMessageDeflate: this.options.enableCompression ? {
+            zlibDeflateOptions: {
+              level: 6,
+              chunkSize: 32 * 1024
+            }
+          } : false
         });
 
-        this.server!.once('error', (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        });
-      });
+        this.wss.on('connection', (ws: WebSocket, request) => this.handleConnection(ws, request));
+        this.wss.on('error', (error) => this.handleServerError(error));
+        this.wss.on('close', () => this.emit('server-closed'));
 
+        // Start HTTP server
+        await new Promise<void>((resolve, reject) => {
+          this.server!.listen(this.options.port, this.options.host, () => {
+            this.log(`WebSocket server listening on ${this.options.host}:${this.options.port}`);
+            resolve();
+          });
+          this.server!.on('error', reject);
+        });
+
+        this.isStarted = true;
+        this.startHeartbeat();
+        this.emit('started', { port: this.options.port, host: this.options.host });
+      });
     } catch (error) {
-      this.isRunning = false;
-      this.stats.errors++;
-      throw new Error(`Failed to start WebSocket adapter: ${error}`);
+      this.emit('start-error', error);
+      throw error;
     }
   }
 
   async stop(): Promise<void> {
-    if (!this.isRunning) {
-      return;
-    }
+    if (!this.isStarted) return;
 
-    this.isRunning = false;
-
-    // Stop heartbeat
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer);
-    }
-
-    // Close all connections
-    Array.from(this.connections.values()).forEach(connection => {
-      this.closeConnection(connection, 'Server shutting down');
-    });
-    this.connections.clear();
-
-    // Close server
-    if (this.server) {
-      await new Promise<void>((resolve) => {
-        this.server!.close(() => {
-          resolve();
-        });
-      });
-      this.server = null;
-    }
-
-    this.emit('stopped');
-  }
-
-  async send(message: Message, target: NodeId): Promise<void> {
-    if (!this.isRunning) {
-      throw new Error('WebSocket adapter is not running');
-    }
-
-    const messageData = JSON.stringify(message);
-    const connection = this.findConnectionByNodeId(target.id);
-    
-    if (connection) {
-      await this.sendToConnection(connection, messageData);
-    } else {
-      // Try to establish new connection
-      await this.connectToNode(target, messageData);
-    }
-
-    this.stats.messagesSent++;
-  }
-
-  async sendMessage(message: Message, targetNode?: NodeId): Promise<void> {
-    if (!this.isRunning) {
-      throw new Error('WebSocket adapter is not running');
-    }
-
-    const messageData = JSON.stringify({
-      id: message.id,
-      type: message.type,
-      data: message.data,
-      sender: message.sender,
-      timestamp: message.timestamp,
-      headers: message.headers
-    });
-
-    if (targetNode) {
-      // Send to specific node
-      const connection = this.findConnectionByNodeId(targetNode.id);
-      if (connection) {
-        await this.sendToConnection(connection, messageData);
-      } else {
-        // Try to establish new connection
-        await this.connectToNode(targetNode, messageData);
-      }
-    } else {
-      // Broadcast to all connections
-      const promises: Promise<void>[] = [];
-      Array.from(this.connections.values()).forEach(connection => {
-        promises.push(this.sendToConnection(connection, messageData));
-      });
-      await Promise.allSettled(promises);
-    }
-
-    this.stats.messagesSent++;
-  }
-
-  onMessage(handler: (message: Message) => void): void {
-    this.messageHandler = handler;
-  }
-
-  removeMessageListener(callback: (message: Message) => void): void {
-    if (this.messageHandler === callback) {
-      this.messageHandler = undefined;
-    }
-  }
-
-  getConnectedNodes(): NodeId[] {
-    const nodes: NodeId[] = [];
-    Array.from(this.connections.values()).forEach(connection => {
-      if (connection.nodeId && connection.socket.readyState === WebSocket.OPEN) {
-        // Convert node ID string to NodeId interface
-        // This assumes the nodeId is stored as a composite string like "id:address:port"
-        const parts = connection.nodeId.split(':');
-        if (parts.length >= 3) {
-          nodes.push({
-            id: parts[0],
-            address: parts[1],
-            port: parseInt(parts[2])
-          });
-        }
-      }
-    });
-    return nodes;
-  }
-
-  getStats() {
-    return {
-      isStarted: this.isRunning,
-      host: this.config.host,
-      port: this.config.port,
-      activeConnections: this.connections.size,
-      maxConnections: this.config.maxConnections,
-      totalConnections: this.stats.connectionsEstablished,
-      droppedConnections: this.stats.connectionsDropped,
-      messagesReceived: this.stats.messagesReceived,
-      messagesSent: this.stats.messagesSent,
-      pingsSent: this.stats.pingsSent,
-      pongsReceived: this.stats.pongsReceived,
-      errors: this.stats.errors,
-      circuitBreakerState: this.circuitBreaker.getState(),
-      compressionEnabled: this.config.compression
-    };
-  }
-
-  private handleConnection(socket: WebSocket, request: any): void {
-    const connectionId = this.generateConnectionId();
-    const connection: WebSocketConnection = {
-      id: connectionId,
-      socket,
-      lastPing: Date.now(),
-      lastPong: Date.now(),
-      isAlive: true,
-      connectedAt: Date.now(),
-      messageCount: 0
-    };
-
-    // Connection limit check
-    if (this.connections.size >= this.config.maxConnections) {
-      socket.close(1008, 'Connection limit exceeded');
-      return;
-    }
-
-    this.connections.set(connectionId, connection);
-    this.stats.connectionsEstablished++;
-
-    // Set up socket event handlers
-    socket.on('message', (data: RawData) => {
-      this.handleMessage(connection, data);
-    });
-
-    socket.on('pong', () => {
-      this.handlePong(connection);
-    });
-
-    socket.on('close', (code: number, reason: Buffer) => {
-      this.handleDisconnection(connection, code, reason.toString());
-    });
-
-    socket.on('error', (error: Error) => {
-      this.handleConnectionError(connection, error);
-    });
-
-    // Send initial ping
-    this.sendPing(connection);
-
-    this.emit('connection', { connectionId, nodeId: connection.nodeId });
-  }
-
-  private handleMessage(connection: WebSocketConnection, data: RawData): void {
     try {
-      const messageStr = data.toString();
-      const messageData = JSON.parse(messageStr);
+      this.stopHeartbeat();
 
-      // Handle control messages
-      if (messageData.type === 'node_info') {
-        connection.nodeId = messageData.nodeId;
-        this.emit('nodeIdentified', { connectionId: connection.id, nodeId: messageData.nodeId });
-        return;
+      // Close all connections
+      const closePromises = Array.from(this.connections.values()).map(conn =>
+        this.closeConnection(conn)
+      );
+      await Promise.allSettled(closePromises);
+
+      // Close WebSocket server
+      if (this.wss) {
+        await new Promise<void>((resolve) => {
+          this.wss!.close(() => resolve());
+        });
       }
 
-      // Handle gossip messages
-      if (this.messageHandler && messageData.id && messageData.type) {
-        const message: Message = {
-          id: messageData.id,
-          type: messageData.type,
-          data: messageData.data,
-          sender: messageData.sender,
-          timestamp: messageData.timestamp,
-          headers: messageData.headers
-        };
-
-        connection.messageCount++;
-        this.stats.messagesReceived++;
-        this.messageHandler(message);
+      // Close HTTP server
+      if (this.server) {
+        await new Promise<void>((resolve) => {
+          this.server!.close(() => resolve());
+        });
       }
 
+      this.circuitBreaker.destroy();
+      this.retryManager.destroy();
+
+      this.isStarted = false;
+      this.emit('stopped');
     } catch (error) {
-      this.stats.errors++;
-      this.emit('messageError', { connectionId: connection.id, error });
-      
-      // Close connection on repeated parse errors
-      if (connection.messageCount > 0 && Math.random() < 0.1) {
-        this.closeConnection(connection, 'Invalid message format');
-      }
+      this.emit('stop-error', error);
+      throw error;
     }
   }
 
-  private handlePong(connection: WebSocketConnection): void {
-    connection.lastPong = Date.now();
-    connection.isAlive = true;
-    this.stats.pongsReceived++;
+  async send(message: Message): Promise<void> {
+    if (!this.isStarted) {
+      throw new Error('WebSocket adapter not started');
+    }
+
+    const gossipMessage = message as unknown as GossipMessage;
+    
+    if (gossipMessage.isBroadcast()) {
+      await this.broadcast(gossipMessage);
+    } else if (gossipMessage.header.recipient) {
+      await this.sendToNode(gossipMessage.header.recipient, gossipMessage);
+    } else {
+      throw new Error('Message must have recipient or be broadcast');
+    }
   }
 
-  private handleDisconnection(connection: WebSocketConnection, code: number, reason: string): void {
-    this.connections.delete(connection.id);
-    this.stats.connectionsDropped++;
-    this.emit('disconnection', { 
-      connectionId: connection.id, 
-      nodeId: connection.nodeId,
-      code,
-      reason,
-      duration: Date.now() - connection.connectedAt
+  async connect(nodeId: NodeId): Promise<void> {
+    const operationId = `connect-${nodeId.id}`;
+    
+    await this.retryManager.execute(async () => {
+      await this.createOutgoingConnection(nodeId);
+    }, operationId);
+  }
+
+  private async sendToNode(nodeId: NodeId, message: GossipMessage): Promise<void> {
+    const connection = this.connections.get(nodeId.id);
+    if (!connection || !connection.isActive) {
+      throw new Error(`No active connection to node ${nodeId.id}`);
+    }
+
+    await this.sendMessage(connection, message);
+  }
+
+  private async broadcast(message: GossipMessage): Promise<void> {
+    const activeConnections = Array.from(this.connections.values())
+      .filter(conn => conn.isActive);
+
+    if (activeConnections.length === 0) {
+      this.emit('broadcast-no-connections', message);
+      return;
+    }
+
+    const sendPromises = activeConnections.map(async (connection) => {
+      try {
+        await this.sendMessage(connection, message);
+      } catch (error) {
+        this.emit('broadcast-error', { connection: connection.nodeId, error });
+      }
     });
+
+    await Promise.allSettled(sendPromises);
+    this.emit('broadcast-sent', { 
+      message: message.header.id, 
+      connections: activeConnections.length 
+    });
+  }
+
+  private async sendMessage(connection: WebSocketConnection, message: GossipMessage): Promise<void> {
+    if (connection.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('WebSocket connection is not open');
+    }
+
+    const serialized = message.serialize();
+    
+    return new Promise<void>((resolve, reject) => {
+      connection.ws.send(serialized, (error) => {
+        if (error) {
+          this.handleConnectionError(connection, error);
+          reject(error);
+        } else {
+          connection.lastActivity = Date.now();
+          this.emit('message-sent', { 
+            nodeId: connection.nodeId, 
+            messageId: message.header.id 
+          });
+          resolve();
+        }
+      });
+    });
+  }
+
+  private async createOutgoingConnection(nodeId: NodeId): Promise<WebSocketConnection> {
+    const url = `ws://${nodeId.address}:${nodeId.port}`;
+    const ws = new (WebSocket as any)(url, {
+      handshakeTimeout: this.options.upgradeTimeout,
+      perMessageDeflate: this.options.enableCompression
+    });
+
+    const connection: WebSocketConnection = {
+      ws,
+      nodeId,
+      isActive: false,
+      lastActivity: Date.now(),
+      isAlive: true
+    };
+
+    return new Promise<WebSocketConnection>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        ws.terminate();
+        reject(new Error(`Connection timeout to ${url}`));
+      }, this.options.upgradeTimeout);
+
+      ws.on('open', () => {
+        clearTimeout(timeout);
+        connection.isActive = true;
+        this.connections.set(nodeId.id, connection);
+        this.setupConnectionHandlers(connection);
+        this.emit('connection-established', nodeId);
+        resolve(connection);
+      });
+
+      ws.on('error', (error: any) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
+  }
+
+  private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
+    if (this.connections.size >= this.options.maxConnections) {
+      this.log(`Max connections reached, rejecting connection from ${request.socket.remoteAddress}`);
+      ws.close(1013, 'Server overloaded');
+      return;
+    }
+
+    // Create temporary connection until we get node identification
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const connection: WebSocketConnection = {
+      ws,
+      nodeId: { 
+        id: tempId, 
+        address: request.socket.remoteAddress || 'unknown', 
+        port: request.socket.remotePort || 0 
+      },
+      isActive: true,
+      lastActivity: Date.now(),
+      isAlive: true
+    };
+
+    this.connections.set(tempId, connection);
+    this.setupConnectionHandlers(connection);
+    this.emit('connection-received', connection.nodeId);
+  }
+
+  private setupConnectionHandlers(connection: WebSocketConnection): void {
+    connection.ws.on('message', (data) => this.handleMessage(connection, data));
+    connection.ws.on('error', (error) => this.handleConnectionError(connection, error));
+    connection.ws.on('close', (code, reason) => this.handleConnectionClose(connection, code, reason.toString()));
+    connection.ws.on('pong', () => this.handlePong(connection));
+  }
+
+  private handleMessage(connection: WebSocketConnection, data: WebSocket.Data): void {
+    connection.lastActivity = Date.now();
+    
+    try {
+      const buffer = data instanceof Buffer ? data : Buffer.from(data.toString());
+      const message = GossipMessage.deserialize(buffer);
+      this.emit('message-received', message, connection.nodeId);
+    } catch (error) {
+      this.emit('message-parse-error', { error, connection: connection.nodeId });
+    }
   }
 
   private handleConnectionError(connection: WebSocketConnection, error: Error): void {
-    this.stats.errors++;
-    this.emit('connectionError', { connectionId: connection.id, error });
-    this.closeConnection(connection, 'Connection error');
+    connection.isActive = false;
+    this.emit('connection-error', { nodeId: connection.nodeId, error });
+    this.closeConnection(connection);
+  }
+
+  private handleConnectionClose(connection: WebSocketConnection, code: number, reason: string): void {
+    connection.isActive = false;
+    this.connections.delete(connection.nodeId.id);
+    this.emit('connection-closed', { 
+      nodeId: connection.nodeId, 
+      code, 
+      reason: reason.toString() 
+    });
+  }
+
+  private handlePong(connection: WebSocketConnection): void {
+    connection.isAlive = true;
+    connection.lastActivity = Date.now();
   }
 
   private handleServerError(error: Error): void {
-    this.stats.errors++;
-    this.emit('error', error);
+    this.emit('server-error', error);
+    this.log(`WebSocket server error: ${error.message}`);
   }
 
-  private async sendToConnection(connection: WebSocketConnection, message: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (connection.socket.readyState !== WebSocket.OPEN) {
-        reject(new Error('Connection not open'));
-        return;
-      }
-
-      connection.socket.send(message, (error) => {
-        if (error) {
-          this.stats.errors++;
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
-    });
+  private async closeConnection(connection: WebSocketConnection): Promise<void> {
+    if (connection.ws.readyState === WebSocket.OPEN) {
+      connection.ws.close(1000, 'Normal closure');
+    } else if (connection.ws.readyState === WebSocket.CONNECTING) {
+      connection.ws.terminate();
+    }
+    this.connections.delete(connection.nodeId.id);
   }
 
-  private async connectToNode(node: { id: string; address: string; port: number }, initialMessage?: string): Promise<void> {
-    const wsUrl = `ws://${node.address}:${node.port}`;
-    
-    return new Promise((resolve, reject) => {
-      const socket = new WebSocket(wsUrl);
-      const connectionId = this.generateConnectionId();
-      
-      const connection: WebSocketConnection = {
-        id: connectionId,
-        socket,
-        nodeId: node.id,
-        lastPing: Date.now(),
-        lastPong: Date.now(),
-        isAlive: true,
-        connectedAt: Date.now(),
-        messageCount: 0
-      };
-
-      socket.once('open', async () => {
-        this.connections.set(connectionId, connection);
-        this.stats.connectionsEstablished++;
-
-        // Send node identification
-        socket.send(JSON.stringify({
-          type: 'node_info',
-          nodeId: this.nodeInfo.id
-        }));
-
-        // Send initial message if provided
-        if (initialMessage) {
-          socket.send(initialMessage);
-        }
-
-        // Set up ongoing event handlers
-        this.setupOutgoingConnectionHandlers(connection);
-        resolve();
-      });
-
-      socket.once('error', (error) => {
-        this.stats.errors++;
-        reject(error);
-      });
-
-      // Connection timeout
-      setTimeout(() => {
-        if (socket.readyState === WebSocket.CONNECTING) {
-          socket.terminate();
-          reject(new Error('Connection timeout'));
-        }
-      }, this.config.connectionTimeout);
-    });
-  }
-
-  private setupOutgoingConnectionHandlers(connection: WebSocketConnection): void {
-    connection.socket.on('message', (data: RawData) => {
-      this.handleMessage(connection, data);
-    });
-
-    connection.socket.on('pong', () => {
-      this.handlePong(connection);
-    });
-
-    connection.socket.on('close', (code: number, reason: Buffer) => {
-      this.handleDisconnection(connection, code, reason.toString());
-    });
-
-    connection.socket.on('error', (error: Error) => {
-      this.handleConnectionError(connection, error);
+  private setupEventHandlers(): void {
+    this.circuitBreaker.on('state-change', (data) => {
+      this.emit('circuit-breaker-state-change', data);
     });
   }
 
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
       const now = Date.now();
-      const connectionsToClose: WebSocketConnection[] = [];
-
-      Array.from(this.connections.values()).forEach(connection => {
-        // Check for stale connections
-        if (now - connection.lastPong > this.config.pongTimeout) {
-          connectionsToClose.push(connection);
+      
+      this.connections.forEach((connection) => {
+        if (!connection.isActive) return;
+        
+        // Check if connection is stale
+        if (!connection.isAlive) {
+          this.log(`Terminating stale connection to ${connection.nodeId.id}`);
+          connection.ws.terminate();
           return;
         }
-
-        // Send ping if needed
-        if (now - connection.lastPing > this.config.pingInterval) {
-          this.sendPing(connection);
+        
+        // Send ping
+        connection.isAlive = false;
+        try {
+          connection.ws.ping();
+        } catch (error) {
+          this.handleConnectionError(connection, error as Error);
         }
       });
-
-      // Close stale connections
-      for (const connection of connectionsToClose) {
-        this.closeConnection(connection, 'Ping timeout');
-      }
-
-    }, this.config.heartbeatInterval);
+    }, this.options.pingInterval);
     this.heartbeatTimer?.unref();
   }
 
-  private sendPing(connection: WebSocketConnection): void {
-    if (connection.socket.readyState === WebSocket.OPEN) {
-      connection.socket.ping();
-      connection.lastPing = Date.now();
-      connection.isAlive = false; // Will be set to true on pong
-      this.stats.pingsSent++;
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
     }
   }
 
-  private closeConnection(connection: WebSocketConnection, reason: string): void {
-    try {
-      connection.socket.close(1000, reason);
-    } catch (error) {
-      // Socket might already be closed
-    }
-    this.connections.delete(connection.id);
+  getStats(): {
+    isStarted: boolean;
+    activeConnections: number;
+    totalConnections: number;
+    port: number;
+    host: string;
+  } {
+    return {
+      isStarted: this.isStarted,
+      activeConnections: Array.from(this.connections.values()).filter(c => c.isActive).length,
+      totalConnections: this.connections.size,
+      port: this.options.port,
+      host: this.options.host
+    };
   }
 
-  private findConnectionByNodeId(nodeId: string): WebSocketConnection | undefined {
-    for (const connection of Array.from(this.connections.values())) {
-      if (connection.nodeId === nodeId) {
-        return connection;
-      }
-    }
-    return undefined;
+  /**
+   * Register a callback to handle incoming messages
+   */
+  onMessage(callback: (message: Message) => void): void {
+    this.on('message', callback);
   }
 
-  private generateConnectionId(): string {
-    return `ws-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  /**
+   * Remove a message listener
+   */
+  removeMessageListener(callback: (message: Message) => void): void {
+    this.off('message', callback);
+  }
+
+  /**
+   * Get currently connected nodes
+   */
+  getConnectedNodes(): NodeId[] {
+    return Array.from(this.connections.values())
+      .filter(conn => conn.isActive)
+      .map(conn => conn.nodeId);
+  }
+
+  private log(message: string): void {
+    console.log(`[WebSocketAdapter:${this.nodeId.id}] ${message}`);
   }
 }

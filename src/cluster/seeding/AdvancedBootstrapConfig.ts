@@ -113,7 +113,7 @@ export class AdvancedBootstrapConfig extends EventEmitter {
   }
 
   // Expose legacy config properties for compatibility
-  get seedNodes(): string[] { return this.legacyConfig.seedNodes; }
+  get seedNodes(): string[] { return this.legacyConfig.getSeedNodes(); }
   get joinTimeout(): number { return this.legacyConfig.joinTimeout; }
   get gossipInterval(): number { return this.legacyConfig.gossipInterval; }
   get enableLogging(): boolean { return this.legacyConfig.enableLogging; }

@@ -1,4 +1,4 @@
-import * as WebSocket from 'ws';
+import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import * as http from 'http';
 import { Transport } from '../Transport';
@@ -401,6 +401,29 @@ export class WebSocketAdapter extends Transport {
       port: this.options.port,
       host: this.options.host
     };
+  }
+
+  /**
+   * Register a callback to handle incoming messages
+   */
+  onMessage(callback: (message: Message) => void): void {
+    this.on('message', callback);
+  }
+
+  /**
+   * Remove a message listener
+   */
+  removeMessageListener(callback: (message: Message) => void): void {
+    this.off('message', callback);
+  }
+
+  /**
+   * Get currently connected nodes
+   */
+  getConnectedNodes(): NodeId[] {
+    return Array.from(this.connections.values())
+      .filter(conn => conn.isActive)
+      .map(conn => conn.nodeId);
   }
 
   private log(message: string): void {

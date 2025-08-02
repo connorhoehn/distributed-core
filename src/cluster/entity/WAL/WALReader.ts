@@ -1,4 +1,4 @@
-import { WALReader, WALFile, WALEntry, WALCoordinator } from '../types';
+import { WALReader, WALFile, WALEntry, WALCoordinator } from '../../../persistence/wal/types';
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
 import { FrameworkLogger } from '../../../common/logger';
@@ -36,7 +36,7 @@ export class WALReaderImpl implements WALReader {
     const entries = await this.walFile.readEntries();
     
     // Filter out invalid entries
-    return entries.filter(entry => {
+    return entries.filter((entry: WALEntry) => {
       const isValid = this.coordinator.validateEntry(entry);
       if (!isValid) {
         console.warn(`[WALReader] Invalid entry at LSN ${entry.logSequenceNumber}, filtering out`);

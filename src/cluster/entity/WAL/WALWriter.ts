@@ -1,4 +1,4 @@
-import { WALWriter, WALFile, WALCoordinator, EntityUpdate, WALConfig } from '../types';
+import { WALWriter, WALFile, WALCoordinator, EntityUpdate, WALConfig } from '../../../persistence/wal/types';
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
 
