@@ -1,24 +1,241 @@
+import { EventEmitter } from 'events';
 import { IClusterManagerContext, IRequiresContext } from '../core/IClusterManagerContext';
 import { ClusterHealth, ClusterTopology, ClusterMetadata, MembershipEntry } from '../types';
+
+/**
+ * Real-time performance tracking interface
+ */
+export interface PerformanceMetrics {
+  membershipSize: number;
+  gossipRate: number;
+  failureDetectionLatency: number;
+  averageHeartbeatInterval: number;
+  messageRate: number;
+  messageLatency: number;
+  networkThroughput: number;
+  cpuUsage?: number;
+  memoryUsage?: number;
+  timestamp: number;
+}
+
+/**
+ * Logical service tracking interface
+ */
+export interface LogicalService {
+  id: string;
+  type: string;
+  nodeId: string;
+  rangeId?: string;
+  metadata: Record<string, any>;
+  stats: Record<string, number>;
+  lastUpdated: number;
+}
+
+/**
+ * Real-time cluster state interface
+ */
+export interface ClusterState {
+  health: ClusterHealth;
+  topology: ClusterTopology;
+  metadata: ClusterMetadata;
+  performance: PerformanceMetrics;
+  logicalServices: LogicalService[];
+  lastUpdated: number;
+}
 
 /**
  * ClusterIntrospection provides health monitoring, analytics, and metadata services
  * 
  * Responsibilities:
- * - Cluster health metrics and monitoring
+ * - Real-time cluster health metrics and monitoring
  * - Topology analysis and reporting
- * - Load balancing calculations
- * - Cluster metadata generation
- * - Performance analytics
+ * - Performance metrics collection and tracking
+ * - Logical service registry and monitoring
+ * - State aggregation for external systems
  */
-export class ClusterIntrospection implements IRequiresContext {
+export class ClusterIntrospection extends EventEmitter implements IRequiresContext {
   private context?: IClusterManagerContext;
+  private logicalServices = new Map<string, LogicalService>();
+  private performanceHistory: PerformanceMetrics[] = [];
+  private maxHistorySize = 100;
+  private metricsInterval?: NodeJS.Timeout;
+  private lastGossipCount = 0;
+  private lastMessageCount = 0;
+
+  constructor() {
+    super();
+  }
 
   /**
    * Set the cluster manager context for delegation
    */
   setContext(context: IClusterManagerContext): void {
     this.context = context;
+    // Don't automatically start tracking - wait for cluster to start
+  }
+
+  /**
+   * Start real-time metrics collection (called when cluster starts)
+   */
+  startTracking(): void {
+    if (!this.metricsInterval && this.context) {
+      this.setupRealTimeTracking();
+    }
+  }
+
+  /**
+   * Start real-time metrics collection
+   */
+  private setupRealTimeTracking(): void {
+    // Collect performance metrics every 5 seconds
+    this.metricsInterval = setInterval(() => {
+      const metrics = this.collectCurrentMetrics();
+      this.performanceHistory.push(metrics);
+      
+      // Keep only recent history
+      if (this.performanceHistory.length > this.maxHistorySize) {
+        this.performanceHistory.shift();
+      }
+      
+      // Emit real-time updates for external systems
+      this.emit('metrics-updated', metrics);
+      this.emit('state-changed', this.getCurrentState());
+    }, 5000);
+
+    // Listen for cluster events through the membership table
+    if (this.context) {
+      this.context.membership.on('member-joined', () => {
+        this.emit('topology-changed', this.getTopology());
+      });
+      
+      this.context.membership.on('member-left', () => {
+        this.emit('topology-changed', this.getTopology());
+      });
+      
+      this.context.membership.on('membership-updated', () => {
+        this.emit('health-changed', this.getClusterHealth());
+      });
+    }
+  }
+
+  /**
+   * Stop real-time tracking
+   */
+  destroy(): void {
+    if (this.metricsInterval) {
+      clearInterval(this.metricsInterval);
+      this.metricsInterval = undefined;
+    }
+    this.removeAllListeners();
+  }
+
+  /**
+   * Register a logical service (e.g., chat rooms, game sessions)
+   */
+  registerLogicalService(service: LogicalService): void {
+    this.logicalServices.set(service.id, {
+      ...service,
+      lastUpdated: Date.now()
+    });
+    this.emit('service-registered', service);
+  }
+
+  /**
+   * Unregister a logical service
+   */
+  unregisterLogicalService(serviceId: string): void {
+    const service = this.logicalServices.get(serviceId);
+    if (service) {
+      this.logicalServices.delete(serviceId);
+      this.emit('service-unregistered', service);
+    }
+  }
+
+  /**
+   * Update logical service stats
+   */
+  updateLogicalService(serviceId: string, stats: Record<string, number>, metadata?: Record<string, any>): void {
+    const service = this.logicalServices.get(serviceId);
+    if (service) {
+      service.stats = { ...service.stats, ...stats };
+      if (metadata) {
+        service.metadata = { ...service.metadata, ...metadata };
+      }
+      service.lastUpdated = Date.now();
+      this.emit('service-updated', service);
+    }
+  }
+
+  /**
+   * Get all logical services
+   */
+  getLogicalServices(): LogicalService[] {
+    return Array.from(this.logicalServices.values());
+  }
+
+  /**
+   * Get logical services by type (e.g., 'chat-room', 'game-session')
+   */
+  getLogicalServicesByType(type: string): LogicalService[] {
+    return Array.from(this.logicalServices.values()).filter(service => service.type === type);
+  }
+
+  /**
+   * Get logical services for a specific node
+   */
+  getLogicalServicesByNode(nodeId: string): LogicalService[] {
+    return Array.from(this.logicalServices.values()).filter(service => service.nodeId === nodeId);
+  }
+
+  /**
+   * Collect current performance metrics
+   */
+  private collectCurrentMetrics(): PerformanceMetrics {
+    if (!this.context) {
+      throw new Error('ClusterIntrospection requires context to be set');
+    }
+
+    // Calculate gossip rate (messages per second)
+    const currentGossipCount = 0; // TODO: Get from gossip strategy
+    const gossipRate = Math.max(0, currentGossipCount - this.lastGossipCount) / 5; // per 5 second interval
+    this.lastGossipCount = currentGossipCount;
+
+    // Calculate message rate
+    const currentMessageCount = 0; // TODO: Get from transport layer
+    const messageRate = Math.max(0, currentMessageCount - this.lastMessageCount) / 5;
+    this.lastMessageCount = currentMessageCount;
+
+    return {
+      membershipSize: this.context.membership.getAllMembers().length,
+      gossipRate,
+      failureDetectionLatency: 3000, // TODO: Get from failure detector
+      averageHeartbeatInterval: 1000, // TODO: Get from failure detector config
+      messageRate,
+      messageLatency: 50, // TODO: Calculate from transport metrics
+      networkThroughput: messageRate * 1024, // Estimate bytes per second
+      timestamp: Date.now()
+    };
+  }
+
+  /**
+   * Get current comprehensive cluster state
+   */
+  getCurrentState(): ClusterState {
+    return {
+      health: this.getClusterHealth(),
+      topology: this.getTopology(),
+      metadata: this.getMetadata(),
+      performance: this.performanceHistory[this.performanceHistory.length - 1] || this.collectCurrentMetrics(),
+      logicalServices: this.getLogicalServices(),
+      lastUpdated: Date.now()
+    };
+  }
+
+  /**
+   * Get performance history
+   */
+  getPerformanceHistory(): PerformanceMetrics[] {
+    return [...this.performanceHistory];
   }
 
   /**
@@ -179,26 +396,10 @@ export class ClusterIntrospection implements IRequiresContext {
   }
 
   /**
-   * Analyze cluster performance metrics
+   * Analyze cluster performance metrics (enhanced version)
    */
-  getPerformanceMetrics(): {
-    membershipSize: number;
-    gossipRate: number;
-    failureDetectionLatency: number;
-    averageHeartbeatInterval: number;
-  } {
-    if (!this.context) {
-      throw new Error('ClusterIntrospection requires context to be set');
-    }
-
-    // TODO: Implement actual metrics collection
-    // For now, return placeholder values
-    return {
-      membershipSize: this.context.membership.getAllMembers().length,
-      gossipRate: 1.0, // gossips per second
-      failureDetectionLatency: 3000, // ms
-      averageHeartbeatInterval: 1000 // ms
-    };
+  getPerformanceMetrics(): PerformanceMetrics {
+    return this.performanceHistory[this.performanceHistory.length - 1] || this.collectCurrentMetrics();
   }
 
   /**

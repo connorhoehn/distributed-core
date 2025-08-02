@@ -4,8 +4,25 @@ import { spyLogger, LogEntry } from '../helpers/spyLogger';
 
 describe('Test Harness Example', () => {
   describe('createTestCluster', () => {
+    let testClusters: any[] = [];
+
+    afterEach(async () => {
+      // Clean up all test clusters to prevent open handles
+      for (const cluster of testClusters) {
+        try {
+          if (cluster && typeof cluster.stop === 'function') {
+            await cluster.stop();
+          }
+        } catch (error) {
+          // Ignore cleanup errors
+        }
+      }
+      testClusters = [];
+    });
+
     it('should create a test cluster with specified size', () => {
       const cluster = createTestCluster({ size: 3 });
+      testClusters.push(cluster);
       
       expect(cluster.nodes).toHaveLength(3);
       expect(cluster.start).toBeDefined();
@@ -16,6 +33,7 @@ describe('Test Harness Example', () => {
 
     it('should provide access to individual nodes', () => {
       const cluster = createTestCluster({ size: 2 });
+      testClusters.push(cluster);
       
       const node0 = cluster.getNode(0);
       const node1 = cluster.getNode(1);
@@ -27,6 +45,7 @@ describe('Test Harness Example', () => {
 
     it('should throw error for invalid node index', () => {
       const cluster = createTestCluster({ size: 2 });
+      testClusters.push(cluster);
       
       expect(() => cluster.getNode(-1)).toThrow();
       expect(() => cluster.getNode(2)).toThrow();
@@ -34,6 +53,7 @@ describe('Test Harness Example', () => {
 
     it('should capture logs when enabled', async () => {
       const cluster = createTestCluster({ size: 1, enableTestHarnessOnly: true });
+      testClusters.push(cluster);
       
       await cluster.start();
       await cluster.stop();
@@ -45,6 +65,7 @@ describe('Test Harness Example', () => {
 
     it('should not capture logs when disabled', async () => {
       const cluster = createTestCluster({ size: 1, enableLogging: false });
+      testClusters.push(cluster);
       
       await cluster.start();
       await cluster.stop();

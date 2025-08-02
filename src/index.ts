@@ -25,9 +25,23 @@ export * from './cluster/gossip/GossipStrategy';
 export * from './cluster/monitoring/FailureDetector';
 export * from './cluster/config/BootstrapConfig';
 
+// Enhanced Observability 
+export * from './cluster/introspection/ClusterIntrospection';
+export * from './cluster/aggregation/StateAggregator';
+export type { 
+  PerformanceMetrics, 
+  LogicalService, 
+  ClusterState
+} from './cluster/introspection/ClusterIntrospection';
+export type {
+  AggregatedClusterState,
+  PartitionInfo,
+  StateAggregatorConfig
+} from './cluster/aggregation/StateAggregator';
+
 // Transport modules
 export * from './transport/Transport';
-export * from './transport/GossipMessage';
+export { GossipMessage } from './transport/GossipMessage';
 export * from './transport/GossipBackoff';
 export * from './transport/MessageCache';
 export * from './transport/Encryption';

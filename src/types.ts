@@ -39,6 +39,8 @@ export enum MessageType {
   MEMBERSHIP_UPDATE = 'membership_update',
   STATE_SYNC = 'state_sync',
   FAILURE_DETECTION = 'failure_detection',
+  CLUSTER_STATE_REQUEST = 'cluster_state_request',
+  CLUSTER_STATE_RESPONSE = 'cluster_state_response',
   CUSTOM = 'custom'
 }
 

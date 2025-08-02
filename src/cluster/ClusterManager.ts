@@ -165,6 +165,11 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     this.communication.startGossipTimer();
     await this.communication.joinCluster();
 
+    // Start introspection tracking after cluster is started
+    if (this.introspection && typeof this.introspection.startTracking === 'function') {
+      this.introspection.startTracking();
+    }
+
     this.isStarted = true;
     this.emit('started');
   }
@@ -174,6 +179,11 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
 
     // Stop communication first
     this.communication.stopGossipTimer();
+
+    // Clean up introspection timers and listeners
+    if (this.introspection) {
+      this.introspection.destroy();
+    }
 
     // Use lifecycle module for shutdown
     await this.lifecycle.stop();
@@ -289,6 +299,8 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
   getClusterHealth(): ClusterHealth { return this.introspection.getClusterHealth(); }
   getTopology(): ClusterTopology { return this.introspection.getTopology(); }
   canHandleFailures(nodeCount: number): boolean { return this.quorum.canHandleFailures(nodeCount); }
+  getIntrospection(): ClusterIntrospection { return this.introspection; }
+  getTransport(): Transport { return this.transport; }
 
   // Advanced Cluster Operations
   async drainNode(nodeId: string, timeout: number = 30000): Promise<boolean> {
