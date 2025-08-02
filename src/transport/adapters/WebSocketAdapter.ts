@@ -1,4 +1,4 @@
-import * as WebSocket from 'ws';
+import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 import * as http from 'http';
 import { Transport } from '../Transport';
@@ -90,7 +90,7 @@ export class WebSocketAdapter extends Transport {
           } : false
         });
 
-        this.wss.on('connection', (ws: WebSocket, request) => this.handleConnection(ws, request));
+        this.wss.on('connection', (ws, request) => this.handleConnection(ws, request));
         this.wss.on('error', (error) => this.handleServerError(error));
         this.wss.on('close', () => this.emit('server-closed'));
 
@@ -155,7 +155,7 @@ export class WebSocketAdapter extends Transport {
       throw new Error('WebSocket adapter not started');
     }
 
-    const gossipMessage = message as unknown as GossipMessage;
+    const gossipMessage = message as GossipMessage;
     
     if (gossipMessage.isBroadcast()) {
       await this.broadcast(gossipMessage);
@@ -233,7 +233,7 @@ export class WebSocketAdapter extends Transport {
 
   private async createOutgoingConnection(nodeId: NodeId): Promise<WebSocketConnection> {
     const url = `ws://${nodeId.address}:${nodeId.port}`;
-    const ws = new (WebSocket as any)(url, {
+    const ws = new WebSocket(url, {
       handshakeTimeout: this.options.upgradeTimeout,
       perMessageDeflate: this.options.enableCompression
     });
@@ -261,7 +261,7 @@ export class WebSocketAdapter extends Transport {
         resolve(connection);
       });
 
-      ws.on('error', (error: any) => {
+      ws.on('error', (error) => {
         clearTimeout(timeout);
         reject(error);
       });
@@ -297,7 +297,7 @@ export class WebSocketAdapter extends Transport {
   private setupConnectionHandlers(connection: WebSocketConnection): void {
     connection.ws.on('message', (data) => this.handleMessage(connection, data));
     connection.ws.on('error', (error) => this.handleConnectionError(connection, error));
-    connection.ws.on('close', (code, reason) => this.handleConnectionClose(connection, code, reason.toString()));
+    connection.ws.on('close', (code, reason) => this.handleConnectionClose(connection, code, reason));
     connection.ws.on('pong', () => this.handlePong(connection));
   }
 
