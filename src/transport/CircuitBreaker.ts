@@ -434,9 +434,9 @@ export class CircuitBreakerManager extends EventEmitter {
    */
   getAllStats(): Record<string, CircuitBreakerStats> {
     const stats: Record<string, CircuitBreakerStats> = {};
-    for (const [name, breaker] of this.breakers) {
+    Array.from(this.breakers.entries()).forEach(([name, breaker]) => {
       stats[name] = breaker.getStats();
-    }
+    });
     return stats;
   }
 
@@ -445,9 +445,9 @@ export class CircuitBreakerManager extends EventEmitter {
    */
   getHealthCheck(): Record<string, ReturnType<CircuitBreaker['getHealthCheck']>> {
     const health: Record<string, ReturnType<CircuitBreaker['getHealthCheck']>> = {};
-    for (const [name, breaker] of this.breakers) {
+    Array.from(this.breakers.entries()).forEach(([name, breaker]) => {
       health[name] = breaker.getHealthCheck();
-    }
+    });
     return health;
   }
 
@@ -455,9 +455,9 @@ export class CircuitBreakerManager extends EventEmitter {
    * Reset all circuit breakers
    */
   resetAll(): void {
-    for (const [name, breaker] of this.breakers) {
+    Array.from(this.breakers.entries()).forEach(([name, breaker]) => {
       breaker.reset();
-    }
+    });
     this.emit('all-breakers-reset');
   }
 
@@ -465,9 +465,9 @@ export class CircuitBreakerManager extends EventEmitter {
    * Destroy all circuit breakers
    */
   destroy(): void {
-    for (const [name, breaker] of this.breakers) {
+    Array.from(this.breakers.entries()).forEach(([name, breaker]) => {
       breaker.destroy();
-    }
+    });
     this.breakers.clear();
     this.removeAllListeners();
     this.emit('manager-destroyed');

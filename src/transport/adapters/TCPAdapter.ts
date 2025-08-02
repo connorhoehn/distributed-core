@@ -1,148 +1,390 @@
+import * as net from 'net';
 import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
+import { CircuitBreaker } from '../CircuitBreaker';
+import { RetryManager } from '../RetryManager';
+import { GossipMessage } from '../GossipMessage';
+
+interface TCPConnection {
+  socket: net.Socket;
+  nodeId: NodeId;
+  isActive: boolean;
+  lastActivity: number;
+  messageBuffer: Buffer;
+}
+
+interface TCPAdapterOptions {
+  port?: number;
+  host?: string;
+  maxConnections?: number;
+  connectionTimeout?: number;
+  keepAliveInterval?: number;
+  enableNagle?: boolean;
+  enableLogging?: boolean;
+  // Test-specific options for faster failures
+  maxRetries?: number;
+  baseRetryDelay?: number;
+  circuitBreakerTimeout?: number;
+}
 
 /**
  * TCP transport adapter for reliable, persistent connections
- * Ideal for internal service-to-service communication
+ * Provides low-latency, high-throughput communication with connection pooling
  */
 export class TCPAdapter extends Transport {
-  private nodeId: NodeId;
-  private server: any; // net.Server (stub)
-  private connections = new Map<string, any>(); // Socket connections
+  private readonly nodeId: NodeId;
+  private readonly options: Required<TCPAdapterOptions>;
+  private server?: net.Server;
+  private connections = new Map<string, TCPConnection>();
   private isStarted = false;
-  private static adapterRegistry = new Map<string, TCPAdapter>();
+  private circuitBreaker: CircuitBreaker;
+  private retryManager: RetryManager;
+  private keepAliveTimer?: NodeJS.Timeout;
+  private messageHandlers: Set<(message: Message) => void> = new Set();
 
-  constructor(nodeId: NodeId, private port: number = 9090) {
+  private static readonly MESSAGE_DELIMITER = '\n\n';
+  private static readonly MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
+
+  constructor(nodeId: NodeId, options: TCPAdapterOptions = {}) {
     super();
     this.nodeId = nodeId;
+    this.options = {
+      port: options.port || 9090,
+      host: options.host || '0.0.0.0',
+      maxConnections: options.maxConnections || 100,
+      connectionTimeout: options.connectionTimeout || 30000,
+      keepAliveInterval: options.keepAliveInterval || 60000,
+      enableNagle: options.enableNagle !== false,
+      enableLogging: options.enableLogging ?? true,
+      maxRetries: options.maxRetries ?? 3,
+      baseRetryDelay: options.baseRetryDelay ?? 1000,
+      circuitBreakerTimeout: options.circuitBreakerTimeout ?? 10000
+    };
+
+    this.circuitBreaker = new CircuitBreaker({
+      name: `tcp-adapter-${nodeId.id}`,
+      failureThreshold: 5,
+      timeout: this.options.circuitBreakerTimeout,
+      enableLogging: this.options.enableLogging
+    });
+
+    this.retryManager = new RetryManager({
+      maxRetries: this.options.maxRetries,
+      baseDelay: this.options.baseRetryDelay,
+      enableLogging: false
+    });
   }
 
   async start(): Promise<void> {
     if (this.isStarted) return;
 
-    // Stub: In real implementation, would use Node.js 'net' module
-    // const net = require('net');
-    // this.server = net.createServer((socket) => {
-    //   this.handleConnection(socket);
-    // });
-    // this.server.listen(this.port);
+    try {
+      await this.circuitBreaker.execute(async () => {
+        this.server = net.createServer({
+          allowHalfOpen: false,
+          pauseOnConnect: false
+        });
 
-    TCPAdapter.adapterRegistry.set(this.nodeId.id, this);
-    this.isStarted = true;
-    this.emit('started');
+        this.server.on('connection', (socket) => this.handleIncomingConnection(socket));
+        this.server.on('error', (error) => this.handleServerError(error));
+        this.server.on('close', () => this.emit('server-closed'));
+
+        await new Promise<void>((resolve, reject) => {
+          this.server!.listen(this.options.port, this.options.host, () => {
+            this.log(`TCP server listening on ${this.options.host}:${this.options.port}`);
+            resolve();
+          });
+          this.server!.on('error', reject);
+        });
+
+        this.isStarted = true;
+        this.startKeepAlive();
+        this.emit('started', { port: this.options.port, host: this.options.host });
+      });
+    } catch (error) {
+      this.emit('start-error', error);
+      throw error;
+    }
   }
 
   async stop(): Promise<void> {
     if (!this.isStarted) return;
 
-    // Close all connections
-    for (const [nodeId, socket] of this.connections) {
-      // socket.destroy();
-    }
-    this.connections.clear();
+    try {
+      this.stopKeepAlive();
+      
+      // Close all connections
+      const closePromises = Array.from(this.connections.values()).map(conn => 
+        this.closeConnection(conn)
+      );
+      await Promise.all(closePromises);
 
-    // Close server
-    if (this.server) {
-      // this.server.close();
-      this.server = null;
-    }
+      // Close server
+      if (this.server) {
+        await new Promise<void>((resolve) => {
+          this.server!.close(() => resolve());
+        });
+      }
 
-    TCPAdapter.adapterRegistry.delete(this.nodeId.id);
-    this.isStarted = false;
-    this.emit('stopped');
+      this.circuitBreaker.destroy();
+      this.retryManager.destroy();
+
+      this.isStarted = false;
+      this.emit('stopped');
+    } catch (error) {
+      this.emit('stop-error', error);
+      throw error;
+    }
   }
 
   async send(message: Message, target: NodeId): Promise<void> {
     if (!this.isStarted) {
-      throw new Error('TCP server not started');
+      throw new Error('TCP adapter not started');
     }
 
-    let socket = this.connections.get(target.id);
-    if (!socket) {
-      await this.connect(target);
-      socket = this.connections.get(target.id);
-    }
-
-    if (!socket) {
-      throw new Error(`Failed to establish TCP connection to ${target.id}`);
-    }
-
-    // Simulate message delivery to target adapter
-    const targetAdapter = TCPAdapter.adapterRegistry.get(target.id);
-    if (targetAdapter) {
-      setTimeout(() => {
-        targetAdapter.emit('message', message);
-      }, 1);
-    }
-
-    // Stub: In real implementation would serialize and write to socket
-    // const data = JSON.stringify(message) + '\n';
-    // socket.write(data);
+    const operationId = `send-${target.id}-${Date.now()}`;
     
-    return Promise.resolve();
-  }
-
-  async connect(target: NodeId): Promise<void> {
-    if (!this.isStarted) {
-      throw new Error('Adapter not started');
-    }
-
-    // Stub: In real implementation would create TCP socket
-    // const net = require('net');
-    // const socket = new net.Socket();
-    // await new Promise((resolve, reject) => {
-    //   socket.connect(target.port, target.address, resolve);
-    //   socket.on('error', reject);
-    // });
-
-    // Simulate connection
-    const mockSocket = {
-      id: target.id,
-      connected: true,
-      write: (data: string) => console.log(`Mock TCP send to ${target.id}:`, data),
-      destroy: () => console.log(`Mock TCP disconnect from ${target.id}`)
-    };
-    this.connections.set(target.id, mockSocket);
-    this.emit('connected', target);
-  }
-
-  disconnect(target: NodeId): void {
-    const socket = this.connections.get(target.id);
-    if (socket) {
-      // socket.destroy();
-      this.connections.delete(target.id);
-      this.emit('disconnected', target);
-    }
-  }
-
-  getConnectedNodes(): NodeId[] {
-    return Array.from(this.connections.keys()).map(id => ({
-      id,
-      address: 'localhost', // Stub
-      port: this.port
-    }));
-  }
-
-  isConnected(target: NodeId): boolean {
-    return this.connections.has(target.id);
+    await this.retryManager.execute(async () => {
+      const connection = await this.getOrCreateConnection(target);
+      await this.sendMessage(connection, message);
+    }, operationId);
   }
 
   onMessage(callback: (message: Message) => void): void {
-    this.on('message', callback);
+    this.messageHandlers.add(callback);
   }
 
   removeMessageListener(callback: (message: Message) => void): void {
-    this.removeListener('message', callback);
+    this.messageHandlers.delete(callback);
   }
 
-  /**
-   * Handle incoming TCP connection (stub)
-   */
-  private handleConnection(socket: any): void {
-    // Stub: In real implementation would handle incoming data
-    // socket.on('data', (data) => {
-    //   const message = JSON.parse(data.toString());
-    //   this.emit('message', message);
-    // });
+  getConnectedNodes(): NodeId[] {
+    return Array.from(this.connections.values())
+      .filter(conn => conn.isActive)
+      .map(conn => conn.nodeId);
+  }
+
+  private async sendMessage(connection: TCPConnection, message: Message): Promise<void> {
+    if (!connection.isActive) {
+      throw new Error('Connection is not active');
+    }
+
+    const serialized = this.serializeMessage(message);
+    const messageWithDelimiter = Buffer.concat([
+      serialized, 
+      Buffer.from(TCPAdapter.MESSAGE_DELIMITER, 'utf8')
+    ]);
+
+    return new Promise<void>((resolve, reject) => {
+      connection.socket.write(messageWithDelimiter, (error) => {
+        if (error) {
+          this.handleConnectionError(connection, error);
+          reject(error);
+        } else {
+          connection.lastActivity = Date.now();
+          this.emit('message-sent', { nodeId: connection.nodeId });
+          resolve();
+        }
+      });
+    });
+  }
+
+  private async getOrCreateConnection(nodeId: NodeId): Promise<TCPConnection> {
+    const existingConnection = this.connections.get(nodeId.id);
+    if (existingConnection && existingConnection.isActive) {
+      return existingConnection;
+    }
+
+    return this.createOutgoingConnection(nodeId);
+  }
+
+  private async createOutgoingConnection(nodeId: NodeId): Promise<TCPConnection> {
+    const socket = new net.Socket();
+    
+    // Configure socket options
+    socket.setNoDelay(!this.options.enableNagle);
+    socket.setKeepAlive(true, this.options.keepAliveInterval);
+    socket.setTimeout(this.options.connectionTimeout);
+
+    const connection: TCPConnection = {
+      socket,
+      nodeId,
+      isActive: false,
+      lastActivity: Date.now(),
+      messageBuffer: Buffer.alloc(0)
+    };
+
+    return new Promise<TCPConnection>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        socket.destroy();
+        reject(new Error(`Connection timeout to ${nodeId.address}:${nodeId.port}`));
+      }, this.options.connectionTimeout);
+
+      socket.connect(nodeId.port!, nodeId.address, () => {
+        clearTimeout(timeout);
+        connection.isActive = true;
+        this.connections.set(nodeId.id, connection);
+        this.setupConnectionHandlers(connection);
+        this.emit('connection-established', nodeId);
+        resolve(connection);
+      });
+
+      socket.on('error', (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      });
+    });
+  }
+
+  private handleIncomingConnection(socket: net.Socket): void {
+    if (this.connections.size >= this.options.maxConnections) {
+      this.log(`Max connections reached, rejecting connection from ${socket.remoteAddress}`);
+      socket.end();
+      return;
+    }
+
+    // Configure socket
+    socket.setNoDelay(!this.options.enableNagle);
+    socket.setKeepAlive(true, this.options.keepAliveInterval);
+    socket.setTimeout(this.options.connectionTimeout);
+
+    // Create temporary connection until we get node identification
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const connection: TCPConnection = {
+      socket,
+      nodeId: { id: tempId, address: socket.remoteAddress || 'unknown', port: socket.remotePort || 0 },
+      isActive: true,
+      lastActivity: Date.now(),
+      messageBuffer: Buffer.alloc(0)
+    };
+
+    this.connections.set(tempId, connection);
+    this.setupConnectionHandlers(connection);
+    this.emit('connection-received', connection.nodeId);
+  }
+
+  private setupConnectionHandlers(connection: TCPConnection): void {
+    connection.socket.on('data', (data) => this.handleConnectionData(connection, data));
+    connection.socket.on('error', (error) => this.handleConnectionError(connection, error));
+    connection.socket.on('close', () => this.handleConnectionClose(connection));
+    connection.socket.on('timeout', () => this.handleConnectionTimeout(connection));
+  }
+
+  private handleConnectionData(connection: TCPConnection, data: Buffer): void {
+    connection.lastActivity = Date.now();
+    connection.messageBuffer = Buffer.concat([connection.messageBuffer, data]);
+
+    // Process complete messages
+    let delimiterIndex: number;
+    while ((delimiterIndex = connection.messageBuffer.indexOf(TCPAdapter.MESSAGE_DELIMITER)) !== -1) {
+      const messageData = connection.messageBuffer.slice(0, delimiterIndex);
+      connection.messageBuffer = connection.messageBuffer.slice(delimiterIndex + TCPAdapter.MESSAGE_DELIMITER.length);
+
+      try {
+        const message = this.deserializeMessage(messageData);
+        this.messageHandlers.forEach(handler => {
+          try {
+            handler(message);
+          } catch (error) {
+            this.emit('handler-error', { error, connection: connection.nodeId });
+          }
+        });
+      } catch (error) {
+        this.emit('message-parse-error', { error, connection: connection.nodeId });
+      }
+    }
+
+    // Prevent buffer overflow
+    if (connection.messageBuffer.length > TCPAdapter.MAX_MESSAGE_SIZE) {
+      this.log(`Message buffer overflow for ${connection.nodeId.id}, closing connection`);
+      this.closeConnection(connection);
+    }
+  }
+
+  private handleConnectionError(connection: TCPConnection, error: Error): void {
+    connection.isActive = false;
+    this.emit('connection-error', { nodeId: connection.nodeId, error });
+    this.closeConnection(connection);
+  }
+
+  private handleConnectionClose(connection: TCPConnection): void {
+    connection.isActive = false;
+    this.connections.delete(connection.nodeId.id);
+    this.emit('connection-closed', connection.nodeId);
+  }
+
+  private handleConnectionTimeout(connection: TCPConnection): void {
+    this.log(`Connection timeout for ${connection.nodeId.id}`);
+    this.closeConnection(connection);
+  }
+
+  private handleServerError(error: Error): void {
+    this.emit('server-error', error);
+    this.log(`TCP server error: ${error.message}`);
+  }
+
+  private async closeConnection(connection: TCPConnection): Promise<void> {
+    if (!connection.socket.destroyed) {
+      connection.socket.destroy();
+    }
+    this.connections.delete(connection.nodeId.id);
+  }
+
+  private startKeepAlive(): void {
+    this.keepAliveTimer = setInterval(() => {
+      const now = Date.now();
+      const staleConnections = Array.from(this.connections.values())
+        .filter(conn => 
+          conn.isActive && 
+          (now - conn.lastActivity) > this.options.keepAliveInterval * 2
+        );
+
+      staleConnections.forEach(conn => {
+        this.log(`Closing stale connection to ${conn.nodeId.id}`);
+        this.closeConnection(conn);
+      });
+    }, this.options.keepAliveInterval);
+    
+    // Unref the timer to prevent hanging in tests
+    this.keepAliveTimer?.unref();
+  }
+
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = undefined;
+    }
+  }
+
+  private serializeMessage(message: Message): Buffer {
+    // Simple JSON serialization for now
+    return Buffer.from(JSON.stringify(message), 'utf8');
+  }
+
+  private deserializeMessage(buffer: Buffer): Message {
+    // Simple JSON deserialization for now
+    return JSON.parse(buffer.toString('utf8'));
+  }
+
+  getStats(): {
+    isStarted: boolean;
+    activeConnections: number;
+    totalConnections: number;
+    port: number;
+    host: string;
+  } {
+    return {
+      isStarted: this.isStarted,
+      activeConnections: Array.from(this.connections.values()).filter(c => c.isActive).length,
+      totalConnections: this.connections.size,
+      port: this.options.port,
+      host: this.options.host
+    };
+  }
+
+  private log(message: string): void {
+    if (this.options.enableLogging) {
+      console.log(`[TCPAdapter:${this.nodeId.id}] ${message}`);
+    }
   }
 }

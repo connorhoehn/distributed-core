@@ -2,15 +2,27 @@ import { KeyManager } from '../../../src/identity/KeyManager';
 
 describe('KeyManager Unit Tests', () => {
   let keyManager: KeyManager;
+  let sharedRSAKeyManager: KeyManager; // Reuse expensive RSA keys
+
+  beforeAll(() => {
+    // Generate expensive RSA keys once for all tests
+    sharedRSAKeyManager = new KeyManager({ enableLogging: false });
+  });
 
   beforeEach(() => {
-    keyManager = new KeyManager({ enableLogging: false });
+    // Use fast EC keys for most tests by default
+    keyManager = new KeyManager({ 
+      algorithm: 'ec', 
+      curve: 'secp256k1', 
+      enableLogging: false 
+    });
   });
 
   describe('Key Generation and Management', () => {
     it('should generate RSA key pair by default', () => {
-      const publicKey = keyManager.getPublicKey();
-      const privateKey = keyManager.getPrivateKey();
+      // Use the shared RSA instance instead of creating new one
+      const publicKey = sharedRSAKeyManager.getPublicKey();
+      const privateKey = sharedRSAKeyManager.getPrivateKey();
       
       expect(publicKey).toContain('-----BEGIN PUBLIC KEY-----');
       expect(publicKey).toContain('-----END PUBLIC KEY-----');
@@ -88,18 +100,13 @@ describe('KeyManager Unit Tests', () => {
 
     it('should reject signatures from wrong public key', () => {
       const message = 'Hello, cluster!';
-      // Use fast EC keys for the other KeyManager to improve performance
-      const otherKeyManager = new KeyManager({ 
-        algorithm: 'ec', 
-        curve: 'secp256k1', 
-        enableLogging: false 
-      });
+      // Use the shared RSA KeyManager as the "other" key manager for this test
       
       const signatureResult = keyManager.sign(message);
       const verificationResult = KeyManager.verify(
         message, 
         signatureResult.signature, 
-        otherKeyManager.getPublicKey()
+        sharedRSAKeyManager.getPublicKey()
       );
       
       expect(verificationResult.isValid).toBe(false);
@@ -207,13 +214,8 @@ describe('KeyManager Unit Tests', () => {
       const nodeId = 'test-node-1';
       const publicKey = keyManager.getPublicKey();
       
-      // Use fast EC keys for the other KeyManager to improve performance
-      const otherKeyManager = new KeyManager({ 
-        algorithm: 'ec', 
-        curve: 'secp256k1', 
-        enableLogging: false 
-      });
-      const wrongPublicKey = otherKeyManager.getPublicKey();
+      // Use the shared RSA KeyManager's public key as the "wrong" key
+      const wrongPublicKey = sharedRSAKeyManager.getPublicKey();
       
       keyManager.pinCertificate(nodeId, publicKey);
       
