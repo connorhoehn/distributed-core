@@ -3,6 +3,7 @@ import { ClusterManager } from '../ClusterManager';
 import { ClusterState, LogicalService, PerformanceMetrics, StateConflict, VectorClock } from '../introspection/ClusterIntrospection';
 import { ClusterHealth, ClusterTopology, ClusterMetadata } from '../types';
 import { Message, MessageType } from '../../types';
+import { StateReconciler, ResolutionResult } from '../reconciliation/StateReconciler';
 
 /**
  * Aggregated cluster state from multiple nodes
@@ -41,6 +42,9 @@ export interface StateAggregatorConfig {
   enableConflictDetection: boolean;
   autoResolve: boolean;
   conflictDetectionInterval: number;
+  // Resolution configuration
+  enableResolution: boolean;
+  resolutionTimeout: number;
 }
 
 /**
@@ -52,6 +56,7 @@ export class StateAggregator extends EventEmitter {
   private config: StateAggregatorConfig;
   private lastAggregatedState?: AggregatedClusterState;
   private aggregationTimer?: NodeJS.Timeout;
+  private reconciler: StateReconciler;
   private pendingCollections = new Map<string, {
     resolve: (state: ClusterState) => void;
     reject: (error: Error) => void;
@@ -73,8 +78,15 @@ export class StateAggregator extends EventEmitter {
       enableConflictDetection: false, // Start disabled by default
       autoResolve: false,
       conflictDetectionInterval: 60000, // Check for conflicts every minute
+      enableResolution: false, // Start disabled by default
+      resolutionTimeout: 30000, // 30 seconds for resolution
       ...config
     };
+
+    this.reconciler = new StateReconciler({
+      enableAutoResolution: this.config.autoResolve,
+      requireConfirmation: !this.config.autoResolve
+    });
 
     this.setupMessageHandling();
   }
@@ -145,6 +157,15 @@ export class StateAggregator extends EventEmitter {
         const conflicts = await this.detectConflicts(aggregatedState);
         if (conflicts.length > 0) {
           this.emit('conflicts-detected', conflicts);
+          
+          // Auto-resolve if enabled
+          if (this.config.autoResolve && this.config.enableResolution) {
+            try {
+              await this.resolveConflicts(conflicts, aggregatedState);
+            } catch (error) {
+              this.emit('auto-resolution-failed', { conflicts, error });
+            }
+          }
         }
       } catch (error) {
         this.emit('conflict-detection-error', error);
@@ -607,7 +628,92 @@ export class StateAggregator extends EventEmitter {
   /**
    * Configure conflict detection settings
    */
-  configureConflictDetection(config: Partial<Pick<StateAggregatorConfig, 'enableConflictDetection' | 'autoResolve' | 'conflictDetectionInterval'>>): void {
+  configureConflictDetection(config: Partial<Pick<StateAggregatorConfig, 'enableConflictDetection' | 'autoResolve' | 'conflictDetectionInterval' | 'enableResolution' | 'resolutionTimeout'>>): void {
     this.config = { ...this.config, ...config };
+    
+    // Update reconciler configuration
+    this.reconciler.updateConfig({
+      enableAutoResolution: this.config.autoResolve,
+      requireConfirmation: !this.config.autoResolve
+    });
+  }
+
+  /**
+   * Resolve conflicts using the integrated reconciler
+   */
+  async resolveConflicts(
+    conflicts: StateConflict[], 
+    aggregatedState?: AggregatedClusterState
+  ): Promise<ResolutionResult[]> {
+    if (!this.config.enableResolution) {
+      throw new Error('Conflict resolution is disabled');
+    }
+
+    try {
+      const results = await this.reconciler.resolveConflicts(conflicts);
+      
+      if (results.length > 0) {
+        // Apply resolutions to the aggregated state if available
+        if (aggregatedState) {
+          const allServices = Array.from(aggregatedState.nodeStates.values())
+            .flatMap(state => state.logicalServices);
+          
+          const resolvedServices = this.reconciler.applyResolutions(allServices, results);
+          
+          // Update the aggregated state with resolved services
+          aggregatedState.aggregatedServices = this.deduplicateServices(resolvedServices);
+          aggregatedState.timestamp = Date.now();
+        }
+        
+        this.emit('conflicts-resolved', results);
+      }
+      
+      return results;
+    } catch (error) {
+      this.emit('resolution-error', { conflicts, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Preview what conflict resolution would do without applying changes
+   */
+  previewConflictResolution(conflicts: StateConflict[]) {
+    return this.reconciler.previewResolution(conflicts);
+  }
+
+  /**
+   * Manually resolve a specific conflict with a chosen strategy
+   */
+  async manualResolveConflict(
+    conflict: StateConflict, 
+    strategy: string
+  ): Promise<ResolutionResult> {
+    if (!this.config.enableResolution) {
+      throw new Error('Conflict resolution is disabled');
+    }
+
+    try {
+      const result = await this.reconciler.resolveConflict(conflict, strategy as any);
+      this.emit('manual-resolution', result);
+      return result;
+    } catch (error) {
+      this.emit('manual-resolution-failed', { conflict, strategy, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Get the integrated state reconciler for direct access
+   */
+  getReconciler(): StateReconciler {
+    return this.reconciler;
+  }
+
+  /**
+   * Get resolution history for auditing
+   */
+  getResolutionHistory(limit?: number) {
+    return this.reconciler.getResolutionHistory(limit);
   }
 }
