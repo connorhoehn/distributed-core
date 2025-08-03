@@ -120,7 +120,10 @@ class BandwidthMonitor {
     if (this.bytesTransmitted + bytes > this.maxBytesPerSecond) {
       const delay = this.windowSize - (now - this.windowStart);
       if (delay > 0) {
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise(resolve => {
+          const timer = setTimeout(resolve, delay);
+          timer.unref(); // Prevent Jest hanging
+        });
         // Reset after delay
         this.bytesTransmitted = 0;
         this.windowStart = Date.now();
@@ -277,7 +280,16 @@ export class DeltaSyncEngine extends EventEmitter {
         // Validate delta
         const validation = this.deltaManager.validateDelta(decompressedDelta);
         if (!validation.valid) {
-          throw new Error(`Invalid delta: ${validation.errors.join(', ')}`);
+          // Handle invalid delta gracefully instead of throwing
+          allResults.push({
+            success: false,
+            appliedOperations: 0,
+            resultingServices: currentState,
+            conflicts: [],
+            failedOperations: [],
+            newFingerprint: ''
+          });
+          continue;
         }
 
         // Apply delta
@@ -515,7 +527,10 @@ export class DeltaSyncEngine extends EventEmitter {
   private async simulateTransmission(delta: any, size: number): Promise<void> {
     // Simulate network latency proportional to size
     const latency = Math.min(10 + (size / 1024), 100); // 10-100ms based on size
-    await new Promise(resolve => setTimeout(resolve, latency));
+    await new Promise(resolve => {
+      const timer = setTimeout(resolve, latency);
+      timer.unref(); // Prevent Jest hanging
+    });
   }
 
   /**

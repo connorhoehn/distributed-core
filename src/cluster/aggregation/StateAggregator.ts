@@ -101,6 +101,9 @@ export class StateAggregator extends EventEmitter {
       });
     }, this.config.aggregationInterval);
 
+    // Prevent Jest from hanging on this timer
+    this.aggregationTimer.unref();
+
     this.emit('started');
   }
 
@@ -113,12 +116,15 @@ export class StateAggregator extends EventEmitter {
       this.aggregationTimer = undefined;
     }
 
-    // Cancel pending collections
+    // Cancel pending collections and clear their timeouts
     for (const [messageId, pending] of this.pendingCollections) {
       clearTimeout(pending.timeout);
       pending.reject(new Error('StateAggregator stopped'));
     }
     this.pendingCollections.clear();
+
+    // Clean up any event listeners to prevent memory leaks
+    this.removeAllListeners();
 
     this.emit('stopped');
   }
@@ -269,6 +275,9 @@ export class StateAggregator extends EventEmitter {
         this.pendingCollections.delete(messageId);
         reject(new Error(`Timeout collecting state from node ${nodeId}`));
       }, this.config.collectionTimeout);
+
+      // Prevent Jest from hanging on this timeout
+      timeout.unref();
 
       this.pendingCollections.set(messageId, { resolve, reject, timeout });
 

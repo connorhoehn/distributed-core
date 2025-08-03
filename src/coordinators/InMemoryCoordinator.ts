@@ -194,16 +194,19 @@ export class InMemoryCoordinator extends EventEmitter implements IClusterCoordin
     this.heartbeatInterval = setInterval(() => {
       this.updateHeartbeat();
     }, this.config.heartbeatIntervalMs);
+    this.heartbeatInterval.unref(); // Prevent Jest hanging
 
     // Start lease renewal
     this.leaseRenewalInterval = setInterval(() => {
       this.renewLeases();
     }, this.config.leaseRenewalIntervalMs);
+    this.leaseRenewalInterval.unref(); // Prevent Jest hanging
 
     // Clean up expired leases periodically
     this.leaseCleanupInterval = setInterval(() => {
       this.cleanupExpiredLeases();
     }, this.config.leaseTimeoutMs / 2);
+    this.leaseCleanupInterval.unref(); // Prevent Jest hanging
   }
 
   async stop(): Promise<void> {

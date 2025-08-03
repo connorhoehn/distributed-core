@@ -15,11 +15,4 @@ module.exports = {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  testTimeout: 30000,
-  // Force exit to prevent hanging from any unref'd timers
-  forceExit: true,
-  // Detect open handles
-  detectOpenHandles: true,
-  // Verbose for debugging
-  verbose: true
 };

@@ -1,4 +1,4 @@
-import WebSocket from 'ws';
+import WebSocket = require('ws');
 import { EventEmitter } from 'events';
 import * as http from 'http';
 import { Transport } from '../Transport';
@@ -23,6 +23,7 @@ interface WebSocketAdapterOptions {
   pongTimeout?: number;
   upgradeTimeout?: number;
   enableCompression?: boolean;
+  enableLogging?: boolean;
 }
 
 /**
@@ -50,20 +51,22 @@ export class WebSocketAdapter extends Transport {
       pingInterval: options.pingInterval || 30000, // 30 seconds
       pongTimeout: options.pongTimeout || 5000, // 5 seconds
       upgradeTimeout: options.upgradeTimeout || 10000, // 10 seconds
-      enableCompression: options.enableCompression !== false
+      enableCompression: options.enableCompression !== false,
+      enableLogging: options.enableLogging !== false
     };
 
     this.circuitBreaker = new CircuitBreaker({
       name: `websocket-adapter-${nodeId.id}`,
       failureThreshold: 5,
-      timeout: 15000
+      timeout: 15000,
+      enableLogging: this.options.enableLogging
     });
 
     this.retryManager = new RetryManager({
       maxRetries: 5,
       baseDelay: 2000,
       maxDelay: 30000,
-      enableLogging: false
+      enableLogging: this.options.enableLogging
     });
 
     this.setupEventHandlers();
@@ -97,7 +100,9 @@ export class WebSocketAdapter extends Transport {
         // Start HTTP server
         await new Promise<void>((resolve, reject) => {
           this.server!.listen(this.options.port, this.options.host, () => {
-            this.log(`WebSocket server listening on ${this.options.host}:${this.options.port}`);
+            if (this.options.enableLogging) {
+              this.log(`WebSocket server listening on ${this.options.host}:${this.options.port}`);
+            }
             resolve();
           });
           this.server!.on('error', reject);
@@ -155,7 +160,7 @@ export class WebSocketAdapter extends Transport {
       throw new Error('WebSocket adapter not started');
     }
 
-    const gossipMessage = message as GossipMessage;
+    const gossipMessage = message as unknown as GossipMessage;
     
     if (gossipMessage.isBroadcast()) {
       await this.broadcast(gossipMessage);
@@ -251,6 +256,7 @@ export class WebSocketAdapter extends Transport {
         ws.terminate();
         reject(new Error(`Connection timeout to ${url}`));
       }, this.options.upgradeTimeout);
+      timeout.unref(); // Prevent Jest hanging
 
       ws.on('open', () => {
         clearTimeout(timeout);
@@ -270,7 +276,9 @@ export class WebSocketAdapter extends Transport {
 
   private handleConnection(ws: WebSocket, request: http.IncomingMessage): void {
     if (this.connections.size >= this.options.maxConnections) {
-      this.log(`Max connections reached, rejecting connection from ${request.socket.remoteAddress}`);
+      if (this.options.enableLogging) {
+        this.log(`Max connections reached, rejecting connection from ${request.socket.remoteAddress}`);
+      }
       ws.close(1013, 'Server overloaded');
       return;
     }
@@ -319,7 +327,7 @@ export class WebSocketAdapter extends Transport {
     this.closeConnection(connection);
   }
 
-  private handleConnectionClose(connection: WebSocketConnection, code: number, reason: string): void {
+  private handleConnectionClose(connection: WebSocketConnection, code: number, reason: Buffer): void {
     connection.isActive = false;
     this.connections.delete(connection.nodeId.id);
     this.emit('connection-closed', { 
@@ -336,7 +344,9 @@ export class WebSocketAdapter extends Transport {
 
   private handleServerError(error: Error): void {
     this.emit('server-error', error);
-    this.log(`WebSocket server error: ${error.message}`);
+    if (this.options.enableLogging) {
+      this.log(`WebSocket server error: ${error.message}`);
+    }
   }
 
   private async closeConnection(connection: WebSocketConnection): Promise<void> {
@@ -363,7 +373,9 @@ export class WebSocketAdapter extends Transport {
         
         // Check if connection is stale
         if (!connection.isAlive) {
-          this.log(`Terminating stale connection to ${connection.nodeId.id}`);
+          if (this.options.enableLogging) {
+            this.log(`Terminating stale connection to ${connection.nodeId.id}`);
+          }
           connection.ws.terminate();
           return;
         }
@@ -427,6 +439,8 @@ export class WebSocketAdapter extends Transport {
   }
 
   private log(message: string): void {
-    console.log(`[WebSocketAdapter:${this.nodeId.id}] ${message}`);
+    if (this.options.enableLogging) {
+      console.log(`[WebSocketAdapter:${this.nodeId.id}] ${message}`);
+    }
   }
 }

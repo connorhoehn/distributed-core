@@ -36,7 +36,7 @@
  *    - Allow external adapters (WebSocket, gRPC, in-memory) to call routeMessage().
  *    - Integrate session-level connection tracking and stream management.
  * 
- * 📡 Phase 4 - Cluster Coordination and Orchestration
+ * 📡 Cluster Coordination and Orchestration
  *    - Participate in leader election, cluster health reporting, and sharded task assignment.
  *    - React to changes in membership or partitions.
  * 

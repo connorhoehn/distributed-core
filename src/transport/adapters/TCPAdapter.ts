@@ -78,6 +78,12 @@ export class TCPAdapter extends Transport {
   async start(): Promise<void> {
     if (this.isStarted) return;
 
+    // Emit deprecation warning
+    process.emitWarning(
+      'Calling start() is no longer necessary. It can be safely omitted.',
+      'DeprecationWarning'
+    );
+
     try {
       await this.circuitBreaker.execute(async () => {
         this.server = net.createServer({
@@ -139,7 +145,8 @@ export class TCPAdapter extends Transport {
 
   async send(message: Message, target: NodeId): Promise<void> {
     if (!this.isStarted) {
-      throw new Error('TCP adapter not started');
+      // Auto-start if not already started
+      await this.start();
     }
 
     const operationId = `send-${target.id}-${Date.now()}`;

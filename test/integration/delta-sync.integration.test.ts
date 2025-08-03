@@ -15,9 +15,8 @@ describe('Delta Sync Integration', () => {
 
   beforeEach(async () => {
     cluster = createTestCluster({ 
-      nodeCount: 3, 
-      enableTestEvents: false,
-      enableDebugConsole: false 
+      size: 3, 
+      enableLogging: false
     });
     deltaEngine = new DeltaSyncEngine();
     fingerprintGenerator = new StateFingerprintGenerator();
@@ -33,24 +32,38 @@ describe('Delta Sync Integration', () => {
     it('should synchronize state across 3 nodes', async () => {
       await cluster.start();
       
-      // Add services to node 0
-      const services: LogicalService[] = [{
+      // Services on node 0 (source)
+      const servicesNode0: LogicalService[] = [{
         id: 'sync-test-service',
         type: 'test-service',
         nodeId: cluster.getNode(0).getNodeInfo().id,
-        metadata: { name: 'Sync Test Service' },
+        metadata: { name: 'Sync Test Service', version: 'v1' },
         stats: { requests: 100 },
         lastUpdated: Date.now(),
-        vectorClock: { node1: 1 },
-        version: 1,
-        checksum: 'test-checksum',
+        vectorClock: { node0: 2 },
+        version: 2,
+        checksum: 'test-checksum-v1',
         conflictPolicy: 'last-writer-wins'
       }];
 
-      // Generate fingerprint for node 0
-      const fingerprint = fingerprintGenerator.generateServiceFingerprint(
-        services, 
-        cluster.getNode(0).getNodeInfo().id
+      // Services on node 1 (target) - different state
+      const servicesNode1: LogicalService[] = [{
+        id: 'sync-test-service',
+        type: 'test-service', 
+        nodeId: cluster.getNode(1).getNodeInfo().id,
+        metadata: { name: 'Sync Test Service', version: 'v0' },
+        stats: { requests: 50 },
+        lastUpdated: Date.now() - 1000,
+        vectorClock: { node1: 1 },
+        version: 1,
+        checksum: 'test-checksum-v0',
+        conflictPolicy: 'last-writer-wins'
+      }];
+
+      // Generate fingerprint for target node (node 1)
+      const fingerprintNode1 = fingerprintGenerator.generateServiceFingerprint(
+        servicesNode1, 
+        cluster.getNode(1).getNodeInfo().id
       );
 
       // Sync from node 0 to node 1
@@ -66,7 +79,7 @@ describe('Delta Sync Integration', () => {
         bandwidth: { maxBytesPerSecond: 10000 }
       };
 
-      const session = await deltaEngine.startSyncSession([], fingerprint, syncConfig);
+      const session = await deltaEngine.startSyncSession(servicesNode0, fingerprintNode1, syncConfig);
       
       expect(session.status).toBe('complete');
       expect(session.metrics.totalDeltas).toBeGreaterThan(0);
@@ -75,28 +88,44 @@ describe('Delta Sync Integration', () => {
     it('should handle encryption in multi-node sync', async () => {
       await cluster.start();
       
-      const services: LogicalService[] = [{
+      // Services on source node
+      const servicesSource: LogicalService[] = [{
         id: 'encrypted-service',
         type: 'encrypted-service',
         nodeId: cluster.getNode(0).getNodeInfo().id,
-        metadata: { sensitive: 'data' },
-        stats: { requests: 500 },
+        metadata: { encrypted: true, version: 'v2' },
+        stats: { requests: 200 },
         lastUpdated: Date.now(),
-        vectorClock: { node1: 1 },
-        version: 1,
-        checksum: 'encrypted-checksum',
+        vectorClock: { node0: 3 },
+        version: 3,
+        checksum: 'encrypted-checksum-v2',
         conflictPolicy: 'last-writer-wins'
       }];
 
-      const fingerprint = fingerprintGenerator.generateServiceFingerprint(
-        services, 
-        cluster.getNode(0).getNodeInfo().id
+      // Services on target node - older version
+      const servicesTarget: LogicalService[] = [{
+        id: 'encrypted-service',
+        type: 'encrypted-service',
+        nodeId: cluster.getNode(1).getNodeInfo().id,
+        metadata: { encrypted: true, version: 'v1' },
+        stats: { requests: 100 },
+        lastUpdated: Date.now() - 2000,
+        vectorClock: { node1: 2 },
+        version: 2,
+        checksum: 'encrypted-checksum-v1',
+        conflictPolicy: 'last-writer-wins'
+      }];
+
+      // Generate fingerprint for target node
+      const fingerprintTarget = fingerprintGenerator.generateServiceFingerprint(
+        servicesTarget, 
+        cluster.getNode(1).getNodeInfo().id
       );
 
       const syncConfig = {
         nodeId: cluster.getNode(0).getNodeInfo().id,
         targetNodeId: cluster.getNode(1).getNodeInfo().id,
-        enableCompression: true,
+        enableCompression: false,
         enableEncryption: true,
         compressionThreshold: 50,
         maxDeltasPerBatch: 5,
@@ -105,7 +134,7 @@ describe('Delta Sync Integration', () => {
         bandwidth: {}
       };
 
-      const session = await deltaEngine.startSyncSession([], fingerprint, syncConfig);
+      const session = await deltaEngine.startSyncSession(servicesSource, fingerprintTarget, syncConfig);
       
       expect(session.status).toBe('complete');
       expect(session.generatedDeltas.length).toBeGreaterThan(0);

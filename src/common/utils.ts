@@ -11,7 +11,10 @@ export function createId(): string {
  * Delay utility for async operations
  */
 export function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref(); // Prevent Jest hanging
+  });
 }
 
 /**

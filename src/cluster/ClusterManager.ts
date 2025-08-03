@@ -180,6 +180,11 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     // Stop communication first
     this.communication.stopGossipTimer();
 
+    // Stop failure detection
+    if (this.failureDetector) {
+      this.failureDetector.stop();
+    }
+
     // Clean up introspection timers and listeners
     if (this.introspection) {
       this.introspection.destroy();
@@ -187,6 +192,9 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
 
     // Use lifecycle module for shutdown
     await this.lifecycle.stop();
+
+    // Remove all event listeners to prevent memory leaks
+    this.removeAllListeners();
 
     this.isStarted = false;
     this.emit('stopped');

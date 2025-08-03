@@ -1,6 +1,5 @@
 /**
  * Multi-Node Delta Synchronization Integration Test
- * Simple, focused test for Phase 4: End-to-End Integration Testing
  */
 
 import { 
@@ -75,8 +74,7 @@ describe('Multi-Node Delta Synchronization', () => {
     const nodeAServices = createServices(3, 'node-a', 'web-server');
     const nodeBServices = createServices(2, 'node-b', 'database');
 
-    console.log('Node A services:', nodeAServices.map(s => `${s.id} (${s.type})`));
-    console.log('Node B services:', nodeBServices.map(s => `${s.id} (${s.type})`));
+    // Silent operation - no logging in tests
 
     // Step 1: Generate fingerprints for both nodes
     const fingerprintA = fingerprintGenerator.generateServiceFingerprint(nodeAServices, 'node-a');
@@ -117,12 +115,12 @@ describe('Multi-Node Delta Synchronization', () => {
     const fullStateSize = Buffer.byteLength(JSON.stringify([...nodeAServices, ...nodeBServices]), 'utf8');
     const bandwidthSavings = ((fullStateSize - deltaSize) / fullStateSize) * 100;
 
-    console.log(`Bandwidth efficiency - Full state: ${fullStateSize} bytes, Delta: ${deltaSize} bytes, Savings: ${bandwidthSavings.toFixed(1)}%`);
+    // Silent operation - no logging in tests
     
     // Delta should be more efficient than sending full state
     expect(deltaSize).toBeLessThan(fullStateSize);
 
-    console.log('✅ Multi-node delta synchronization test completed successfully');
+    // Test completed successfully - no logging needed
   });
 
   it('should handle service updates between synchronized nodes', async () => {
@@ -158,6 +156,6 @@ describe('Multi-Node Delta Synchronization', () => {
     const updatedServiceInA = syncResult.resultingServices.find(s => s.id === updatedService.id);
     expect(updatedServiceInA?.metadata.version).toBe('1.1.0');
 
-    console.log('✅ Service update synchronization test completed successfully');
+    // Test completed successfully - no logging needed
   });
 });

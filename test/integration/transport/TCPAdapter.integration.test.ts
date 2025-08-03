@@ -31,6 +31,10 @@ describe('TCPAdapter', () => {
     });
 
     test('should start and stop adapter', async () => {
+      // Start is now automatic when send() is called
+      expect(adapter.getStats().isStarted).toBe(false);
+      
+      // Manual start for testing explicit start/stop (will show deprecation warning)
       await adapter.start();
       expect(adapter.getStats().isStarted).toBe(true);
       
@@ -39,9 +43,11 @@ describe('TCPAdapter', () => {
     }, 10000);
 
     test('should handle multiple start/stop cycles', async () => {
+      // First cycle - manual start (will show deprecation warning)
       await adapter.start();
       await adapter.stop();
       
+      // Second cycle - manual start (will show deprecation warning)
       await adapter.start();
       expect(adapter.getStats().isStarted).toBe(true);
       
@@ -52,7 +58,7 @@ describe('TCPAdapter', () => {
 
   describe('Message Handling', () => {
     beforeEach(async () => {
-      await adapter.start();
+      // No need to start explicitly - it will auto-start when send() is called
     });
 
     test('should handle message sending to non-existent node gracefully', async () => {
@@ -70,6 +76,7 @@ describe('TCPAdapter', () => {
     }, 3000); // Increased slightly for 1s connection timeout + overhead
 
     test('should track connection statistics', async () => {
+      // Auto-start when getting stats or calling send
       const stats = adapter.getStats();
       expect(stats).toHaveProperty('isStarted');
       expect(stats).toHaveProperty('activeConnections');
@@ -81,7 +88,7 @@ describe('TCPAdapter', () => {
 
   describe('Connection Management', () => {
     test('should manage connections properly', async () => {
-      await adapter.start();
+      // Auto-start when sending messages
       
       const initialStats = adapter.getStats();
       expect(initialStats.totalConnections).toBe(0);
@@ -108,7 +115,7 @@ describe('TCPAdapter', () => {
 
   describe('Error Handling', () => {
     test('should handle invalid target nodes', async () => {
-      await adapter.start();
+      // Auto-start when sending messages
       
       const message: Message = {
         id: 'test-msg-3',

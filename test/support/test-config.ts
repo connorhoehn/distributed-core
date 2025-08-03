@@ -30,28 +30,30 @@ export const TestConfig = {
       maxShutdownWait: 200      // 200ms max shutdown wait for tests
     },
     logging: {
-      enableDebugLogs: false    // Disable debug logs for clean output
+      enableDebugLogs: false,   // Disable debug logs for clean output
+      suppressSkipMessages: true // Suppress test skip console messages for clean output
     }
   },
 
   // Medium timeouts for integration tests
   integration: {
     timeouts: {
-      test: 15000,          // 15s max per test
-      setup: 3000,          // 3s for setup
-      teardown: 2000        // 2s for teardown
+      test: 8000,           // 8s max per test (reduced from 10s)
+      setup: 1500,          // 1.5s for setup (reduced from 2s)
+      teardown: 1000        // 1s for teardown (reduced from 1.5s)
     },
     cluster: {
-      gossipInterval: 200,      // 200ms gossip
-      joinTimeout: 2000,        // 2s join timeout
-      failureTimeout: 800,      // 800ms to SUSPECT
-      deadTimeout: 1500,        // 1.5s to DEAD
-      heartbeatInterval: 200,   // 200ms heartbeats
-      shutdownTimeout: 1000,    // 1s shutdown timeout for integration
-      maxShutdownWait: 500      // 500ms max shutdown wait for integration
+      gossipInterval: 50,       // 50ms gossip (reduced from 100ms - more aggressive)
+      joinTimeout: 800,         // 800ms join timeout (reduced from 1.5s)
+      failureTimeout: 300,      // 300ms to SUSPECT (reduced from 600ms)
+      deadTimeout: 600,         // 600ms to DEAD (reduced from 1.2s)
+      heartbeatInterval: 50,    // 50ms heartbeats (reduced from 100ms)
+      shutdownTimeout: 500,     // 500ms shutdown timeout (reduced from 800ms)
+      maxShutdownWait: 200      // 200ms max shutdown wait (reduced from 400ms)
     },
     logging: {
-      enableDebugLogs: false    // Disable debug logs for clean output
+      enableDebugLogs: false,   // Disable debug logs for clean output
+      suppressSkipMessages: true  // Suppress skip messages for cleaner test output
     }
   },
 
@@ -72,7 +74,8 @@ export const TestConfig = {
       maxShutdownWait: 1000     // 1s max shutdown wait for scenarios
     },
     logging: {
-      enableDebugLogs: true     // Enable debug logs for detailed analysis
+      enableDebugLogs: true,     // Enable debug logs for detailed analysis
+      suppressSkipMessages: false // Show skip messages for scenario debugging
     }
   },
 
@@ -93,7 +96,8 @@ export const TestConfig = {
       maxShutdownWait: 5000     // 5s max shutdown wait for production
     },
     logging: {
-      enableDebugLogs: true     // Enable debug logs for production testing
+      enableDebugLogs: true,    // Enable debug logs for production testing
+      suppressSkipMessages: false // Show skip messages for production debugging
     }
   }
 };

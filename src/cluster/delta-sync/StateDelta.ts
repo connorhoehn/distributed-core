@@ -79,7 +79,7 @@ export interface DeltaApplicationResult {
  */
 export interface ServiceConflict {
   serviceId: string;
-  conflictType: 'version' | 'causality' | 'missing-dependency';
+  conflictType: 'version' | 'causality' | 'missing-dependency' | 'already-deleted';
   expectedVersion?: number;
   actualVersion?: number;
   description: string;
@@ -412,12 +412,15 @@ export class StateDeltaManager {
 
       case 'delete':
         if (!serviceMap.has(operation.serviceId)) {
+          // Service already deleted or never existed - this is not an error in distributed systems
+          // Just log as a warning and continue
           conflicts.push({
             serviceId: operation.serviceId,
-            conflictType: 'missing-dependency',
-            description: 'Service does not exist for deletion'
+            conflictType: 'already-deleted',
+            description: 'Service does not exist for deletion (already deleted or never existed)'
           });
-          return { success: false, conflicts };
+          // Continue processing rather than failing
+          break;
         }
 
         serviceMap.delete(operation.serviceId);

@@ -106,7 +106,8 @@ export class RetryManager extends EventEmitter {
       if (operationId) {
         this.idempotencyCache.set(operationId, result);
         // Clean up cache after some time
-        setTimeout(() => this.idempotencyCache.delete(operationId), 300000); // 5 minutes
+        const cleanupTimer = setTimeout(() => this.idempotencyCache.delete(operationId), 300000); // 5 minutes
+        cleanupTimer.unref(); // Prevent Jest hanging
       }
 
       this.activeRetries.delete(id);
@@ -450,7 +451,10 @@ export class RetryManager extends EventEmitter {
    * Sleep for specified milliseconds
    */
   private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(resolve => {
+      const timer = setTimeout(resolve, ms);
+      timer.unref(); // Prevent Jest hanging
+    });
   }
 
   /**

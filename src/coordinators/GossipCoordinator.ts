@@ -226,6 +226,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
     this.leaseRenewalInterval = setInterval(() => {
       this.renewLeases();
     }, this.config.leaseRenewalIntervalMs);
+    this.leaseRenewalInterval.unref(); // Prevent Jest hanging
   }
 
   async stop(): Promise<void> {
@@ -265,7 +266,10 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
 
   private async waitForMembership(): Promise<void> {
     // Wait a bit for initial gossip to propagate
-    await new Promise(resolve => setTimeout(resolve, this.config.gossipInterval * 2));
+    await new Promise(resolve => {
+      const timer = setTimeout(resolve, this.config.gossipInterval * 2);
+      timer.unref(); // Prevent Jest hanging
+    });
   }
 
   private async broadcastLeaseUpdate(lease: RangeLease): Promise<void> {

@@ -126,6 +126,9 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
       this.emit('state-changed', this.getCurrentState());
     }, 5000);
 
+    // Prevent Jest from hanging on this timer
+    this.metricsInterval.unref();
+
     // Listen for cluster events through the membership table
     if (this.context) {
       this.context.membership.on('member-joined', () => {
