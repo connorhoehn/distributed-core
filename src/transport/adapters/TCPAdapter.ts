@@ -171,6 +171,10 @@ export class TCPAdapter extends Transport {
       .map(conn => conn.nodeId);
   }
 
+  getLocalNodeInfo(): NodeId {
+    return this.nodeId;
+  }
+
   private async sendMessage(connection: TCPConnection, message: Message): Promise<void> {
     if (!connection.isActive) {
       throw new Error('Connection is not active');

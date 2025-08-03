@@ -24,8 +24,8 @@ describe('Transport Layer E2E Integration', () => {
   let encryption: Encryption;
   let messageAuth: MessageAuth;
 
-  const node1Info = { id: 'node-1', address: '127.0.0.1', port: 8001 };
-  const node2Info = { id: 'node-2', address: '127.0.0.1', port: 8002 };
+  const node1Info = { id: 'node-1', address: '127.0.0.1', port: 4253 };
+  const node2Info = { id: 'node-2', address: '127.0.0.1', port: 4254 };
 
   beforeAll(async () => {
     // Initialize security components

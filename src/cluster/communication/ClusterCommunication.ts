@@ -67,6 +67,10 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
     for (const seedNode of seedNodes) {
       if (seedNode !== this.context.localNodeId) {
         try {
+          // Parse seed node address (format: "address:port" or just "address")
+          const [address, portStr] = seedNode.includes(':') ? seedNode.split(':') : [seedNode, '8080'];
+          const port = parseInt(portStr, 10);
+          
           const localNodeInfo = this.context.getLocalNodeInfo();
           let joinData: JoinMessage = {
             type: 'JOIN',
@@ -85,7 +89,10 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
             timestamp: Date.now()
           };
           
-          await this.context.transport.send(transportMessage, { id: seedNode, address: '', port: 0 });
+          // Create proper NodeId for the target
+          const targetNodeId = { id: `seed-${address}-${port}`, address, port };
+          
+          await this.context.transport.send(transportMessage, targetNodeId);
         } catch (error) {
           this.emit('communication-error', { 
             error: error as Error, 

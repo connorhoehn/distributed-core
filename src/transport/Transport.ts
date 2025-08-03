@@ -27,4 +27,9 @@ export abstract class Transport extends EventEmitter {
    * Get currently connected nodes
    */
   abstract getConnectedNodes(): NodeId[];
+
+  /**
+   * Get local node information
+   */
+  abstract getLocalNodeInfo(): NodeId;
 }

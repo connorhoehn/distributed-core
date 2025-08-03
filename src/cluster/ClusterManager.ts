@@ -78,11 +78,12 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     this.transport = transport;
     this.config = config;
     
-    // Create local node info
+    // Get actual transport info for local node
+    const transportInfo = transport.getLocalNodeInfo();
     const localNode = {
       id: localNodeId,
-      address: 'localhost', // Default address, should be configurable
-      port: 8080             // Default port, should be configurable
+      address: transportInfo.address,
+      port: transportInfo.port
     };
     
     this.membership = new MembershipTable(localNodeId);
@@ -204,14 +205,17 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
    * Get local node info (required by IClusterManagerContext)
    */
   getLocalNodeInfo(): NodeInfo {
+    // Get actual address and port from transport
+    const transportInfo = this.transport.getLocalNodeInfo();
+    
     return {
       id: this.localNodeId,
       status: 'ALIVE',
       lastSeen: Date.now(),
       version: this.localVersion,
       metadata: {
-        address: 'localhost',
-        port: 0,
+        address: transportInfo.address,
+        port: transportInfo.port,
         role: this.nodeMetadata.role || 'node',
         region: this.nodeMetadata.region,
         zone: this.nodeMetadata.zone,

@@ -88,6 +88,8 @@ export class MembershipTable extends EventEmitter {
     };
     this.members.set(nodeInfo.id, entry);
     this.version++;
+    this.emit('member-joined', nodeInfo);
+    this.emit('membership-updated', new Map(this.members));
   }
 
   /**

@@ -16,9 +16,9 @@ describe('Transport E2E: Distributed Node Communication Scenario', () => {
   const SCENARIO_TIMEOUT = 20000;
   
   // Test scenario: 3-node cluster with different roles
-  const coordinatorNode = { id: 'coordinator', address: '127.0.0.1', port: 9001 };
-  const workerNode1 = { id: 'worker-1', address: '127.0.0.1', port: 9002 };
-  const workerNode2 = { id: 'worker-2', address: '127.0.0.1', port: 9003 };
+  const coordinatorNode = { id: 'coordinator', address: '127.0.0.1', port: 4250 };
+  const workerNode1 = { id: 'worker-1', address: '127.0.0.1', port: 4251 };
+  const workerNode2 = { id: 'worker-2', address: '127.0.0.1', port: 4252 };
 
   let coordinator: TCPAdapter;
   let worker1: TCPAdapter;
