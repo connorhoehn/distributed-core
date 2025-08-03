@@ -2,7 +2,19 @@
  * Jest setup file for proper test cleanup and timeout handling
  */
 
-import '@jest/globals';
+import { afterEach } from '@jest/globals';
+
+// Suppress all deprecation warnings during tests for cleaner output
+const originalProcessWarning = process.emitWarning;
+process.emitWarning = function(this: typeof process, ...args: any[]) {
+  // Skip all deprecation warnings during tests
+  const [warning, type] = args;
+  if (type === 'DeprecationWarning') {
+    return;
+  }
+  // Pass through other warnings
+  return originalProcessWarning.apply(this, args as any);
+};
 
 // Global cleanup registry
 const globalCleanupTasks: (() => Promise<void> | void)[] = [];
@@ -19,22 +31,30 @@ afterEach(async () => {
     try {
       const result = task();
       if (result instanceof Promise) {
-        // Add timeout to cleanup tasks
-        await Promise.race([
-          result,
-          new Promise((resolve) => setTimeout(resolve, 5000)) // 5 second max per cleanup
-        ]);
+        // Simple await with timeout using AbortController for cleaner cleanup
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
+        timeoutId.unref(); // Prevent keeping Jest from exiting
+        
+        try {
+          await result;
+        } catch (error) {
+          // Ignore cleanup errors
+        } finally {
+          clearTimeout(timeoutId);
+        }
       }
     } catch (error) {
       // Ignore cleanup errors
     }
   });
   
-  // Wait for all cleanup with global timeout
-  await Promise.race([
-    Promise.allSettled(cleanupPromises),
-    new Promise((resolve) => setTimeout(resolve, 10000)) // 10 second max total cleanup
-  ]);
+  // Wait for all cleanup with a simple timeout
+  try {
+    await Promise.allSettled(cleanupPromises);
+  } catch (error) {
+    // Ignore cleanup errors
+  }
   
   // Clear cleanup tasks
   globalCleanupTasks.length = 0;

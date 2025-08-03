@@ -10,6 +10,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:integration": "jest --config jest.integration.config.js",
+    "test:e2e": "jest --config jest.e2e.config.js",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
