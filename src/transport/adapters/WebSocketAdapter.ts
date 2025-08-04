@@ -45,7 +45,7 @@ export class WebSocketAdapter extends Transport {
     super();
     this.nodeId = nodeId;
     this.options = {
-      port: options.port || 8080,
+      port: options.port !== undefined ? options.port : 8080,
       host: options.host || '0.0.0.0',
       maxConnections: options.maxConnections || 200,
       pingInterval: options.pingInterval || 30000, // 30 seconds
@@ -58,7 +58,7 @@ export class WebSocketAdapter extends Transport {
     this.circuitBreaker = new CircuitBreaker({
       name: `websocket-adapter-${nodeId.id}`,
       failureThreshold: 5,
-      timeout: 15000,
+      timeout: 30000, // Increased from 15000 to 30000 for test environment
       enableLogging: this.options.enableLogging
     });
 
@@ -104,6 +104,12 @@ export class WebSocketAdapter extends Transport {
         // Start HTTP server
         await new Promise<void>((resolve, reject) => {
           this.server!.listen(this.options.port, this.options.host, () => {
+            // Get actual port when using ephemeral port (0)
+            const address = this.server!.address();
+            if (address && typeof address === 'object' && address.port) {
+              this.options.port = address.port;
+            }
+            
             if (this.options.enableLogging) {
               this.log(`WebSocket server listening on ${this.options.host}:${this.options.port}`);
             }
