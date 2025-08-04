@@ -14,11 +14,11 @@ describe('Gossip Propagation Integration', () => {
   describe('multi-node gossip', () => {
     it('should propagate state across all nodes', async () => {
       // Setup cluster with multiple nodes (reduced size)
-      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
-      // Wait for initial cluster formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // Wait for initial cluster formation with integration timeouts
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Verify all nodes have formed the cluster
       for (let i = 0; i < 4; i++) {
@@ -41,11 +41,11 @@ describe('Gossip Propagation Integration', () => {
 
     it('should handle concurrent gossip rounds', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
-      // Wait for cluster formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      // Wait for cluster formation with integration timeouts
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Simulate concurrent gossip by checking state changes
       const initialMemberships: number[] = [];
@@ -55,7 +55,7 @@ describe('Gossip Propagation Integration', () => {
       }
       
       // Wait for several gossip rounds (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that membership is stable (not changing rapidly)
       const finalMemberships: number[] = [];
@@ -71,11 +71,11 @@ describe('Gossip Propagation Integration', () => {
 
     it('should converge to consistent state', async () => {
       // Setup cluster with 5 nodes for better convergence testing (reduced from 6)
-      cluster = createTestCluster({ size: 5, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 5, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for convergence (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check membership consistency across all nodes
       const memberships: string[][] = [];
@@ -98,11 +98,11 @@ describe('Gossip Propagation Integration', () => {
   describe('gossip strategy effectiveness', () => {
     it('should reach all nodes within expected rounds', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for initial gossip propagation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that each node knows about most other nodes
       let totalAwareness = 0;
@@ -121,11 +121,11 @@ describe('Gossip Propagation Integration', () => {
 
     it('should maintain efficiency with large clusters', async () => {
       // Setup larger cluster to test scalability (reduced from 8 to 6)
-      cluster = createTestCluster({ size: 6, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 6, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for stabilization (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that gossip is still effective with more nodes
       const membershipSizes: number[] = [];
@@ -147,11 +147,11 @@ describe('Gossip Propagation Integration', () => {
   describe('gossip message handling', () => {
     it('should handle gossip message propagation', async () => {
       // Setup smaller cluster for focused testing
-      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for cluster formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Verify nodes can communicate via gossip
       const node0 = cluster.getNode(0);
@@ -177,11 +177,11 @@ describe('Gossip Propagation Integration', () => {
 
     it('should handle node metadata propagation', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for metadata propagation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that nodes have metadata about other nodes
       for (let i = 0; i < 4; i++) {

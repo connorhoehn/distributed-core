@@ -6,7 +6,17 @@ describe('UDPAdapter', () => {
   const nodeA = { id: 'node-a', address: '127.0.0.1', port: 8080 };
 
   beforeEach(() => {
-    adapter = new UDPAdapter(nodeA, { port: 9008, enableLogging: false });
+    // Use fast retry settings for tests to reduce execution time
+    adapter = new UDPAdapter(nodeA, { 
+      port: 9008, 
+      enableLogging: false,
+      retryConfig: {
+        maxRetries: 2,        // Reduce from 3 to 2
+        baseDelay: 100,       // Reduce from 1000ms to 100ms
+        maxDelay: 500,        // Reduce max delay 
+        backoffFactor: 1.5    // Reduce backoff factor
+      }
+    });
   });
 
   afterEach(async () => {

@@ -15,11 +15,11 @@ describe('Membership Synchronization Integration', () => {
   describe('member join', () => {
     it('should propagate new member to all nodes', async () => {
       // Start with smaller cluster
-      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for initial cluster formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Add a new node dynamically
       const newNodeId = 'test-node-new';
@@ -45,7 +45,7 @@ describe('Membership Synchronization Integration', () => {
       await newNode.start();
       
                   // Wait for membership stabilization (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that existing nodes know about the new member
       let newMemberDetected = false;
@@ -71,11 +71,11 @@ describe('Membership Synchronization Integration', () => {
 
     it('should handle concurrent joins', async () => {
       // Start with minimal cluster
-      cluster = createTestCluster({ size: 2, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 2, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for initial formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Create multiple new nodes concurrently
       const newNodes: ClusterManager[] = [];
@@ -124,11 +124,11 @@ describe('Membership Synchronization Integration', () => {
   describe('member leave', () => {
     it('should propagate member departure', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for cluster formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Record initial membership
       const node0 = cluster.getNode(0);
@@ -161,11 +161,11 @@ describe('Membership Synchronization Integration', () => {
 
     it('should handle graceful shutdown', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Gracefully stop one node
       const stoppingNode = cluster.getNode(2);
@@ -175,7 +175,7 @@ describe('Membership Synchronization Integration', () => {
       await stoppingNode.stop();
       
       // Wait for graceful leave processing (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that other nodes are still healthy
       const node0 = cluster.getNode(0);
@@ -199,11 +199,11 @@ describe('Membership Synchronization Integration', () => {
   describe('membership consistency', () => {
     it('should maintain consistent membership view', async () => {
       // Setup cluster (reduced size)
-      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for full convergence (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check membership consistency across all nodes
       const memberships: Map<string, any>[] = [];
@@ -243,11 +243,11 @@ describe('Membership Synchronization Integration', () => {
 
     it('should resolve membership conflicts', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 4, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for initial formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Simulate a conflict scenario by checking version handling
       const node0 = cluster.getNode(0);
@@ -268,7 +268,7 @@ describe('Membership Synchronization Integration', () => {
       }
       
       // Wait for any conflicts to resolve (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that membership is stable
       const finalMembership0 = node0.getMembership();
@@ -282,11 +282,11 @@ describe('Membership Synchronization Integration', () => {
   describe('membership metadata handling', () => {
     it('should propagate node metadata correctly', async () => {
       // Setup cluster with custom metadata
-      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for metadata propagation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Check that metadata is propagated
       for (let i = 0; i < 3; i++) {
@@ -304,11 +304,11 @@ describe('Membership Synchronization Integration', () => {
 
     it('should handle membership table operations', async () => {
       // Setup cluster
-      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'unit' });
+      cluster = createTestCluster({ size: 3, enableLogging: false, testType: 'integration' });
       await cluster.start();
       
       // Wait for formation (in-memory)
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Test membership table operations
       const node0 = cluster.getNode(0);

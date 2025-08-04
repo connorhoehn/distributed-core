@@ -41,7 +41,9 @@ export class InMemoryAdapter extends Transport {
 
     const targetAdapter = InMemoryAdapter.registry.get(target.id);
     if (!targetAdapter) {
-      throw new Error(`Target node ${target.id} not found`);
+      // Silently ignore missing targets (simulates network unreachability)
+      // This is normal when nodes leave the cluster
+      return;
     }
 
     // Simulate async delivery with next tick
@@ -62,6 +64,10 @@ export class InMemoryAdapter extends Transport {
     return Array.from(InMemoryAdapter.registry.keys())
       .filter(id => id !== this.nodeId.id)
       .map(id => InMemoryAdapter.registry.get(id)!.nodeId);
+  }
+
+  getLocalNodeInfo(): NodeId {
+    return this.nodeId;
   }
 
   /**

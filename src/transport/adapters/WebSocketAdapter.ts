@@ -72,6 +72,10 @@ export class WebSocketAdapter extends Transport {
     this.setupEventHandlers();
   }
 
+  getLocalNodeInfo(): NodeId {
+    return this.nodeId;
+  }
+
   async start(): Promise<void> {
     if (this.isStarted) return;
 

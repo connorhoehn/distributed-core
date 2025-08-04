@@ -2,7 +2,7 @@ import * as dgram from 'dgram';
 import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
-import { RetryManager } from '../RetryManager';
+import { RetryManager, RetryOptions } from '../RetryManager';
 
 interface UDPConnection {
   nodeId: NodeId;
@@ -22,6 +22,7 @@ interface UDPAdapterOptions {
   timeout?: number;
   enableBroadcast?: boolean;
   enableLogging?: boolean;
+  retryConfig?: Partial<RetryOptions>;
 }
 
 /**
@@ -45,29 +46,30 @@ export class UDPAdapter extends Transport {
     super();
     this.nodeId = nodeId;
     this.options = {
-      port: options.port || 4000,
+      port: options.port || 8080,
       host: options.host || '0.0.0.0',
-      multicastAddress: options.multicastAddress || '224.0.0.1',
-      multicastPort: options.multicastPort || 4001,
-      enableMulticast: options.enableMulticast !== false,
-      maxPacketSize: Math.min(options.maxPacketSize || 8192, UDPAdapter.MAX_UDP_PACKET_SIZE),
+      maxPacketSize: options.maxPacketSize || 65507,
       timeout: options.timeout || 5000,
-      enableBroadcast: options.enableBroadcast !== false,
-      enableLogging: options.enableLogging ?? true
-    };
-
+      enableBroadcast: options.enableBroadcast || false,
+      enableMulticast: options.enableMulticast || false,
+      multicastAddress: options.multicastAddress || '224.0.0.1',
+      multicastPort: options.multicastPort || 8081,
+      enableLogging: options.enableLogging !== false
+    } as Required<UDPAdapterOptions>;
+    
     this.circuitBreaker = new CircuitBreaker({
-      name: `udp-adapter-${nodeId.id}`,
-      failureThreshold: 10, // Higher threshold for UDP due to packet loss
-      timeout: this.options.timeout,
-      enableLogging: this.options.enableLogging
+      enableLogging: this.options.enableLogging,
+      name: `udp-circuit-breaker-${nodeId.id}`
     });
-
     this.retryManager = new RetryManager({
-      maxRetries: 2, // Lower retries for UDP due to speed requirements
-      baseDelay: 100,
-      enableLogging: this.options.enableLogging
+      enableLogging: this.options.enableLogging,
+      name: `udp-retry-manager-${nodeId.id}`,
+      ...options.retryConfig
     });
+  }
+
+  getLocalNodeInfo(): NodeId {
+    return this.nodeId;
   }
 
   async start(): Promise<void> {

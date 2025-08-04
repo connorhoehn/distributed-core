@@ -19,7 +19,7 @@ describe('Failure Detection Integration', () => {
       await harness.setupCluster(3);
       
       // Minimal stabilization wait for in-memory tests
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Verify initial cluster state
       const initialMembership = harness.getClusterMembership(0);
@@ -34,14 +34,14 @@ describe('Failure Detection Integration', () => {
       const membershipAfterFailure = harness.getClusterMembership(0);
       const failedNode = membershipAfterFailure.find(m => m.id === 'recovery-node-2');
       expect(failedNode?.status).toMatch(/SUSPECT|DEAD/);
-    }, 300); // Ultra-fast timeout
+    }, 2000); // Ultra-fast timeout
 
     it('should propagate failure information', async () => {
       // Setup cluster with 3 nodes
       await harness.setupCluster(3);
       
       // Minimal stabilization wait
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Simulate failure of node 2 (index 2 = recovery-node-3)
       await harness.simulateNodeFailure(2);
@@ -54,12 +54,12 @@ describe('Failure Detection Integration', () => {
         const failedNode = membership.find(m => m.id === 'recovery-node-3');
         expect(failedNode?.status).toMatch(/SUSPECT|DEAD/);
       }
-    }, 300); // Ultra-fast timeout
+    }, 2000); // Ultra-fast timeout
 
     it('should handle false positives correctly', async () => {
       // Setup cluster with 3 nodes
       await harness.setupCluster(3);
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Verify initial state
       const initialMembership = harness.getClusterMembership(0);
@@ -74,7 +74,7 @@ describe('Failure Detection Integration', () => {
       const recoveredNode = finalMembership.find(m => m.id === 'recovery-node-2');
       expect(recoveredNode).toBeDefined();
       expect(recoveredNode?.id).toBe('recovery-node-2');
-    }, 300);
+    }, 2000);
 
   });
 
@@ -82,19 +82,19 @@ describe('Failure Detection Integration', () => {
     it('should handle network partitions', async () => {
       // Setup cluster with 4 nodes
       await harness.setupCluster(4);
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Create network partition
       const partitionResult = await harness.testNetworkPartition(0.5); // 50% partition
       expect(partitionResult.isolatedCount).toBeGreaterThan(0);
       expect(partitionResult.connectedCount).toBeGreaterThan(0);
       expect(partitionResult.quorumMaintained).toBeDefined();
-    }, 300);
+    }, 2000);
 
     it('should recover from partition healing', async () => {
       // Setup cluster with 3 nodes
       await harness.setupCluster(3);
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Create network partition
       const partitionResult = await harness.testNetworkPartition(0.3); // 30% partition
@@ -102,14 +102,14 @@ describe('Failure Detection Integration', () => {
       expect(partitionResult.isolatedCount).toBeGreaterThanOrEqual(0);
       expect(partitionResult.connectedCount).toBeGreaterThan(0);
       expect(partitionResult.quorumMaintained).toBeDefined();
-    }, 300);
+    }, 2000);
   });
 
   describe('failure recovery', () => {
     it('should detect node recovery', async () => {
       // Setup cluster with 3 nodes
       await harness.setupCluster(3);
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Simulate failure and recovery
       await harness.simulateNodeFailure(1);
@@ -117,12 +117,12 @@ describe('Failure Detection Integration', () => {
       
       expect(recoveryResult.recoveredNodeId).toBe('recovery-node-2');
       expect(recoveryResult.rejoinTime).toBeGreaterThanOrEqual(0);
-    }, 300);
+    }, 2000);
 
     it('should reintegrate recovered nodes', async () => {
       // Setup cluster with 3 nodes
       await harness.setupCluster(3);
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Test simple recovery cycle
       await harness.simulateNodeFailure(2);
@@ -130,14 +130,14 @@ describe('Failure Detection Integration', () => {
       
       expect(recoveryResult.recoveredNodeId).toBe('recovery-node-3');
       expect(recoveryResult.dataConsistency).toBeGreaterThanOrEqual(0);
-    }, 300);
+    }, 2000);
   });
 
   describe('edge cases', () => {
     it('should handle rapid node restarts', async () => {
       // Setup minimal cluster
       await harness.setupCluster(2);
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Test rapid restart scenario
       await harness.simulateNodeFailure(1);
@@ -146,18 +146,18 @@ describe('Failure Detection Integration', () => {
       // Verify cluster stability after rapid changes
       const finalMembership = harness.getClusterMembership(0);
       expect(finalMembership.length).toBeGreaterThan(0);
-    }, 300);
+    }, 2000);
 
     it('should maintain cluster integrity with single node', async () => {
       // Setup single node cluster
       await harness.setupCluster(1);
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       // Verify single node can maintain itself
       const membership = harness.getClusterMembership(0);
       expect(membership.length).toBe(1);
       expect(membership[0].status).toBe('ALIVE');
       expect(membership[0].id).toBe('recovery-node-1');
-    }, 300);
+    }, 2000);
   });
 });

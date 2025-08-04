@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { IClusterCommunication, CommunicationConfig, GossipTargetSelection } from './types';
 import { IClusterManagerContext, IRequiresContext } from '../core/IClusterManagerContext';
 import { JoinMessage, GossipMessage, NodeInfo, MembershipEntry } from '../types';
-import { Message, MessageType } from '../../types';
+import { Message, MessageType, NodeId } from '../../types';
 
 /**
  * ClusterCommunication manages gossip protocol and cluster join/leave operations
@@ -67,10 +67,6 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
     for (const seedNode of seedNodes) {
       if (seedNode !== this.context.localNodeId) {
         try {
-          // Parse seed node address (format: "address:port" or just "address")
-          const [address, portStr] = seedNode.includes(':') ? seedNode.split(':') : [seedNode, '8080'];
-          const port = parseInt(portStr, 10);
-          
           const localNodeInfo = this.context.getLocalNodeInfo();
           let joinData: JoinMessage = {
             type: 'JOIN',
@@ -90,7 +86,20 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
           };
           
           // Create proper NodeId for the target
-          const targetNodeId = { id: `seed-${address}-${port}`, address, port };
+          let targetNodeId: NodeId;
+          
+          // Handle different seed node formats:
+          // - For InMemoryAdapter: seed nodes are just node IDs (e.g., "node-0")
+          // - For network adapters: seed nodes are "address:port" format
+          if (this.context.transport.constructor.name === 'InMemoryAdapter') {
+            // For InMemoryAdapter, use the seed node as the node ID directly
+            targetNodeId = { id: seedNode, address: 'localhost', port: 0 };
+          } else {
+            // Parse seed node address (format: "address:port" or just "address")
+            const [address, portStr] = seedNode.includes(':') ? seedNode.split(':') : [seedNode, '8080'];
+            const port = parseInt(portStr, 10);
+            targetNodeId = { id: `seed-${address}-${port}`, address, port };
+          }
           
           await this.context.transport.send(transportMessage, targetNodeId);
         } catch (error) {

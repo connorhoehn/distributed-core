@@ -68,6 +68,10 @@ export class HTTPAdapter extends Transport {
     });
   }
 
+  getLocalNodeInfo(): NodeId {
+    return this.nodeId;
+  }
+
   async start(): Promise<void> {
     if (this.isRunning) {
       throw new Error('HTTP adapter is already running');

@@ -82,6 +82,10 @@ export class GRPCAdapter extends Transport {
     });
   }
 
+  getLocalNodeInfo(): { id: string; address: string; port: number } {
+    return this.nodeInfo;
+  }
+
   async start(): Promise<void> {
     if (this.isRunning) {
       throw new Error('gRPC adapter is already running');

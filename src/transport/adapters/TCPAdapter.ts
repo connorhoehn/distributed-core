@@ -71,7 +71,7 @@ export class TCPAdapter extends Transport {
     this.retryManager = new RetryManager({
       maxRetries: this.options.maxRetries,
       baseDelay: this.options.baseRetryDelay,
-      enableLogging: false
+      enableLogging: this.options.enableLogging
     });
   }
 

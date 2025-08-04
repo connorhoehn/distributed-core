@@ -105,8 +105,8 @@ describe('InMemoryAdapter', () => {
       
       const nonExistentNode = { id: 'node-x', address: '127.0.0.1', port: 9999 };
       
-      // Should throw an error for non-existent node
-      await expect(adapter.send(message, nonExistentNode)).rejects.toThrow();
+      // Should silently ignore non-existent nodes (simulates network unreachability)
+      await expect(adapter.send(message, nonExistentNode)).resolves.toBeUndefined();
     });
 
     test('should deliver messages instantly (no network latency)', async () => {

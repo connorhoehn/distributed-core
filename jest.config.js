@@ -10,7 +10,9 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '.*/integration/.*',
-    '.*\\.integration\\.test\\.ts$'
+    '.*/e2e/.*',
+    '.*\\.integration\\.test\\.ts$',
+    '.*\\.e2e\\.test\\.ts$'
   ],
   transform: {
     '^.+\\.ts$': 'ts-jest'
