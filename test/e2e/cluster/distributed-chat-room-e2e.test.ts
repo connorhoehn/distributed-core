@@ -60,6 +60,7 @@ class DistributedChatNode {
   private ownedRooms = new Map<string, ChatRoom>(); // Rooms this node owns
   private roomLocations = new Map<string, string>(); // roomId -> ownerNodeId (gossip state)
   private clientSubscriptions = new Map<string, string[]>(); // clientId -> roomIds[]
+  private gossipInterval: NodeJS.Timeout | null = null; // Store interval for cleanup
   
   constructor(
     nodeId: string,
@@ -141,7 +142,7 @@ class DistributedChatNode {
   private setupClusterHandlers(): void {
     // In a real implementation, this would listen to gossip messages about room locations
     // For now, we'll simulate this with periodic updates
-    setInterval(() => {
+    this.gossipInterval = setInterval(() => {
       this.gossipRoomLocations();
     }, 2000);
   }
@@ -374,6 +375,12 @@ class DistributedChatNode {
 
   async stop(): Promise<void> {
     if (!this.isStarted) return;
+
+    // Clear gossip interval to prevent open handles
+    if (this.gossipInterval) {
+      clearInterval(this.gossipInterval);
+      this.gossipInterval = null;
+    }
 
     // Stop client WebSocket server
     await this.clientWebSocketAdapter.stop();

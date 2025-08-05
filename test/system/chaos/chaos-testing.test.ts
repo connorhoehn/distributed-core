@@ -1,3 +1,4 @@
+import { jest, describe, test, it, beforeEach, afterEach, expect } from '@jest/globals';
 import { ChaosInjector } from '../../../src/diagnostics/ChaosInjector';
 import { ClusterManager } from '../../../src/cluster/ClusterManager';
 import { FailureDetector } from '../../../src/monitoring/FailureDetector';
@@ -16,36 +17,18 @@ describe('Chaos Testing Integration', () => {
   });
 
   describe('network chaos', () => {
-    it('should survive random network failures', async () => {
-      // TODO: Test network failure resilience
-    });
-
-    it('should handle packet loss', async () => {
-      // TODO: Test packet loss handling
-    });
-
-    it('should handle network latency spikes', async () => {
-      // TODO: Test latency spike handling
-    });
+    it.todo('should survive random network failures');
+    it.todo('should handle packet loss');
+    it.todo('should handle network latency spikes');
   });
 
   describe('node chaos', () => {
-    it('should survive random node failures', async () => {
-      // TODO: Test node failure resilience
-    });
-
-    it('should handle Byzantine failures', async () => {
-      // TODO: Test Byzantine failure handling
-    });
+    it.todo('should survive random node failures');
+    it.todo('should handle Byzantine failures');
   });
 
   describe('system recovery', () => {
-    it('should recover cluster health after chaos', async () => {
-      // TODO: Test system recovery
-    });
-
-    it('should maintain data consistency during chaos', async () => {
-      // TODO: Test consistency during chaos
-    });
+    it.todo('should recover cluster health after chaos');
+    it.todo('should maintain data consistency during chaos');
   });
 });

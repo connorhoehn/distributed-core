@@ -11,6 +11,15 @@ import { TCPAdapter } from '../../../src/transport/adapters/TCPAdapter';
 import { NodeInfo } from '../../../src/cluster/types';
 import { NodeId } from '../../../src/types';
 
+// Set to true to enable debug logging during test development
+const DEBUG_LOGGING = false;
+
+const debugLog = (message: string, data?: any) => {
+  if (DEBUG_LOGGING) {
+    console.log(message, data || '');
+  }
+};
+
 describe('Minimal Cluster Test', () => {
   const TEST_TIMEOUT = 15000;
   
@@ -107,22 +116,22 @@ describe('Minimal Cluster Test', () => {
   });
 
   test('should start single cluster node successfully', async () => {
-    console.log('Starting single cluster node...');
+    debugLog('Starting single cluster node...');
     
     // Start the cluster manager
     await clusterManager.start();
     
-    console.log('Cluster manager started');
+    debugLog('Cluster manager started');
     
     // Verify it started
     expect(clusterManager).toBeDefined();
     
     // Check basic state
     const memberCount = clusterManager.getMemberCount();
-    console.log('Member count:', memberCount);
+    debugLog('Member count:', memberCount);
     
     const aliveMembers = clusterManager.membership.getAliveMembers();
-    console.log('Alive members:', aliveMembers.map(m => m.id));
+    debugLog('Alive members:', aliveMembers.map(m => m.id));
     
     // Should have at least itself as a member
     expect(aliveMembers.length).toBeGreaterThanOrEqual(1);
@@ -130,10 +139,10 @@ describe('Minimal Cluster Test', () => {
     
     // Check hash ring
     const ringNodes = clusterManager.hashRing.getAllNodes();
-    console.log('Ring nodes:', ringNodes);
+    debugLog('Ring nodes:', ringNodes);
     expect(ringNodes.length).toBeGreaterThanOrEqual(1);
     
-    console.log('Single node test completed successfully');
+    debugLog('Single node test completed successfully');
     
   }, TEST_TIMEOUT);
 });
