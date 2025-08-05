@@ -6,14 +6,9 @@ import { GossipStrategy } from '../gossip/GossipStrategy';
 import { ConsistentHashRing } from '../routing/ConsistentHashRing';
 import { BootstrapConfig } from '../config/BootstrapConfig';
 import { FailureDetector } from '../monitoring/FailureDetector';
-import { KeyManager, KeyManagerConfig } from '../identity/KeyManager';
+import { KeyManager, } from '../identity/KeyManager';
 import { 
   NodeInfo, 
-  ClusterMessage, 
-  JoinMessage, 
-  GossipMessage,
-  LeaveMessage,
-  ClusterEvents,
   MembershipEntry,
   ClusterHealth,
   ClusterMetadata,
