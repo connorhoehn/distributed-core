@@ -1,0 +1,156 @@
+# Distributed Core - Cassandra-style YAML Seed Configuration
+# This configuration defines seed nodes for cluster formation and management
+
+cluster:
+  name: distributed-production-cluster
+  version: "2.0.0"
+  environment: production
+
+# Seed providers configuration (Cassandra-style)
+seed_providers:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      # Core seed nodes for cluster formation
+      seeds:
+        # Primary coordinator nodes
+        - id: coordinator-001
+          address: 10.0.1.10
+          port: 8080
+          priority: 100
+          permanent: true
+          datacenter: us-east-1
+          zone: us-east-1a
+          role: coordinator
+          tags:
+            rack: "A"
+            instance_type: "m5.xlarge"
+            
+        - id: coordinator-002
+          address: 10.0.1.11
+          port: 8080
+          priority: 100
+          permanent: true
+          datacenter: us-east-1
+          zone: us-east-1b
+          role: coordinator
+          tags:
+            rack: "B"
+            instance_type: "m5.xlarge"
+            
+        # Cross-region seeds for disaster recovery
+        - id: coordinator-west-001
+          address: 10.1.1.10
+          port: 8080
+          priority: 90
+          permanent: true
+          datacenter: us-west-2
+          zone: us-west-2a
+          role: coordinator
+          tags:
+            rack: "A"
+            instance_type: "m5.large"
+            
+        # Additional worker nodes that can serve as seeds
+        - id: worker-001
+          address: 10.0.2.10
+          port: 8080
+          priority: 80
+          permanent: false
+          datacenter: us-east-1
+          zone: us-east-1c
+          role: worker
+          tags:
+            rack: "C"
+            instance_type: "m5.large"
+
+      # Regional preferences for multi-region deployments
+      regional_preferences:
+        # Preferred order of regions for seed selection
+        prefer_regions:
+          - us-east-1
+          - us-west-2
+          - eu-west-1
+        
+        # Enable cross-region failover
+        enable_cross_region: true
+        
+        # Maximum number of cross-region seeds to use
+        max_cross_region_seeds: 2
+
+      # Load balancing strategy for seed selection
+      load_balancing:
+        # Strategy: priority, round_robin, least_connections
+        strategy: priority
+        
+        # Maximum concurrent seed connections
+        max_concurrent_seeds: 3
+        
+        # Seed rotation interval (30 seconds)
+        rotation_interval: 30000
+
+# Health monitoring configuration
+health_monitoring:
+  # Enable health checks
+  enabled: true
+  
+  # Health check interval (30 seconds)
+  check_interval: 30000
+  
+  # Maximum failures before marking unhealthy
+  max_failures: 3
+  
+  # Failure timeout for auto-recovery (2 minutes)
+  failure_timeout: 120000
+  
+  # Enable proactive health checks
+  proactive_checks: true
+  
+  # Health check timeout (5 seconds)
+  check_timeout: 5000
+
+# Bootstrap configuration
+bootstrap:
+  # Join timeout (15 seconds)
+  join_timeout: 15000
+  
+  # Gossip interval (1 second)
+  gossip_interval: 1000
+  
+  # Maximum bootstrap retries
+  max_retries: 5
+  
+  # Retry backoff strategy
+  retry_backoff: exponential
+  
+  # Enable legacy string array compatibility
+  legacy_compatibility: true
+
+# Environment-specific overrides
+environments:
+  development:
+    cluster:
+      name: distributed-dev-cluster
+    health_monitoring:
+      check_interval: 10000
+      max_failures: 5
+    bootstrap:
+      join_timeout: 5000
+      max_retries: 10
+      
+  staging:
+    cluster:
+      name: distributed-staging-cluster
+    health_monitoring:
+      check_interval: 20000
+      proactive_checks: false
+    bootstrap:
+      join_timeout: 10000
+      
+  production:
+    # Production uses base configuration
+    health_monitoring:
+      check_interval: 30000
+      max_failures: 2
+    bootstrap:
+      join_timeout: 15000
+      max_retries: 3

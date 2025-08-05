@@ -22,8 +22,10 @@ export interface SeedNodeInfo {
   /** Optional metadata */
   metadata?: {
     region?: string;
+    datacenter?: string;
     zone?: string;
     role?: string;
+    source?: string;
     tags?: Record<string, string>;
   };
   

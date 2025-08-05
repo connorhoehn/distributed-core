@@ -1,0 +1,29 @@
+# Simple development configuration
+cluster:
+  name: local-dev-cluster
+  environment: development
+
+seed_providers:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      seeds:
+        - address: localhost
+          port: 8080
+          priority: 100
+        - address: localhost
+          port: 8081
+          priority: 100
+        - address: localhost
+          port: 8082
+          priority: 100
+
+health_monitoring:
+  enabled: true
+  check_interval: 10000
+  max_failures: 5
+
+bootstrap:
+  join_timeout: 5000
+  gossip_interval: 500
+  max_retries: 10
+  legacy_compatibility: true
