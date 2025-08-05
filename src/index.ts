@@ -28,6 +28,8 @@ export * from './config/BootstrapConfig';
 // Enhanced Observability 
 export * from './cluster/introspection/ClusterIntrospection';
 export * from './cluster/aggregation/StateAggregator';
+export * from './cluster/topology/ClusterTopologyManager';
+export * from './cluster/observability/ObservabilityManager';
 export type { 
   PerformanceMetrics, 
   LogicalService, 
@@ -38,6 +40,19 @@ export type {
   PartitionInfo,
   StateAggregatorConfig
 } from './cluster/aggregation/StateAggregator';
+export type {
+  RoomMetadata,
+  NodeCapacity,
+  EnhancedClusterTopology,
+  ScalingAction,
+  RoomScalingCriteria
+} from './cluster/topology/ClusterTopologyManager';
+export type {
+  ClusterDashboard,
+  TopologyQuery,
+  ClusterScalingAnalysis,
+  RoomPlacementRecommendation
+} from './cluster/observability/ObservabilityManager';
 
 // Transport modules
 export * from './transport/Transport';
