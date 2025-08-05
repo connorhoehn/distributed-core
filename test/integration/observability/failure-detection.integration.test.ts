@@ -1,4 +1,4 @@
-import { FailureRecoveryHarness } from '../harnesses/failure-recovery-harness';
+import { FailureRecoveryHarness } from '../../harnesses/failure-recovery-harness';
 
 describe('Failure Detection Integration', () => {
   let harness: FailureRecoveryHarness;

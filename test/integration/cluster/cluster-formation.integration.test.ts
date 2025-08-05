@@ -1,6 +1,6 @@
-import { createTestCluster } from '../harnesses/create-test-cluster';
-import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { NodeId, MessageType } from '../../src/types';
+import { createTestCluster } from '../../harnesses/create-test-cluster';
+import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
+import { NodeId, MessageType } from '../../../src/types';
 
 describe('Cluster Formation Integration', () => {
   describe('Test Cluster Integration', () => {

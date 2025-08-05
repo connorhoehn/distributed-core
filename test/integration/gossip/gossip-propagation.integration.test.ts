@@ -1,4 +1,4 @@
-import { createTestCluster } from '../harnesses/create-test-cluster';
+import { createTestCluster } from '../../harnesses/create-test-cluster';
 
 describe('Gossip Propagation Integration', () => {
   let cluster: any;

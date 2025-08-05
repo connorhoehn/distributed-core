@@ -2,12 +2,12 @@
  * Integration tests for StateAggregator with conflict resolution
  */
 
-import { StateAggregator, StateAggregatorConfig } from '../../src/cluster/aggregation/StateAggregator';
-import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { createTestCluster } from '../harnesses/create-test-cluster';
-import { ClusterCoordinationHarness } from '../harnesses/cluster-coordination-harness';
-import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { TestConfig } from '../support/test-config';
+import { StateAggregator, StateAggregatorConfig } from '../../../src/cluster/aggregation/StateAggregator';
+import { ClusterManager } from '../../../src/cluster/ClusterManager';
+import { createTestCluster } from '../../harnesses/create-test-cluster';
+import { ClusterCoordinationHarness } from '../../harnesses/cluster-coordination-harness';
+import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
+import { TestConfig } from '../../support/test-config';
 
 describe('StateAggregator Conflict Resolution Integration', () => {
   let cluster: any;

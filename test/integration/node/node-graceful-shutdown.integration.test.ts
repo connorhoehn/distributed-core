@@ -1,4 +1,4 @@
-import { Node } from '../../src/common/Node';
+import { Node } from '../../../src/common/Node';
 
 describe('Node Graceful Shutdown Integration', () => {
   let node: Node;

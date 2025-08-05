@@ -1,8 +1,8 @@
-import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { StateAggregator } from '../../src/cluster/aggregation/StateAggregator';
-import { StateConflict } from '../../src/cluster/introspection/ClusterIntrospection';
-import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { BootstrapConfig } from '../../src/config/BootstrapConfig';
+import { ClusterManager } from '../../../src/cluster/ClusterManager';
+import { StateAggregator } from '../../../src/cluster/aggregation/StateAggregator';
+import { StateConflict } from '../../../src/cluster/introspection/ClusterIntrospection';
+import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
+import { BootstrapConfig } from '../../../src/config/BootstrapConfig';
 
 /**
  * Test anti-entropy conflict detection functionality

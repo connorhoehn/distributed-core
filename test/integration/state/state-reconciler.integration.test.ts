@@ -2,8 +2,8 @@
  * Integration tests for StateReconciler - conflict resolution engine
  */
 
-import { StateReconciler, ResolutionStrategy, ResolutionConfig } from '../../src/cluster/reconciliation/StateReconciler';
-import { StateConflict, LogicalService } from '../../src/cluster/introspection/ClusterIntrospection';
+import { StateReconciler, ResolutionStrategy, ResolutionConfig } from '../../../src/cluster/reconciliation/StateReconciler';
+import { StateConflict, LogicalService } from '../../../src/cluster/introspection/ClusterIntrospection';
 
 describe('StateReconciler Integration Tests', () => {
   let reconciler: StateReconciler;

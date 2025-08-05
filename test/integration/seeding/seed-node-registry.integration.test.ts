@@ -1,5 +1,5 @@
-import { SeedNodeRegistry, SeedNodeInfo } from '../../src/cluster/seeding/SeedNodeRegistry';
-import { YamlSeedConfiguration } from '../../src/config/YamlSeedConfiguration';
+import { SeedNodeRegistry, SeedNodeInfo } from '../../../src/cluster/seeding/SeedNodeRegistry';
+import { YamlSeedConfiguration } from '../../../src/config/YamlSeedConfiguration';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 

@@ -14,20 +14,20 @@ import {
   StateDelta, 
   ServiceDelta,
   DeltaApplicationResult 
-} from '../../src/cluster/delta-sync/StateDelta';
+} from '../../../src/cluster/delta-sync/StateDelta';
 import { 
   StateFingerprintGenerator, 
   StateFingerprint,
   FingerprintComparison 
-} from '../../src/cluster/delta-sync/StateFingerprint';
+} from '../../../src/cluster/delta-sync/StateFingerprint';
 import { 
   DeltaSyncEngine,
   SyncSessionConfig,
   SyncSession 
-} from '../../src/cluster/delta-sync/DeltaSync';
-import { LogicalService } from '../../src/cluster/introspection/ClusterIntrospection';
-import { Node, NodeConfig } from '../../src/common/Node';
-import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
+} from '../../../src/cluster/delta-sync/DeltaSync';
+import { LogicalService } from '../../../src/cluster/introspection/ClusterIntrospection';
+import { Node, NodeConfig } from '../../../src/common/Node';
+import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
 
 interface TestClusterNode {
   node: Node;

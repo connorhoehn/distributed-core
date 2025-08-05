@@ -3,15 +3,15 @@
  * Tests end-to-end delta synchronization across real network transport
  */
 
-import { WebSocketAdapter } from '../../src/transport/adapters/WebSocketAdapter';
-import { StateFingerprintGenerator } from '../../src/cluster/delta-sync/StateFingerprint';
-import { StateDeltaManager } from '../../src/cluster/delta-sync/StateDelta';
-import { DeltaSyncEngine } from '../../src/cluster/delta-sync/DeltaSync';
-import { LogicalService } from '../../src/cluster/introspection/ClusterIntrospection';
-import { NodeMetadata } from '../../src/identity/NodeMetadata';
-import { InMemoryCoordinator } from '../../src/coordinators/InMemoryCoordinator';
-import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { BootstrapConfig } from '../../src/config/BootstrapConfig';
+import { WebSocketAdapter } from '../../../src/transport/adapters/WebSocketAdapter';
+import { StateFingerprintGenerator } from '../../../src/cluster/delta-sync/StateFingerprint';
+import { StateDeltaManager } from '../../../src/cluster/delta-sync/StateDelta';
+import { DeltaSyncEngine } from '../../../src/cluster/delta-sync/DeltaSync';
+import { LogicalService } from '../../../src/cluster/introspection/ClusterIntrospection';
+import { NodeMetadata } from '../../../src/identity/NodeMetadata';
+import { InMemoryCoordinator } from '../../../src/coordinators/InMemoryCoordinator';
+import { ClusterManager } from '../../../src/cluster/ClusterManager';
+import { BootstrapConfig } from '../../../src/config/BootstrapConfig';
 
 interface TestNode {
   id: string;

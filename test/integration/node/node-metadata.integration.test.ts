@@ -1,5 +1,5 @@
-import { Node } from '../../src/common/Node';
-import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
+import { Node } from '../../../src/common/Node';
+import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
 
 describe('Node Integration Tests', () => {
   let node: Node;

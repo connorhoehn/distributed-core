@@ -3,10 +3,10 @@
  * Tests delta sync in real multi-node cluster scenarios
  */
 
-import { createTestCluster, TestClusterOptions } from '../harnesses/create-test-cluster';
-import { DeltaSyncEngine } from '../../src/cluster/delta-sync/DeltaSync';
-import { StateFingerprintGenerator } from '../../src/cluster/delta-sync/StateFingerprint';
-import { LogicalService } from '../../src/cluster/introspection/ClusterIntrospection';
+import { createTestCluster, TestClusterOptions } from '../../harnesses/create-test-cluster';
+import { DeltaSyncEngine } from '../../../src/cluster/delta-sync/DeltaSync';
+import { StateFingerprintGenerator } from '../../../src/cluster/delta-sync/StateFingerprint';
+import { LogicalService } from '../../../src/cluster/introspection/ClusterIntrospection';
 
 describe('Delta Sync Integration', () => {
   let cluster: any;

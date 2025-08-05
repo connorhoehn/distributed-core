@@ -8,20 +8,20 @@ import {
   StateDelta, 
   ServiceDelta,
   DeltaApplicationResult 
-} from '../../src/cluster/delta-sync/StateDelta';
+} from '../../../src/cluster/delta-sync/StateDelta';
 import { 
   StateFingerprintGenerator, 
   StateFingerprint,
   FingerprintComparison 
-} from '../../src/cluster/delta-sync/StateFingerprint';
+} from '../../../src/cluster/delta-sync/StateFingerprint';
 import { 
   DeltaSyncEngine,
   SyncSessionConfig,
   SyncSession 
-} from '../../src/cluster/delta-sync/DeltaSync';
-import { LogicalService } from '../../src/cluster/introspection/ClusterIntrospection';
-import { WebSocketAdapter } from '../../src/transport/adapters/WebSocketAdapter';
-import { TestConfig } from '../support/test-config';
+} from '../../../src/cluster/delta-sync/DeltaSync';
+import { LogicalService } from '../../../src/cluster/introspection/ClusterIntrospection';
+import { WebSocketAdapter } from '../../../src/transport/adapters/WebSocketAdapter';
+import { TestConfig } from '../../support/test-config';
 
 describe('Delta Sync Network Integration', () => {
   let deltaManager: StateDeltaManager;

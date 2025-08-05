@@ -1,7 +1,7 @@
-import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { createTestCluster } from '../harnesses/create-test-cluster';
-import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { BootstrapConfig } from '../../src/config/BootstrapConfig';
+import { ClusterManager } from '../../../src/cluster/ClusterManager';
+import { createTestCluster } from '../../harnesses/create-test-cluster';
+import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
+import { BootstrapConfig } from '../../../src/config/BootstrapConfig';
 
 describe('Membership Synchronization Integration', () => {
   let cluster: any;

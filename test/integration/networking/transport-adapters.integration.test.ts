@@ -1,5 +1,5 @@
-import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { MessageType, Message } from '../../src/types';
+import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
+import { MessageType, Message } from '../../../src/types';
 
 describe('Transport Adapters Integration', () => {
   const nodeA = { id: 'node-a', address: '127.0.0.1', port: 8080 };

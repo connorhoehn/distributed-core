@@ -1,4 +1,4 @@
-import { TCPAdapter, WebSocketAdapter } from '../../src/transport/adapters';
+import { TCPAdapter, WebSocketAdapter } from '../../../src/transport/adapters';
 
 describe('Transport Adapters Working Demo', () => {
   test('should demonstrate all adapters can start and stop', async () => {

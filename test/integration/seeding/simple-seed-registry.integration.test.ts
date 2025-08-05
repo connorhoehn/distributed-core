@@ -1,4 +1,4 @@
-import { SeedNodeRegistry } from '../../src/cluster/seeding/SeedNodeRegistry';
+import { SeedNodeRegistry } from '../../../src/cluster/seeding/SeedNodeRegistry';
 
 describe('SeedNodeRegistry Basic Integration', () => {
   it('should create a registry and add seeds', () => {
