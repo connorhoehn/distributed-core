@@ -1,4 +1,5 @@
-import { SeedClusterFormationHarness } from './seed-cluster-formation-harness';
+import { describe, it, afterEach, expect } from '@jest/globals';
+import { SeedClusterFormationHarness } from '../../harnesses/seed-cluster-formation-harness';
 
 /**
  * Example test demonstrating the Seed Cluster Formation Harness
