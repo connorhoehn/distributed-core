@@ -7,11 +7,11 @@ import {
   RangeLease,
   NodeStatus,
   ClusterFrameworkEvents
-} from './types';
+} from '../coordinators/types';
 import { ClusterManager } from '../cluster/ClusterManager';
-import { BootstrapConfig } from '../cluster/config/BootstrapConfig';
+import { BootstrapConfig } from '../config/BootstrapConfig';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
-import { NodeInfo } from '../cluster/types';
+import { NodeInfo } from '../types';
 import { NodeId } from '../types';
 
 /**

@@ -10,7 +10,7 @@ import {
   ClusterView
 } from './types';
 import { InMemoryCoordinator } from './InMemoryCoordinator';
-import { GossipCoordinator } from './GossipCoordinator';
+import { GossipCoordinator } from '../gossip/GossipCoordinator';
 import { EtcdCoordinator } from './EtcdCoordinator';
 import { ZookeeperCoordinator } from './ZookeeperCoordinator';
 import { createLogger, FrameworkLogger } from '../common/logger';

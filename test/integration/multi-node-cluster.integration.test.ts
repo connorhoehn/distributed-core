@@ -11,7 +11,7 @@ import { LogicalService } from '../../src/cluster/introspection/ClusterIntrospec
 import { NodeMetadata } from '../../src/identity/NodeMetadata';
 import { InMemoryCoordinator } from '../../src/coordinators/InMemoryCoordinator';
 import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { BootstrapConfig } from '../../src/cluster/config/BootstrapConfig';
+import { BootstrapConfig } from '../../src/config/BootstrapConfig';
 
 interface TestNode {
   id: string;

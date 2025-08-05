@@ -21,9 +21,9 @@ export {
 // Cluster modules
 export * from './cluster/ClusterManager';
 export * from './cluster/membership/MembershipTable';
-export * from './cluster/gossip/GossipStrategy';
-export * from './cluster/monitoring/FailureDetector';
-export * from './cluster/config/BootstrapConfig';
+export * from './gossip/GossipStrategy';
+export * from './monitoring/FailureDetector';
+export * from './config/BootstrapConfig';
 
 // Enhanced Observability 
 export * from './cluster/introspection/ClusterIntrospection';
@@ -41,14 +41,14 @@ export type {
 
 // Transport modules
 export * from './transport/Transport';
-export { GossipMessage } from './transport/GossipMessage';
-export * from './transport/GossipBackoff';
+export { GossipMessage } from './gossip/transport/GossipMessage';
+export * from './gossip/transport/GossipBackoff';
 export * from './transport/MessageCache';
 export * from './transport/Encryption';
 
 // Metrics modules
-export * from './metrics/MetricsTracker';
-export * from './metrics/MetricsExporter';
+export * from './monitoring/metrics/MetricsTracker';
+export * from './monitoring/metrics/MetricsExporter';
 
 // Diagnostics modules
 export * from './diagnostics/DiagnosticTool';

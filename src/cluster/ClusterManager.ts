@@ -2,10 +2,10 @@ import { EventEmitter } from 'events';
 import { Transport } from '../transport/Transport';
 import { Message, MessageType } from '../types';
 import { MembershipTable } from './membership/MembershipTable';
-import { GossipStrategy } from './gossip/GossipStrategy';
-import { ConsistentHashRing } from './routing/ConsistentHashRing';
-import { BootstrapConfig } from './config/BootstrapConfig';
-import { FailureDetector } from './monitoring/FailureDetector';
+import { GossipStrategy } from '../gossip/GossipStrategy';
+import { ConsistentHashRing } from '../routing/ConsistentHashRing';
+import { BootstrapConfig } from '../config/BootstrapConfig';
+import { FailureDetector } from '../monitoring/FailureDetector';
 import { KeyManager, KeyManagerConfig } from '../identity/KeyManager';
 import { 
   NodeInfo, 
@@ -26,11 +26,11 @@ import {
 // Import new modular components
 import { IClusterManagerContext } from './core/IClusterManagerContext';
 import { ClusterLifecycle } from './lifecycle/ClusterLifecycle';
-import { ClusterCommunication } from './communication/ClusterCommunication';
+import { ClusterCommunication } from '../messaging/cluster/ClusterCommunication';
 import { ClusterIntrospection } from './introspection/ClusterIntrospection';
-import { ClusterSecurity } from './keys/ClusterSecurity';
+import { ClusterSecurity } from '../identity/keys/ClusterSecurity';
 import { ClusterQuorum } from './quorum/ClusterQuorum';
-import { ClusterRouting } from './routing/ClusterRouting';
+import { ClusterRouting } from '../routing/ClusterRouting';
 
 export class ClusterManager extends EventEmitter implements IClusterManagerContext {
   // Core components (exposed via IClusterManagerContext)

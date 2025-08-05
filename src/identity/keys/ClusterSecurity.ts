@@ -1,4 +1,4 @@
-import { IClusterManagerContext, IRequiresContext } from '../core/IClusterManagerContext';
+import { IClusterManagerContext, IRequiresContext } from '../../cluster/core/IClusterManagerContext';
 import { KeyManager } from '../../identity/KeyManager';
 
 /**

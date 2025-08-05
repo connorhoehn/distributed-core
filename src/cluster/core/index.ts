@@ -6,5 +6,5 @@ export * from '../lifecycle/types';
 export { ClusterLifecycle } from '../lifecycle/ClusterLifecycle';
 
 // Communication module  
-export * from '../communication/types';
-export { ClusterCommunication } from '../communication/ClusterCommunication';
+export * from '../../messaging/cluster/types';
+export { ClusterCommunication } from '../../messaging/cluster/ClusterCommunication';

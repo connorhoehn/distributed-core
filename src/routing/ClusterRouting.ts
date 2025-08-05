@@ -1,5 +1,5 @@
-import { MembershipEntry } from '../types';
-import { IClusterManagerContext, IRequiresContext } from '../core';
+import { MembershipEntry } from '../cluster/types';
+import { IClusterManagerContext, IRequiresContext } from '../cluster/core/IClusterManagerContext';
 
 export interface RoutingOptions {
   strategy: 'CONSISTENT_HASH' | 'ROUND_ROBIN' | 'RANDOM' | 'LOCALITY_AWARE';

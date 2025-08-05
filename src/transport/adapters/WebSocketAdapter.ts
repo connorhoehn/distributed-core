@@ -1,11 +1,10 @@
 import WebSocket = require('ws');
-import { EventEmitter } from 'events';
 import * as http from 'http';
 import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
-import { GossipMessage } from '../GossipMessage';
+import { GossipMessage } from '../../gossip/transport/GossipMessage';
 
 interface WebSocketConnection {
   ws: WebSocket;

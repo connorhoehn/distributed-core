@@ -3,7 +3,6 @@ import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
-import { GossipMessage } from '../GossipMessage';
 
 interface TCPConnection {
   socket: net.Socket;

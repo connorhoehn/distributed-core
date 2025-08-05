@@ -1,4 +1,4 @@
-import { MetricsTracker, UnifiedMetrics, Alert, MetricsTrackerConfig } from '../../../src/metrics/MetricsTracker';
+import { MetricsTracker, UnifiedMetrics, Alert, MetricsTrackerConfig } from '../../../src/monitoring/metrics/MetricsTracker';
 import { EventEmitter } from 'eventemitter3';
 
 // Mock classes for testing

@@ -1,9 +1,9 @@
 import { EventEmitter } from 'eventemitter3';
-import { PerformanceMetrics as DiagnosticMetrics } from '../diagnostics/DiagnosticTool';
-import { PerformanceMetrics as ClusterMetrics } from '../cluster/introspection/ClusterIntrospection';
-import { NodeHealthStatus } from '../cluster/monitoring/FailureDetector';
-import { ConnectionStats } from '../connections/types';
-import { PoolStats } from '../connections/ConnectionPool';
+import { PerformanceMetrics as DiagnosticMetrics } from '../../diagnostics/DiagnosticTool';
+import { PerformanceMetrics as ClusterMetrics } from '../../cluster/introspection/ClusterIntrospection';
+import { NodeHealthStatus } from '../../monitoring/FailureDetector';
+import { ConnectionStats } from '../../connections/types';
+import { PoolStats } from '../../connections/ConnectionPool';
 
 /**
  * Unified metrics interface combining all system metrics

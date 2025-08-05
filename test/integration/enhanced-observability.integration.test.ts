@@ -3,7 +3,7 @@ import { StateAggregator } from '../../src/cluster/aggregation/StateAggregator';
 import { LogicalService } from '../../src/cluster/introspection/ClusterIntrospection';
 import { ChatHandler } from '../fixtures/ChatHandler';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
-import { BootstrapConfig } from '../../src/cluster/config/BootstrapConfig';
+import { BootstrapConfig } from '../../src/config/BootstrapConfig';
 
 /**
  * Example showing how to integrate ClusterIntrospection and StateAggregator

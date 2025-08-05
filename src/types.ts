@@ -9,18 +9,25 @@ export interface NodeId {
 }
 
 export interface NodeInfo {
-  id: NodeId;
-  metadata: Record<string, any>;
-  lastSeen: number;
+  id: string;
   status: NodeStatus;
+  lastSeen: number;
   version: number;
+  metadata?: {
+    address?: string;
+    port?: number;
+    role?: string;
+    region?: string;
+    zone?: string;
+    tags?: Record<string, string>;
+  };
 }
 
 export enum NodeStatus {
-  ALIVE = 'alive',
-  SUSPECTED = 'suspected',
-  DEAD = 'dead',
-  LEAVING = 'leaving'
+  ALIVE = 'ALIVE',
+  SUSPECTED = 'SUSPECTED',
+  DEAD = 'DEAD',
+  LEAVING = 'LEAVING'
 }
 
 export interface GossipMessageData {

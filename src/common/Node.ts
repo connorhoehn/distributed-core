@@ -50,13 +50,13 @@
  */
 
 import { ClusterManager } from '../cluster/ClusterManager';
-import { BootstrapConfig } from '../cluster/config/BootstrapConfig';
+import { BootstrapConfig } from '../config/BootstrapConfig';
 import { Router } from '../messaging/Router';
 import { RoutedMessage, MessageHandler } from '../messaging/types';
 import { ConnectionManager } from '../connections/ConnectionManager';
 import { Session } from '../connections/Session';
 import { NodeMetadata } from '../identity/NodeMetadata';
-import { MetricsTracker } from '../metrics/MetricsTracker';
+import { MetricsTracker } from '../monitoring/metrics/MetricsTracker';
 import { ChaosInjector } from '../diagnostics/ChaosInjector';
 import { Transport } from '../transport/Transport';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';

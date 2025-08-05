@@ -6,7 +6,7 @@
 
 import { describe, test, beforeEach, afterEach, expect } from '@jest/globals';
 import { ClusterManager } from '../../../src/cluster/ClusterManager';
-import { BootstrapConfig } from '../../../src/cluster/config/BootstrapConfig';
+import { BootstrapConfig } from '../../../src/config/BootstrapConfig';
 import { TCPAdapter } from '../../../src/transport/adapters/TCPAdapter';
 import { NodeInfo } from '../../../src/cluster/types';
 import { NodeId } from '../../../src/types';

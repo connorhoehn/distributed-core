@@ -1,7 +1,7 @@
-import { MetricsExporter, ExportDestination, MetricsExporterConfig } from '../../../src/metrics/MetricsExporter';
-import { UnifiedMetrics, Alert } from '../../../src/metrics/MetricsTracker';
-import { NodeHealthStatus } from '../../../src/cluster/monitoring/FailureDetector';
-import { NodeStatus } from '../../../src/cluster/types';
+import { MetricsExporter, ExportDestination, MetricsExporterConfig } from '../../../src/monitoring/metrics/MetricsExporter';
+import { UnifiedMetrics, Alert } from '../../../src/monitoring/metrics/MetricsTracker';
+import { NodeHealthStatus } from '../../../src/monitoring/FailureDetector';
+import { NodeStatus } from '../../../src/types';
 import { EventEmitter } from 'eventemitter3';
 
 // Mock unified metrics for testing
@@ -44,7 +44,7 @@ const mockUnifiedMetrics: UnifiedMetrics = {
     nodeHealth: new Map<string, NodeHealthStatus>([
       ['node1', { 
         nodeId: 'node1', 
-        status: 'ALIVE', 
+        status: NodeStatus.ALIVE, // Use string literal if NodeStatus is only a type, or ensure NodeStatus.ALIVE is a value
         lastHeartbeat: Date.now(),
         lastPing: Date.now(),
         lastPong: Date.now(),
@@ -55,7 +55,7 @@ const mockUnifiedMetrics: UnifiedMetrics = {
       }],
       ['node2', { 
         nodeId: 'node2', 
-        status: 'ALIVE', 
+        status: NodeStatus.ALIVE, 
         lastHeartbeat: Date.now(),
         lastPing: Date.now(),
         lastPong: Date.now(),

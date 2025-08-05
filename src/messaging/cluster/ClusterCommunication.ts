@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { IClusterCommunication, CommunicationConfig, GossipTargetSelection } from './types';
-import { IClusterManagerContext, IRequiresContext } from '../core/IClusterManagerContext';
-import { JoinMessage, GossipMessage, NodeInfo, MembershipEntry } from '../types';
+import { IClusterManagerContext, IRequiresContext } from '../../cluster/core/IClusterManagerContext';
+import { JoinMessage, GossipMessage, MembershipEntry } from '../../cluster/types';
 import { Message, MessageType, NodeId } from '../../types';
 
 /**

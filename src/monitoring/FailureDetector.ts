@@ -1,8 +1,9 @@
 import { EventEmitter } from 'events';
-import { Transport } from '../../transport/Transport';
-import { MembershipTable } from '../membership/MembershipTable';
-import { NodeInfo, NodeStatus } from '../types';
-import { Message, MessageType, NodeId } from '../../types';
+import { Transport } from '../transport/Transport';
+import { MembershipTable } from '../cluster/membership/MembershipTable';
+import { NodeStatus } from '../types';
+import { NodeInfo } from '../types';
+import { Message, MessageType, NodeId } from '../types';
 
 export interface FailureDetectorConfig {
   heartbeatInterval: number;    // How often to send heartbeats (ms)
@@ -588,7 +589,7 @@ export class FailureDetector extends EventEmitter {
 
     return {
       nodeId,
-      status: member ? member.status : 'DEAD',
+      status: member ? member.status as NodeStatus : NodeStatus.DEAD,
       lastHeartbeat,
       lastPing,
       lastPong,

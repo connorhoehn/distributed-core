@@ -1,5 +1,5 @@
-import { MetricsTracker } from '../../../src/metrics/MetricsTracker';
-import { MetricsExporter } from '../../../src/metrics/MetricsExporter';
+import { MetricsTracker } from '../../../src/monitoring/metrics/MetricsTracker';
+import { MetricsExporter } from '../../../src/monitoring/metrics/MetricsExporter';
 import { ClusterManager } from '../../../src/cluster/ClusterManager';
 
 describe('Metrics Collection Integration', () => {

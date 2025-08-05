@@ -1,5 +1,4 @@
-import { MembershipEntry, NodeInfo } from '../types';
-
+import { NodeInfo } from '../../types';
 /**
  * Communication and gossip management interface
  */

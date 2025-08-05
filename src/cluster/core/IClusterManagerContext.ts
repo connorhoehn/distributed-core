@@ -1,10 +1,10 @@
-import { BootstrapConfig } from '../config/BootstrapConfig';
+import { BootstrapConfig } from '../../config/BootstrapConfig';
 import { KeyManager } from '../../identity/KeyManager';
 import { Transport } from '../../transport/Transport';
 import { MembershipTable } from '../membership/MembershipTable';
-import { FailureDetector } from '../monitoring/FailureDetector';
-import { GossipStrategy } from '../gossip/GossipStrategy';
-import { ConsistentHashRing } from '../routing/ConsistentHashRing';
+import { FailureDetector } from '../../monitoring/FailureDetector';
+import { GossipStrategy } from '../../gossip/GossipStrategy';
+import { ConsistentHashRing } from '../../routing/ConsistentHashRing';
 import { NodeInfo } from '../types';
 
 /**

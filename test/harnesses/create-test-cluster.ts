@@ -1,5 +1,5 @@
 import { ClusterManager } from '../../src/cluster/ClusterManager';
-import { BootstrapConfig } from '../../src/cluster/config/BootstrapConfig';
+import { BootstrapConfig } from '../../src/config/BootstrapConfig';
 import { InMemoryAdapter } from '../../src/transport/adapters/InMemoryAdapter';
 import { createTestClusterConfig, createTestClusterConfigWithDebug } from '../support/test-config';
 

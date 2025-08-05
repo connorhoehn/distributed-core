@@ -1,9 +1,5 @@
-import { MetricsTracker, UnifiedMetrics, Alert } from '../../src/metrics/MetricsTracker';
-import { MetricsExporter, ExportDestination } from '../../src/metrics/MetricsExporter';
-import { DiagnosticTool } from '../../src/diagnostics/DiagnosticTool';
-import { FailureDetector } from '../../src/cluster/monitoring/FailureDetector';
-import { ClusterIntrospection } from '../../src/cluster/introspection/ClusterIntrospection';
-import { ConnectionPool } from '../../src/connections/ConnectionPool';
+import { MetricsTracker, UnifiedMetrics, Alert } from '../../src/monitoring/metrics/MetricsTracker';
+import { MetricsExporter } from '../../src/monitoring/metrics/MetricsExporter';
 
 // Mock implementations for integration testing
 class MockDiagnosticTool {
