@@ -130,15 +130,15 @@ export class ConsistentHashRing {
   }
 
   /**
-   * Simple hash function (for demo - use crypto hash in production)
+   * Better hash function for consistent hashing (using crypto for better distribution)
    */
   private hash(key: string): number {
-    let hash = 0;
-    for (let i = 0; i < key.length; i++) {
-      const char = key.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32-bit integer
-    }
-    return Math.abs(hash);
+    // Use Node.js crypto for better hash distribution
+    const crypto = require('crypto');
+    const hash = crypto.createHash('md5').update(key).digest('hex');
+    
+    // Convert first 8 hex chars to a 32-bit integer
+    const hashValue = parseInt(hash.substring(0, 8), 16);
+    return Math.abs(hashValue);
   }
 }
