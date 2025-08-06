@@ -2,7 +2,7 @@ import { YamlSeedConfiguration } from '../../../src/config/YamlSeedConfiguration
 import * as path from 'path';
 
 describe('YamlSeedConfiguration Integration with Example Files', () => {
-  const configExamplesDir = path.join(__dirname, '../fixtures/config-examples');
+  const configExamplesDir = path.join(__dirname, '../../fixtures/config-examples');
 
   describe('Cassandra-style configuration', () => {
     it('should load and parse the production-style configuration', async () => {
