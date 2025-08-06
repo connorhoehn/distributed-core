@@ -1,3 +1,4 @@
+import { jest, describe, beforeEach, afterEach, test, expect, it } from '@jest/globals';
 import { ChatApplicationModule, ChatApplicationConfig } from '../../../src/applications/ChatApplicationModule';
 import { ChatTopologyManager } from '../../../src/applications/chat/ChatTopologyManager';
 import { ChatRoomCoordinator } from '../../../src/applications/chat/ChatRoomCoordinator';
@@ -61,11 +62,14 @@ describe('Chat System Integration', () => {
       resourceRegistry: {
         on: jest.fn(),
         registerResourceType: jest.fn(),
+        createResource: jest.fn().mockImplementation((resource) => Promise.resolve(resource)),
+        getResource: jest.fn(),
         getResourcesByType: jest.fn(() => []),
         getResourcesByNode: jest.fn(() => []),
         registerResource: jest.fn(),
         unregisterResource: jest.fn(),
-        updateResource: jest.fn()
+        updateResource: jest.fn(),
+        deleteResource: jest.fn()
       },
       topologyManager: {
         getResourceTopology: jest.fn(() => ({
