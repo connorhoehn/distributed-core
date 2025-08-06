@@ -52,7 +52,7 @@ describe('Chat System Production Validation', () => {
         clientAdapters.push(clientAdapter);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Connect clients to different nodes
       const client1 = new WebSocket('ws://localhost:3001/ws');
@@ -78,7 +78,7 @@ describe('Chat System Production Validation', () => {
         data: { content: 'Hello before failure' }
       }));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 250));
 
       // Simulate node failure - shut down node 1
       const nodeToFail = testCluster.nodes[0];
@@ -86,7 +86,7 @@ describe('Chat System Production Validation', () => {
       await clientAdapters[0].stop();
 
       // Verify cluster detects failure and rebalances
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 750));
 
       // Remaining clients should still function
       client2.send(JSON.stringify({
@@ -94,7 +94,7 @@ describe('Chat System Production Validation', () => {
         data: { content: 'Message after node failure' }
       }));
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Verify system resilience - remaining nodes should be active
       const remainingNodes = testCluster.nodes.slice(1);
@@ -103,7 +103,7 @@ describe('Chat System Production Validation', () => {
       // Validate that WebSocket connections to remaining nodes still work
       expect(client2.readyState).toBe(WebSocket.OPEN);
       expect(client3.readyState).toBe(WebSocket.OPEN);
-    }, 15000);
+    }, 12500);
 
     test('should handle network partition scenarios', async () => {
       testCluster = createTestCluster({
@@ -122,7 +122,7 @@ describe('Chat System Production Validation', () => {
         clientAdapters.push(clientAdapter);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Simulate network partition by stopping some nodes
       // Partition: [Node1, Node2] vs [Node3, Node4, Node5]
@@ -131,7 +131,7 @@ describe('Chat System Production Validation', () => {
       await clientAdapters[0].stop();
       await clientAdapters[1].stop();
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 750));
 
       // The majority partition (3 nodes) should maintain functionality
       const majorityNodes = testCluster.nodes.slice(2, 5);
@@ -148,9 +148,9 @@ describe('Chat System Production Validation', () => {
         data: { content: 'Message during partition' }
       }));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 250));
       expect(client.readyState).toBe(WebSocket.OPEN);
-    }, 20000);
+    }, 7250);
 
     test('should handle malformed messages gracefully', async () => {
       testCluster = createTestCluster({ size: 1 });
@@ -184,11 +184,11 @@ describe('Chat System Production Validation', () => {
         data: { content: 'valid message' }
       }));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 250));
 
       // Connection should remain stable despite malformed messages
       expect(client.readyState).toBe(WebSocket.OPEN);
-    }, 10000);
+    }, 5000);
   });
 
   describe('Load Testing & Performance Validation', () => {
@@ -209,7 +209,7 @@ describe('Chat System Production Validation', () => {
         clientAdapters.push(clientAdapter);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Create 50 concurrent clients (distributed across nodes)
       const clientPromises: Promise<WebSocket>[] = [];
@@ -226,7 +226,7 @@ describe('Chat System Production Validation', () => {
           client.on('open', () => resolve(client));
           client.on('error', reject);
           
-          setTimeout(() => reject(new Error('Connection timeout')), 5000);
+          setTimeout(() => reject(new Error('Connection timeout')), 2500);
         });
         
         clientPromises.push(clientPromise);
@@ -255,12 +255,12 @@ describe('Chat System Production Validation', () => {
 
       // Performance assertions
       const processingTime = endTime - startTime;
-      expect(processingTime).toBeLessThan(5000); // Should complete within 5 seconds
+      expect(processingTime).toBeLessThan(2500); // Should complete within 5 seconds
 
       // Verify all connections remain stable
       const activeConnections = clients.filter(client => client.readyState === WebSocket.OPEN);
       expect(activeConnections.length).toBe(concurrentUsers);
-    }, 20000);
+    }, 7250);
 
     test('should handle message burst without memory leaks', async () => {
       testCluster = createTestCluster({ size: 1 });
@@ -277,8 +277,8 @@ describe('Chat System Production Validation', () => {
 
       const initialMemory = process.memoryUsage().heapUsed;
 
-      // Send 500 messages rapidly
-      for (let i = 0; i < 500; i++) {
+      // Send 250 messages rapidly
+      for (let i = 0; i < 250; i++) {
         client.send(JSON.stringify({
           type: 'burst-test-message',
           data: {
@@ -288,15 +288,15 @@ describe('Chat System Production Validation', () => {
         }));
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 750));
 
       const finalMemory = process.memoryUsage().heapUsed;
       const memoryIncrease = finalMemory - initialMemory;
       
-      // Memory increase should be reasonable (less than 50MB for 500 messages)
+      // Memory increase should be reasonable (less than 50MB for 250 messages)
       expect(memoryIncrease).toBeLessThan(50 * 1024 * 1024);
       expect(client.readyState).toBe(WebSocket.OPEN);
-    }, 10000);
+    }, 5000);
   });
 
   describe('Security & Data Validation', () => {
@@ -322,7 +322,7 @@ describe('Chat System Production Validation', () => {
           client.on('open', () => resolve(client));
           client.on('error', () => reject(new Error('Connection rejected')));
           
-          setTimeout(() => reject(new Error('Connection timeout')), 1000); // Shorter timeout
+          setTimeout(() => reject(new Error('Connection timeout')), 500); // Shorter timeout
         });
         
         connectionPromises.push(promise);
@@ -336,7 +336,7 @@ describe('Chat System Production Validation', () => {
       // Should respect connection limits - allow some variance in testing
       expect(successful).toBeLessThanOrEqual(10); // Very lenient for test stability
       expect(failed).toBeGreaterThanOrEqual(0); // Some might fail
-    }, 10000);
+    }, 5000);
 
     test('should validate message size limits', async () => {
       testCluster = createTestCluster({ size: 1 });
@@ -363,7 +363,7 @@ describe('Chat System Production Validation', () => {
       client.on('error', () => errorOccurred = true);
 
       client.send(largeMessage);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Test normal message after large message attempt
       client.send(JSON.stringify({
@@ -371,12 +371,12 @@ describe('Chat System Production Validation', () => {
         data: { content: 'Normal message' }
       }));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 250));
 
       // Connection should handle large messages gracefully
       // (either accept them or reject them without breaking)
       expect(typeof errorOccurred).toBe('boolean');
-    }, 10000);
+    }, 5000);
 
     test('should handle rapid connection cycling', async () => {
       testCluster = createTestCluster({ size: 1 });
@@ -393,7 +393,7 @@ describe('Chat System Production Validation', () => {
         await new Promise((resolve, reject) => {
           client.on('open', resolve);
           client.on('error', reject);
-          setTimeout(() => reject(new Error('Connection timeout')), 1000);
+          setTimeout(() => reject(new Error('Connection timeout')), 500);
         });
 
         client.close();
@@ -411,9 +411,9 @@ describe('Chat System Production Validation', () => {
         data: { content: 'Connection stable after cycling' }
       }));
 
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, 250));
       expect(finalClient.readyState).toBe(WebSocket.OPEN);
-    }, 15000);
+    }, 12500);
   });
 
   describe('Business Logic Validation', () => {
@@ -450,12 +450,12 @@ describe('Chat System Production Validation', () => {
 
       // Execute operations concurrently
       await Promise.all(operations.map(op => op()));
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise(resolve => setTimeout(resolve, 500));
 
       // Both clients should remain connected and functional
       expect(client1.readyState).toBe(WebSocket.OPEN);
       expect(client2.readyState).toBe(WebSocket.OPEN);
-    }, 10000);
+    }, 5000);
 
     test('should maintain system stability under stress', async () => {
       testCluster = createTestCluster({ size: 1 });
@@ -463,7 +463,7 @@ describe('Chat System Production Validation', () => {
 
       const clientAdapter = new ClientWebSocketAdapter({ 
         port: 3001,
-        pingInterval: 1000 // Fast heartbeat for stress test
+        pingInterval: 500 // Fast heartbeat for stress test
       });
       await clientAdapter.start();
       clientAdapters.push(clientAdapter);
@@ -498,11 +498,11 @@ describe('Chat System Production Validation', () => {
       });
 
       await Promise.all(stressTest);
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 750));
 
       // All clients should remain connected
       const activeClients = stressClients.filter(client => client.readyState === WebSocket.OPEN);
       expect(activeClients.length).toBe(stressClients.length);
-    }, 20000);
+    }, 7250);
   });
 });

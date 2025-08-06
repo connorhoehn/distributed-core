@@ -656,4 +656,185 @@ export class MetricsTracker extends EventEmitter {
     this.config = { ...this.config, ...newConfig };
     this.emit('config-updated', this.config);
   }
+
+  /**
+   * Track unified metrics - Used by ProductionScaleResourceManager
+   * @param metrics - The unified metrics to track
+   */
+  trackUnified(metrics: UnifiedMetrics): void {
+    this.metricsHistory.push(metrics);
+    
+    // Trim history to retention period (convert milliseconds to count)
+    const maxHistoryItems = Math.floor(this.config.retentionPeriod / this.config.collectionInterval);
+    if (this.metricsHistory.length > maxHistoryItems) {
+      this.metricsHistory = this.metricsHistory.slice(-maxHistoryItems);
+    }
+
+    // Check for alerts based on the new metrics
+    this.checkMetricsAlerts(metrics);
+    
+    // Emit metrics event for listeners
+    this.emit('metrics-tracked', metrics);
+  }
+
+  /**
+   * Increment a counter metric - Used by ProductionScaleResourceManager
+   * @param counterName - Name of the counter to increment
+   * @param value - Value to increment by (default: 1)
+   * @param tags - Optional tags for the counter
+   */
+  incrementCounter(counterName: string, value: number = 1, tags?: Record<string, string>): void {
+    const timestamp = Date.now();
+    
+    // Create a counter event
+    const counterEvent = {
+      type: 'counter',
+      name: counterName,
+      value,
+      tags,
+      timestamp
+    };
+
+    // Emit counter event for listeners
+    this.emit('counter-incremented', counterEvent);
+    
+    // If this is a resource-related counter, track it in current metrics
+    const currentMetrics = this.getCurrentMetrics();
+    if (currentMetrics) {
+      // Add counter data to the metrics for persistence
+      (currentMetrics as any).counters = (currentMetrics as any).counters || {};
+      (currentMetrics as any).counters[counterName] = 
+        ((currentMetrics as any).counters[counterName] || 0) + value;
+    }
+  }
+
+  /**
+   * Get gauge value - Used by ProductionScaleResourceManager
+   * @param gaugeName - Name of the gauge metric
+   * @param tags - Optional tags to filter by
+   * @returns Current gauge value or undefined if not found
+   */
+  getGaugeValue(gaugeName: string, tags?: Record<string, string>): number | undefined {
+    const currentMetrics = this.getCurrentMetrics();
+    if (!currentMetrics) return undefined;
+
+    // Simple implementation - look in current metrics or return default
+    const gauges = (currentMetrics as any).gauges || {};
+    
+    if (tags) {
+      // If tags are provided, look for specific gauge with those tags
+      const taggedKey = `${gaugeName}_${Object.entries(tags).map(([k, v]) => `${k}:${v}`).join('_')}`;
+      return gauges[taggedKey];
+    }
+    
+    return gauges[gaugeName];
+  }
+
+  /**
+   * Set gauge value - Used by ProductionScaleResourceManager
+   * @param gaugeName - Name of the gauge to set
+   * @param value - Value to set
+   * @param tags - Optional tags for the gauge
+   */
+  setGauge(gaugeName: string, value: number, tags?: Record<string, string>): void {
+    const timestamp = Date.now();
+    
+    // Create a gauge event
+    const gaugeEvent = {
+      type: 'gauge',
+      name: gaugeName,
+      value,
+      tags,
+      timestamp
+    };
+
+    // Emit gauge event for listeners
+    this.emit('gauge-set', gaugeEvent);
+    
+    // Store in current metrics
+    const currentMetrics = this.getCurrentMetrics();
+    if (currentMetrics) {
+      (currentMetrics as any).gauges = (currentMetrics as any).gauges || {};
+      
+      if (tags) {
+        const taggedKey = `${gaugeName}_${Object.entries(tags).map(([k, v]) => `${k}:${v}`).join('_')}`;
+        (currentMetrics as any).gauges[taggedKey] = value;
+      } else {
+        (currentMetrics as any).gauges[gaugeName] = value;
+      }
+    }
+  }
+
+  /**
+   * Check metrics against alert thresholds and create alerts if needed
+   */
+  private checkMetricsAlerts(metrics: UnifiedMetrics): void {
+    if (!this.config.enableAlerts) {
+      return;
+    }
+
+    const alerts: Alert[] = [];
+
+    // CPU alert
+    if (metrics.system.cpu.percentage > this.config.thresholds.cpu) {
+      alerts.push({
+        id: `cpu-${Date.now()}`,
+        severity: 'warning',
+        message: `High CPU usage: ${metrics.system.cpu.percentage.toFixed(2)}%`,
+        timestamp: metrics.timestamp,
+        source: 'MetricsTracker'
+      });
+    }
+
+    // Memory alert
+    if (metrics.system.memory.percentage > this.config.thresholds.memory) {
+      alerts.push({
+        id: `memory-${Date.now()}`,
+        severity: 'warning',
+        message: `High memory usage: ${metrics.system.memory.percentage.toFixed(2)}%`,
+        timestamp: metrics.timestamp,
+        source: 'MetricsTracker'
+      });
+    }
+
+    // Disk alert
+    if (metrics.system.disk.percentage > this.config.thresholds.disk) {
+      alerts.push({
+        id: `disk-${Date.now()}`,
+        severity: 'warning',
+        message: `High disk usage: ${metrics.system.disk.percentage.toFixed(2)}%`,
+        timestamp: metrics.timestamp,
+        source: 'MetricsTracker'
+      });
+    }
+
+    // Network latency alert (check if network metrics have latency info)
+    if ((metrics.network as any).latency && 
+        (metrics.network as any).latency > this.config.thresholds.networkLatency) {
+      alerts.push({
+        id: `network-latency-${Date.now()}`,
+        severity: 'error',
+        message: `High network latency: ${((metrics.network as any).latency).toFixed(2)}ms`,
+        timestamp: metrics.timestamp,
+        source: 'MetricsTracker'
+      });
+    }
+
+    // Add new alerts
+    this.alerts.push(...alerts);
+    
+    // Trim alerts to retention period
+    const maxAlertItems = Math.floor(this.config.retentionPeriod / this.config.collectionInterval);
+    if (this.alerts.length > maxAlertItems) {
+      this.alerts = this.alerts.slice(-maxAlertItems);
+    }
+
+    // Emit alerts and call alert handlers
+    alerts.forEach(alert => {
+      this.emit('alert', alert);
+      if (this.config.alertHandlers) {
+        this.config.alertHandlers.forEach(handler => handler(alert));
+      }
+    });
+  }
 }

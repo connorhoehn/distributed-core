@@ -747,10 +747,33 @@ export class ProductionChatHarness {
       })
     );
 
+    // Calculate resource distribution and health
+    const resourceDistribution = new Map<string, number>();
+    let healthyResources = 0;
+    let totalResources = 0;
+
+    for (const nodeStat of resourceStats) {
+      resourceDistribution.set(nodeStat.nodeId, nodeStat.resources);
+      totalResources += nodeStat.resources;
+      // For now, assume all resources are healthy if utilization < 90%
+      if (nodeStat.utilization < 0.9) {
+        healthyResources += nodeStat.resources;
+      }
+    }
+
     return {
+      // Legacy chat metrics (maintain backward compatibility)
       ...metrics,
       nodes: resourceStats,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      
+      // New resource-centric API (align with ProductionScaleResourceManager)
+      totalResources,
+      healthyResources,
+      unhealthyResources: totalResources - healthyResources,
+      resourceDistribution,
+      resourcesByType: new Map([['chat-room', totalResources]]),
+      resourcesByNode: resourceDistribution
     };
   }
 }

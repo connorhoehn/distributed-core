@@ -71,13 +71,13 @@ export class ProductionScaleResourceManager extends EventEmitter {
           timestamp: Date.now(),
           system: { cpu: { percentage: 0 }, memory: { used: 0, total: 0, percentage: 0 }, disk: { used: 0, available: 0, total: 0, percentage: 0 } },
           cluster: { membershipSize: 1, gossipRate: 0, failureDetectionLatency: 0, averageHeartbeatInterval: 0, messageRate: 0, messageLatency: 0, networkThroughput: 0, clusterStability: 'stable' },
-          network: { bytesIn: 0, bytesOut: 0, packetsIn: 0, packetsOut: 0, connectionsActive: 0, connectionsIdle: 0, errorRate: 0 },
-          connections: { active: 0, idle: 0, total: 0, poolUtilization: 0, errorRate: 0, avgConnectionTime: 0 },
-          health: { overall: 'healthy', components: {} }
+          network: { latency: 0, status: 'connected', roundTripTimes: new Map(), failedConnections: 0, activeConnections: 0 },
+          connections: { totalAcquired: 0, totalReleased: 0, totalCreated: 0, totalDestroyed: 0, activeConnections: 0, poolUtilization: 0, averageAcquireTime: 0, connectionHealth: 'healthy' },
+          health: { overallHealth: 'healthy', nodeHealth: new Map(), systemAlerts: [], performanceTrends: { cpu: 'stable', memory: 'stable', network: 'stable' } }
         });
 
         // Start auto-scaling if enabled
-        if (resource.scaling?.enabled) {
+        if (resource.applicationData?.scaling?.enabled) {
           this.startAutoScaling(resource.resourceId);
         }
 
@@ -88,7 +88,7 @@ export class ProductionScaleResourceManager extends EventEmitter {
       },
       onResourceDestroyed: async (resource: ResourceMetadata) => {
         // Track destruction metrics
-        this.metricsTracker.incrementCounter('resources_destroyed_total', {
+        this.metricsTracker.incrementCounter('resources_destroyed_total', 1, {
           type: resource.resourceType,
           node: resource.nodeId
         });
@@ -125,7 +125,7 @@ export class ProductionScaleResourceManager extends EventEmitter {
         selectedNode = targetNode;
         break;
       default:
-        selectedNode = this.clusterManager.getLocalNodeId();
+        selectedNode = this.clusterManager.localNodeId;
     }
 
     const fullResourceMetadata: ResourceMetadata = {
@@ -158,19 +158,19 @@ export class ProductionScaleResourceManager extends EventEmitter {
 
   private async checkAndScale(resourceId: string): Promise<void> {
     const resource = this.resourceRegistry.getResource(resourceId);
-    if (!resource || !resource.scaling?.enabled) return;
+    if (!resource || !resource.applicationData?.scaling?.enabled) return;
 
     const metrics = await this.getResourceMetrics(resourceId);
     const currentLoad = metrics.cpuUsage || 0;
 
     // Scale up if load is high
-    if (currentLoad > resource.scaling.scaleUpThreshold && 
-        resource.capacity.currentReplicas < resource.scaling.maxReplicas) {
+    if (currentLoad > (resource.applicationData?.scaling?.scaleUpThreshold || 80) && 
+        (resource.applicationData?.currentReplicas || 1) < (resource.applicationData?.scaling?.maxReplicas || 1)) {
       await this.scaleUp(resourceId);
     }
     // Scale down if load is low
-    else if (currentLoad < resource.scaling.scaleDownThreshold && 
-             resource.capacity.currentReplicas > resource.scaling.minReplicas) {
+    else if (currentLoad < (resource.applicationData?.scaling?.scaleDownThreshold || 20) && 
+             (resource.applicationData?.currentReplicas || 1) > (resource.applicationData?.scaling?.minReplicas || 1)) {
       await this.scaleDown(resourceId);
     }
   }
@@ -180,13 +180,13 @@ export class ProductionScaleResourceManager extends EventEmitter {
     if (!resource) return;
 
     const newReplicaCount = Math.min(
-      resource.capacity.currentReplicas + 1,
-      resource.scaling?.maxReplicas || 1
+      (resource.applicationData?.currentReplicas || 1) + 1,
+      resource.applicationData?.scaling?.maxReplicas || 1
     );
 
     await this.resourceRegistry.updateResource(resourceId, {
-      capacity: {
-        ...resource.capacity,
+      applicationData: {
+        ...resource.applicationData,
         currentReplicas: newReplicaCount
       }
     });
@@ -199,13 +199,13 @@ export class ProductionScaleResourceManager extends EventEmitter {
     if (!resource) return;
 
     const newReplicaCount = Math.max(
-      resource.capacity.currentReplicas - 1,
-      resource.scaling?.minReplicas || 1
+      (resource.applicationData?.currentReplicas || 1) - 1,
+      resource.applicationData?.scaling?.minReplicas || 1
     );
 
     await this.resourceRegistry.updateResource(resourceId, {
-      capacity: {
-        ...resource.capacity,
+      applicationData: {
+        ...resource.applicationData,
         currentReplicas: newReplicaCount
       }
     });
@@ -215,18 +215,17 @@ export class ProductionScaleResourceManager extends EventEmitter {
 
   // Load Balancing and Node Selection
   private async selectOptimalNode(resourceType: string): Promise<string> {
-    const clusterTopology = await this.clusterManager.getClusterTopology();
-    const nodes = Array.from(clusterTopology.nodes.keys());
+    const nodes = this.clusterManager.getAliveMembers().map(member => member.id);
     
     if (nodes.length === 0) {
-      return this.clusterManager.getLocalNodeId();
+      return this.clusterManager.localNodeId;
     }
 
     // Simple load-based selection for now
     const nodeLoads = new Map<string, number>();
     for (const nodeId of nodes) {
       const resources = this.resourceRegistry.getResourcesByNode(nodeId);
-      const load = resources.reduce((sum, r) => sum + (r.capacity.currentLoad || 0), 0);
+      const load = resources.reduce((sum, r) => sum + (r.capacity.current || 0), 0);
       nodeLoads.set(nodeId, load);
     }
 
@@ -286,7 +285,7 @@ export class ProductionScaleResourceManager extends EventEmitter {
     // Try to recover the resource
     if (health.issues.includes('High CPU usage') || health.issues.includes('High memory usage')) {
       // Scale up if possible
-      if (resource.scaling?.enabled && resource.capacity.currentReplicas < (resource.scaling.maxReplicas || 1)) {
+      if (resource.applicationData?.scaling?.enabled && (resource.applicationData?.currentReplicas || 1) < (resource.applicationData?.scaling?.maxReplicas || 1)) {
         await this.scaleUp(resource.resourceId);
       }
     }
@@ -333,7 +332,7 @@ export class ProductionScaleResourceManager extends EventEmitter {
     });
 
     this.resourceRegistry.on('resource:migrated', (resource: ResourceMetadata) => {
-      this.metricsTracker.incrementCounter('resource_migrations_total', {
+      this.metricsTracker.incrementCounter('resource_migrations_total', 1, {
         type: resource.resourceType,
         to_node: resource.nodeId
       });
