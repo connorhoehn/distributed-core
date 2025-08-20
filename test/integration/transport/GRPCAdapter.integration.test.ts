@@ -1,4 +1,4 @@
-import { GRPCAdapter } from '../../../src/transport/adapters/GRPCAdapter';
+import { GRPCAdapter } from '../../../src/transport/adapters';
 import { Message, MessageType } from '../../../src/types';
 
 describe('GRPCAdapter', () => {

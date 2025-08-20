@@ -3,5 +3,5 @@ export { WebSocketAdapter } from './WebSocketAdapter';
 export { ClientWebSocketAdapter } from './ClientWebSocketAdapter';
 export { TCPAdapter } from './TCPAdapter';
 export { HTTPAdapter } from './HTTPAdapter';
-// ...existing code...
+export { GRPCAdapter } from './GRPCAdapter';
 export { UDPAdapter } from './UDPAdapter';
