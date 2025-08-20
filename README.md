@@ -1,6 +1,28 @@
+
 # Distributed Core Sandbox
 
 ![CI](https://github.com/connorhoehn/distributed-core/actions/workflows/ci.yml/badge.svg)
+
+## Overview
+Distributed Core is a research kernel for distributed systems, providing modular primitives and subsystems for building clusters, agents, and distributed applications. It is not a business-logic framework; all real-world scenarios are implemented as examples outside the core.
+
+### Features
+- **Cluster Management**: Node membership, join/leave, topology, and resource registry.
+- **Messaging & Transport**: Reliable message delivery, batching, encryption, circuit breaking, and retry logic.
+- **Persistence**: Write-ahead log, state store, checkpointing, compaction, and memory backends.
+- **Pluggable Coordinators**: Gossip, Etcd, Zookeeper, InMemory for cluster coordination and consensus.
+- **Observability**: Metrics, logging, diagnostics, and chaos injection for testing resilience.
+- **Front Door APIs**: Node, Cluster, Agent, and CLI entrypoints for bootstrapping and management.
+- **Examples-Driven**: All downstream use cases (API server, queue, database, management agent) live in `/examples/`.
+
+### Subsystems
+- **Cluster**: Membership, topology, aggregation, lifecycle, reconciliation, seeding, and quorum.
+- **Applications**: Registry, chat, and custom modules.
+- **Messaging**: Router, handlers, cluster messaging, and transport adapters.
+- **Persistence**: WAL, state store, broadcast buffer, checkpointing, compaction, and memory backends.
+- **Identity**: Key management, node metadata, and authentication.
+- **Monitoring**: Failure detection, metrics, and observability tools.
+- **Diagnostics**: Chaos injection and diagnostic utilities.
 
 ## Project Goals
 - **Research Kernel for Distributed Systems**: Modular primitives for cluster join, gossip, replication, quorum, persistence, compaction, and more.
@@ -21,33 +43,3 @@
 npm test
 npm run test:integration
 ```
-
-## GitHub Actions Workflow
-Add this to `.github/workflows/ci.yml`:
-```yaml
-name: CI
-on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-
-jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      - run: npm install
-      - run: npm test
-      - run: npm run test:integration
-```
-
-## Badge Example
-Add this to the top of your README:
-```
-![CI](https://github.com/<OWNER>/<REPO>/actions/workflows/ci.yml/badge.svg)
-```
-Replace `<OWNER>` and `<REPO>` with your GitHub username and repo name.
