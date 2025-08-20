@@ -47,6 +47,7 @@ describe('Transport Adapters Working Demo', () => {
         port: 8086, 
         enableLogging: false 
       })
+      // GRPCAdapter removed: not available in this build
     ];
 
     adapters.forEach(adapter => {
