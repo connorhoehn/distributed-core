@@ -4,11 +4,36 @@
 
 import { LogicalService, VectorClock } from '../introspection/ClusterIntrospection';
 import { StateFingerprint, FingerprintComparison } from './StateFingerprint';
+import { ResourceMetadata } from '../../resources/types';
 
 /**
  * Types of delta operations
  */
 export type DeltaOperation = 'add' | 'modify' | 'delete';
+
+/**
+ * Individual resource change
+ */
+export interface ResourceDelta {
+  operation: DeltaOperation;
+  resourceId: string;
+  resource?: ResourceMetadata;       // Full resource for add/modify
+  patch?: ResourcePatch;             // Partial changes for modify
+  previousVersion?: number;          // For conflict detection
+  timestamp: number;
+}
+
+/**
+ * Partial resource updates
+ */
+export interface ResourcePatch {
+  capacity?: Partial<ResourceMetadata['capacity']>;
+  performance?: Partial<ResourceMetadata['performance']>;
+  distribution?: Partial<ResourceMetadata['distribution']>;
+  applicationData?: Partial<Record<string, any>>;
+  state?: ResourceMetadata['state'];
+  health?: ResourceMetadata['health'];
+}
 
 /**
  * Individual service change
@@ -45,6 +70,7 @@ export interface StateDelta {
   
   // Delta operations
   services: ServiceDelta[];
+  resources: ResourceDelta[];        // Resource state changes
   
   // Metadata
   timestamp: number;
@@ -178,6 +204,7 @@ export class StateDeltaManager {
         targetNodeId,
         sourceFingerprint,
         services: chunk,
+        resources: [], // Empty for now, will be populated by resource operations
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: this.sequenceCounter,
@@ -191,6 +218,39 @@ export class StateDeltaManager {
     }
 
     return deltas;
+  }
+
+  /**
+   * Generate resource delta for a single resource operation
+   */
+  generateResourceDelta(
+    operation: DeltaOperation,
+    resource: ResourceMetadata,
+    sourceNodeId: string,
+    targetNodeId?: string
+  ): StateDelta {
+    const resourceDelta: ResourceDelta = {
+      operation,
+      resourceId: resource.resourceId,
+      resource: operation === 'delete' ? undefined : resource,
+      timestamp: Date.now()
+    };
+
+    return {
+      id: `resource-delta-${Date.now()}-${++this.sequenceCounter}`,
+      sourceNodeId,
+      targetNodeId,
+      sourceFingerprint: '', // Will be set by caller
+      services: [],
+      resources: [resourceDelta],
+      timestamp: Date.now(),
+      version: 1,
+      sequenceNumber: this.sequenceCounter,
+      vectorClockUpdates: {}, // Simple implementation
+      causality: [],
+      compressed: false,
+      encrypted: false
+    };
   }
 
   /**
@@ -292,6 +352,7 @@ export class StateDeltaManager {
       sourceNodeId: deltas[0].sourceNodeId,
       sourceFingerprint: deltas[0].sourceFingerprint,
       services: mergedServices,
+      resources: [], // TODO: Implement resource merging
       timestamp: Date.now(),
       version: Math.max(...deltas.map(d => d.version)),
       sequenceNumber: Math.max(...deltas.map(d => d.sequenceNumber)),

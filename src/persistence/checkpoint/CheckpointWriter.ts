@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { CheckpointWriter, CheckpointSnapshot, EntityState, CheckpointConfig } from './types';
+import { CheckpointWriter, CheckpointSnapshot, EntityState, CheckpointConfig } from '../types';
 
 export class CheckpointWriterImpl implements CheckpointWriter {
   private config: Required<CheckpointConfig> & { filePath: string };
@@ -10,10 +10,50 @@ export class CheckpointWriterImpl implements CheckpointWriter {
       checkpointPath: config.checkpointPath || './data/checkpoints',
       filePath: config.checkpointPath || './data/checkpoints', // Internal use
       interval: config.interval !== undefined ? config.interval : 0, // disabled by default
+      retention: config.retention !== undefined ? config.retention : 0, // default value for retention
       lsnThreshold: config.lsnThreshold !== undefined ? config.lsnThreshold : 1000,
       keepHistory: config.keepHistory || 5,
       compressionEnabled: config.compressionEnabled || false
     };
+  }
+  async write(data: CheckpointSnapshot): Promise<void> {
+    // Use current timestamp as LSN if not provided
+    const lsn = data.timestamp || Date.now();
+
+    // Ensure checkpoint directory exists
+    await fs.mkdir(this.config.filePath, { recursive: true });
+
+    const filename = `checkpoint-lsn-${lsn.toString().padStart(8, '0')}.json`;
+    const filePath = path.join(this.config.filePath, filename);
+    const tempPath = `${filePath}.tmp`;
+
+    try {
+      // Write to temporary file first
+      const content = JSON.stringify(data, null, 2);
+      await fs.writeFile(tempPath, content, 'utf-8');
+      
+      // Atomic rename
+      await fs.rename(tempPath, filePath);
+
+      // Update latest symlink/pointer
+      const latestPath = path.join(this.config.filePath, 'latest.json');
+      await fs.writeFile(latestPath, JSON.stringify({ 
+        lsn, 
+        filename, 
+        timestamp: data.timestamp 
+      }), 'utf-8');
+
+      // Clean up old checkpoints
+      await this.cleanup();
+    } catch (error) {
+      // Clean up temp file on error
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+      throw error;
+    }
   }
 
   async writeSnapshot(lsn: number, entities: Record<string, EntityState>): Promise<void> {
@@ -21,7 +61,6 @@ export class CheckpointWriterImpl implements CheckpointWriter {
     await fs.mkdir(this.config.filePath, { recursive: true });
 
     const snapshot: CheckpointSnapshot = {
-      lsn,
       entities,
       timestamp: Date.now(),
       version: '1.0'

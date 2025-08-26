@@ -2,12 +2,12 @@ import { EventEmitter } from 'events';
 import { ClusterManager } from '../ClusterManager';
 import { StateAggregator, AggregatedClusterState } from '../aggregation/StateAggregator';
 import { ClusterState, LogicalService, PerformanceMetrics } from '../introspection/ClusterIntrospection';
-import { ClusterHealth, ClusterTopology, ClusterMetadata, NodeInfo } from '../types';
+import { ClusterHealth, ClusterTopology, ClusterMetadata, NodeInfo, DistributionPolicy } from '../types';
 import { MetricsTracker, UnifiedMetrics } from '../../monitoring/metrics/MetricsTracker';
 import { ResourceRegistry } from '../resources/ResourceRegistry';
-import { ResourceTypeRegistry } from '../resources/ResourceTypeRegistry';
-import { ResourceMetadata, ResourceState, ResourceHealth, DistributionStrategy } from '../resources/types';
-
+import { ResourceTypeRegistry } from '../../resources';
+import { DistributionStrategy } from '../types';
+import { ResourceHealth, ResourceMetadata, ResourceState } from '../../resources';
 /**
  * Generic Resource Topology Manager
  * 
@@ -129,7 +129,7 @@ export interface ResourceClusterTopology {
     unhealthy: number;
   };
   distribution: {
-    strategy: DistributionStrategy;
+    strategy: { type: 'replicas'; count: number };
     replicationFactor: number;
     shardingEnabled: boolean;
     loadBalancing: 'round-robin' | 'least-loaded' | 'affinity-based' | 'custom';
@@ -269,7 +269,7 @@ export class ResourceTopologyManager extends EventEmitter {
         unhealthy: unhealthyResources
       },
       distribution: {
-        strategy: DistributionStrategy.LEAST_LOADED, // Default strategy
+        strategy: DistributionPolicy., // Default strategy
         replicationFactor: 2, // Default replication
         shardingEnabled: true,
         loadBalancing: 'least-loaded'

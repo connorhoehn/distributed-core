@@ -244,3 +244,5 @@ export interface ITransport {
    */
   getConnectionInfo(): Record<string, any>;
 }
+
+export type { ClusterNodeConfig, RangeHandler, ClusterMessage, ClusterInfo, RangeId, RingId } from './types';

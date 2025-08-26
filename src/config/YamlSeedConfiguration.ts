@@ -1,7 +1,7 @@
 import * as yaml from 'js-yaml';
 import { promises as fs } from 'fs';
 import { EventEmitter } from 'events';
-import { SeedNodeInfo } from '../cluster/seeding/SeedNodeRegistry';
+import { SeedNodeInfo } from '../cluster/core/seeding/SeedNodeRegistry';
 
 /**
  * YAML Seed Configuration Schema (Cassandra-style)

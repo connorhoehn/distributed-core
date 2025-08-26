@@ -7,7 +7,8 @@ import {
   ScalingStrategy,
   ModuleState 
 } from './types';
-import { ResourceMetadata, ResourceTypeDefinition } from '../cluster/resources/types';
+import type { ResourceTypeDefinition } from '../resources';
+import { ResourceMetadata } from '../resources';
 
 /**
  * ApplicationModule - Base interface for all application modules

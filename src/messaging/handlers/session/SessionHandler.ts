@@ -17,7 +17,7 @@ export class SessionHandler implements MessageHandler {
   }
 
   private handleJoin(message: RoutedMessage, session: Session): void {
-    const { roomId, userId } = message;
+    const { roomId, userId } = message as RoutedMessage & { roomId?: string; userId?: string };
     
     if (roomId) {
       session.setTag('room', roomId);
@@ -29,7 +29,7 @@ export class SessionHandler implements MessageHandler {
   }
 
   private handleLeave(message: RoutedMessage, session: Session): void {
-    const { roomId } = message;
+    const { roomId } = message as RoutedMessage & { roomId?: string };
     
     if (roomId) {
       session.removeTag('room');

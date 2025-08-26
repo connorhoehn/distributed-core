@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { CheckpointReader, CheckpointSnapshot, CheckpointConfig } from './types';
+import { CheckpointReader, CheckpointSnapshot, CheckpointConfig } from '../types';
 
 export class CheckpointReaderImpl implements CheckpointReader {
   private config: Required<CheckpointConfig> & { filePath: string };
@@ -10,10 +10,14 @@ export class CheckpointReaderImpl implements CheckpointReader {
       checkpointPath: config.checkpointPath || './data/checkpoints',
       filePath: config.checkpointPath || './data/checkpoints', // Internal use
       interval: config.interval !== undefined ? config.interval : 0,
+      retention: config.retention !== undefined ? config.retention : 0,
       lsnThreshold: config.lsnThreshold !== undefined ? config.lsnThreshold : 1000,
       keepHistory: config.keepHistory || 5,
       compressionEnabled: config.compressionEnabled || false
     };
+  }
+  read(): Promise<CheckpointSnapshot> {
+    throw new Error('Method not implemented.');
   }
 
   async readLatest(): Promise<CheckpointSnapshot | null> {

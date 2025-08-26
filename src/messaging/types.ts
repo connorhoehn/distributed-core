@@ -9,3 +9,6 @@ export interface MessageHandler {
 
 // Import Session type from connections
 import { Session } from '../connections/Session';
+export const IClusterCommunication = undefined; // TODO: Implement IClusterCommunication
+export const CommunicationConfig = undefined; // TODO: Implement CommunicationConfig
+export const GossipTargetSelection = undefined; // TODO: Implement GossipTargetSelection

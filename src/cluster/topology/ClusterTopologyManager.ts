@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
-import { ClusterManager } from '../ClusterManager';
-import { StateAggregator, AggregatedClusterState } from '../aggregation/StateAggregator';
+import { ClusterManager } from '../../cluster/ClusterManager';
+import { StateAggregator, AggregatedClusterState } from '../reconciliation/StateAggregator';
 import { ClusterState, LogicalService, PerformanceMetrics } from '../introspection/ClusterIntrospection';
 import { ClusterHealth, ClusterTopology, ClusterMetadata, NodeInfo } from '../types';
 import { MetricsTracker, UnifiedMetrics } from '../../monitoring/metrics/MetricsTracker';

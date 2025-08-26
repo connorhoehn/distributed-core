@@ -658,7 +658,7 @@ export class MetricsTracker extends EventEmitter {
   }
 
   /**
-   * Track unified metrics - Used by ProductionScaleResourceManager
+   * Track unified metrics - Used by ResourceManager
    * @param metrics - The unified metrics to track
    */
   trackUnified(metrics: UnifiedMetrics): void {
@@ -678,7 +678,7 @@ export class MetricsTracker extends EventEmitter {
   }
 
   /**
-   * Increment a counter metric - Used by ProductionScaleResourceManager
+   * Increment a counter metric - Used by ResourceManager
    * @param counterName - Name of the counter to increment
    * @param value - Value to increment by (default: 1)
    * @param tags - Optional tags for the counter
@@ -709,7 +709,7 @@ export class MetricsTracker extends EventEmitter {
   }
 
   /**
-   * Get gauge value - Used by ProductionScaleResourceManager
+   * Get gauge value - Used by ResourceManager
    * @param gaugeName - Name of the gauge metric
    * @param tags - Optional tags to filter by
    * @returns Current gauge value or undefined if not found
@@ -731,7 +731,7 @@ export class MetricsTracker extends EventEmitter {
   }
 
   /**
-   * Set gauge value - Used by ProductionScaleResourceManager
+   * Set gauge value - Used by ResourceManager
    * @param gaugeName - Name of the gauge to set
    * @param value - Value to set
    * @param tags - Optional tags for the gauge

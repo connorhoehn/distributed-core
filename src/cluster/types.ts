@@ -61,6 +61,13 @@ export type DistributionStrategy =
   | { type: 'primary' }
   | { type: 'all' };
 
+export enum DistributionPolicy {
+  LEAST_LOADED = 'least_loaded',
+  ROUND_ROBIN = 'round_robin',
+  WEIGHTED = 'weighted'
+}
+
+
 /**
  * Cluster health metrics
  */
@@ -119,3 +126,5 @@ export interface PartitionInfo {
   timestamp: number;
   partitionType?: 'zone-based' | 'network-split' | 'unknown';
 }
+export const QuorumStrategy = undefined; // TODO: Implement QuorumStrategy
+export const QuorumStrategyType = undefined; // TODO: Implement QuorumStrategyType

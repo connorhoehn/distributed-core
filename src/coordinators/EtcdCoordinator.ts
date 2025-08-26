@@ -1,14 +1,9 @@
 import { EventEmitter } from 'events';
-import {
-  IClusterCoordinator,
-  ClusterView,
-  RangeId,
-  RingId,
-  RangeLease,
-  NodeStatus,
-  ClusterFrameworkEvents
-} from './types';
+import { ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents } from '../types';
+import type { NodeStatus } from './types';;
 import { createLogger, FrameworkLogger } from '../common/logger';
+
+import { IClusterCoordinator } from './types';
 
 /**
  * Etcd-based coordinator (STUB)

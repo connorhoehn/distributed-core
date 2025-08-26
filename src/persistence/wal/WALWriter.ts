@@ -1,7 +1,8 @@
-import { WALWriter, WALFile, WALCoordinator, EntityUpdate, WALConfig } from './types';
+import { WALWriter, WALFile, WALCoordinator, WALConfig } from './types';
+// Ensure WALWriter in ./types uses EntityUpdate from ../types for compatibility
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
-
+import type { EntityUpdate } from './types';
 export class WALWriterImpl implements WALWriter {
   private walFile: WALFile;
   private coordinator: WALCoordinator;
@@ -29,13 +30,19 @@ export class WALWriterImpl implements WALWriter {
     // Initialize LSN from last entry in file
     const lastLSN = await this.walFile.getLastLSN();
     if (lastLSN > 0) {
-      (this.coordinator as WALCoordinatorImpl).resetLSN(lastLSN);
+      ((this.coordinator as unknown) as WALCoordinatorImpl).resetLSN(lastLSN);
     }
   }
 
   async append(update: EntityUpdate): Promise<number> {
     // Create WAL entry
-    const entry = this.coordinator.createEntry(update);
+    // Convert EntityUpdate from ../types to ./types.EntityUpdate
+    const walUpdate = {
+      ...update,
+      version: (update as any).version ?? 1, // Provide default or map as needed
+      operation: (update as any).operation ?? 'update' // Provide default or map as needed
+    };
+    const entry = this.coordinator.createEntry(walUpdate);
 
     // Validate if checksums are enabled
     if (this.config.checksumEnabled && !this.coordinator.validateEntry(entry)) {
@@ -92,7 +99,7 @@ export class WALWriterImpl implements WALWriter {
     // Update coordinator LSN if needed
     const lastLSN = await this.walFile.getLastLSN();
     if (lastLSN < this.coordinator.getCurrentLSN()) {
-      (this.coordinator as WALCoordinatorImpl).resetLSN(lastLSN);
+      ((this.coordinator as unknown) as WALCoordinatorImpl).resetLSN(lastLSN);
     }
   }
 

@@ -14,7 +14,6 @@ import { GossipCoordinator } from '../gossip/GossipCoordinator';
 import { EtcdCoordinator } from './EtcdCoordinator';
 import { ZookeeperCoordinator } from './ZookeeperCoordinator';
 import { createLogger, FrameworkLogger } from '../common/logger';
-
 /**
  * Range-based coordination framework for distributed applications.
  * 

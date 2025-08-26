@@ -1,6 +1,8 @@
 import { EventEmitter } from 'events';
 import { IClusterManagerContext, IRequiresContext } from '../core/IClusterManagerContext';
 import { ClusterHealth, ClusterTopology, ClusterMetadata, MembershipEntry } from '../types';
+import { ResourceMetadata } from '../../resources/types';
+import { ResourceRegistry } from '../../resources/core/ResourceRegistry';
 
 /**
  * Real-time performance tracking interface
@@ -64,6 +66,7 @@ export interface ClusterState {
   metadata: ClusterMetadata;
   performance: PerformanceMetrics;
   logicalServices: LogicalService[];
+  resources: Map<string, ResourceMetadata>;
   lastUpdated: number;
 }
 
@@ -79,6 +82,7 @@ export interface ClusterState {
  */
 export class ClusterIntrospection extends EventEmitter implements IRequiresContext {
   private context?: IClusterManagerContext;
+  private resourceRegistry?: ResourceRegistry;
   private logicalServices = new Map<string, LogicalService>();
   private performanceHistory: PerformanceMetrics[] = [];
   private maxHistorySize = 100;
@@ -86,8 +90,9 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
   private lastGossipCount = 0;
   private lastMessageCount = 0;
 
-  constructor() {
+  constructor(resourceRegistry?: ResourceRegistry) {
     super();
+    this.resourceRegistry = resourceRegistry;
   }
 
   /**
@@ -314,8 +319,32 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
       metadata: this.getMetadata(),
       performance: this.performanceHistory[this.performanceHistory.length - 1] || this.collectCurrentMetrics(),
       logicalServices: this.getLogicalServices(),
+      resources: this.resourceRegistry ? this.getResourcesMap() : new Map(),
       lastUpdated: Date.now()
     };
+  }
+
+  /**
+   * Get resources as a map (helper method)
+   */
+  private getResourcesMap(): Map<string, ResourceMetadata> {
+    if (!this.resourceRegistry) {
+      return new Map();
+    }
+    
+    try {
+      const resources = this.resourceRegistry.getAllResources();
+      const resourceMap = new Map<string, ResourceMetadata>();
+      
+      resources.forEach(resource => {
+        resourceMap.set(resource.resourceId, resource);
+      });
+      
+      return resourceMap;
+    } catch (error) {
+      // If ResourceRegistry is not running, return empty map
+      return new Map();
+    }
   }
 
   /**

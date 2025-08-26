@@ -47,20 +47,41 @@ export class VacuumBasedCompactionStrategy extends CompactionStrategy {
   }
 
   planCompaction(segments: WALSegment[], checkpointMetrics: CheckpointMetrics): CompactionPlan | null {
-    // STUB: Implement vacuum-based compaction planning
-    
     if (segments.length === 0) {
       return null;
     }
 
-    // TODO: Implement logic to:
-    // 1. Identify segments with high dead tuple ratio
-    // 2. Plan vacuum operations to rebuild segments optimally
-    // 3. Optimize for read access patterns
-    // 4. Consider segment consolidation for better cache locality
-    
-    // console.log('[VacuumBasedCompaction] Planning not yet implemented');
-    return null; // STUB
+    // Identify segments exceeding dead tuple or fragmentation thresholds
+    const candidates = segments.filter(segment => {
+      const deadRatio = this.calculateDeadTupleRatio(segment);
+      const fragRatio = this.calculateFragmentationRatio(segment);
+      return deadRatio >= this.deadTupleThreshold || fragRatio >= this.fragmentationThreshold;
+    });
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    // Prioritize segments with highest dead tuple ratio
+    candidates.sort((a, b) => 
+      this.calculateDeadTupleRatio(b) - this.calculateDeadTupleRatio(a)
+    );
+
+    // Build compaction plan
+    const plan: CompactionPlan = {
+      planId: `vacuum-${Date.now()}`,
+      inputSegments: candidates,
+      outputSegments: candidates.map(s => ({
+        segmentId: s.segmentId,
+        estimatedSize: s.sizeBytes || 0,
+        lsnRange: { start: s.startLSN || 0, end: s.endLSN || 0 }
+      })),
+      estimatedSpaceSaved: candidates.reduce((acc, s) => acc + (s.sizeBytes || 0) * this.calculateDeadTupleRatio(s), 0),
+      estimatedDuration: 0, // STUB: estimation logic can be added
+      priority: 'medium'
+    };
+
+    return plan;
   }
 
   async executeCompaction(plan: CompactionPlan): Promise<CompactionResult> {

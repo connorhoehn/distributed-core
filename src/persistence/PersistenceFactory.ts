@@ -6,7 +6,7 @@ import { WALWriterImpl } from './wal/WALWriter';
 import { WALReaderImpl } from './wal/WALReader';
 import { CheckpointWriterImpl } from './checkpoint/CheckpointWriter';
 import { CheckpointReaderImpl } from './checkpoint/CheckpointReader';
-import { WALConfig } from './wal/types';
+import { WALConfig } from './types';
 import { CheckpointConfig } from './checkpoint/types';
 
 export interface PersistenceLayer {

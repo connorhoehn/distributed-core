@@ -1,14 +1,65 @@
-import { EventEmitter } from 'events';
 import { Connection } from './Connection';
 import { Session } from './Session';
 import { SendFunction, SessionMetadata, ConnectionConfig, MessageRouterFunction } from './types';
+import { ConnectionBackpressureManager, BackpressureConfig, BackpressureStats } from './ConnectionBackpressure';
 
-export class ConnectionManager extends EventEmitter {
+// Node.js environment access
+declare const console: any;
+
+// Simple EventEmitter implementation for this environment
+class SimpleEventEmitter {
+  private listeners = new Map<string, Function[]>();
+
+  emit(event: string, data?: any): boolean {
+    const handlers = this.listeners.get(event);
+    if (handlers) {
+      handlers.forEach(handler => {
+        try {
+          handler(data);
+        } catch (error) {
+          console.error(`Event handler error for ${event}:`, error);
+        }
+      });
+      return true;
+    }
+    return false;
+  }
+
+  on(event: string, listener: Function): this {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(listener);
+    return this;
+  }
+
+  once(event: string, listener: Function): this {
+    const onceWrapper = (data: any) => {
+      listener(data);
+      this.removeListener(event, onceWrapper);
+    };
+    return this.on(event, onceWrapper);
+  }
+
+  removeListener(event: string, listener: Function): this {
+    const handlers = this.listeners.get(event);
+    if (handlers) {
+      const index = handlers.indexOf(listener);
+      if (index >= 0) {
+        handlers.splice(index, 1);
+      }
+    }
+    return this;
+  }
+}
+
+export class ConnectionManager extends SimpleEventEmitter {
   private connections = new Map<string, Connection>();
   private tagIndex = new Map<string, Map<string, Set<Connection>>>(); // tagKey -> tagValue -> connections
   private readonly defaultConfig: ConnectionConfig;
+  private backpressureManager: ConnectionBackpressureManager;
 
-  constructor(config: ConnectionConfig = {}) {
+  constructor(config: ConnectionConfig = {}, backpressureConfig?: Partial<BackpressureConfig>) {
     super();
     this.defaultConfig = {
       heartbeatInterval: 30000,
@@ -16,6 +67,7 @@ export class ConnectionManager extends EventEmitter {
       maxMessageSize: 64 * 1024,
       ...config
     };
+    this.backpressureManager = new ConnectionBackpressureManager(backpressureConfig);
   }
 
   createConnection(
@@ -104,11 +156,22 @@ export class ConnectionManager extends EventEmitter {
     
     for (const conn of this.connections.values()) {
       if (conn.isActive() && (!filter || filter(conn))) {
-        try {
-          conn.send(message);
+        // Use backpressure queue for delivery
+        const queue = this.backpressureManager.getQueue(conn.id);
+        const result = queue.offer(message, { 
+          opId: `broadcast-${Date.now()}`,
+          priority: 1 
+        });
+        
+        if (result === 'enqueued') {
           sentCount++;
-        } catch (error) {
-          this.emit('broadcast-error', { connectionId: conn.id, error });
+          // Trigger immediate drain attempt
+          this.drainConnectionQueue(conn.id);
+        } else {
+          this.emit('broadcast-error', { 
+            connectionId: conn.id, 
+            error: new Error(`Message ${result}: queue full or error`) 
+          });
         }
       }
     }
@@ -266,6 +329,20 @@ export class ConnectionManager extends EventEmitter {
       if (tagMap.size === 0) {
         this.tagIndex.delete(tagKey);
       }
+    });
+  }
+
+  private async drainConnectionQueue(connectionId: string): Promise<void> {
+    const conn = this.connections.get(connectionId);
+    if (!conn || !conn.isActive()) {
+      return;
+    }
+
+    const queue = this.backpressureManager.getQueue(connectionId);
+    
+    // Provide writer function that sends through the connection
+    await queue.drain(async (message: any) => {
+      conn.send(message);
     });
   }
 

@@ -7,6 +7,21 @@ export class WALCoordinatorImpl implements WALCoordinator {
   constructor(initialLSN: number = 0) {
     this.currentLSN = initialLSN;
   }
+  private running: boolean = false;
+
+  async start(): Promise<void> {
+    if (this.running) return;
+    // Initialize resources, e.g., open WAL file, setup buffers, etc.
+    // For now, just mark as running.
+    this.running = true;
+  }
+
+  async stop(): Promise<void> {
+    if (!this.running) return;
+    // Cleanup resources, flush buffers, close WAL file, etc.
+    // For now, just mark as stopped.
+    this.running = false;
+  }
 
   getCurrentLSN(): number {
     return this.currentLSN;

@@ -152,6 +152,20 @@ export class Node {
   }
 
   /**
+   * Get node region from metadata
+   */
+  get region(): string {
+    return this.metadata.region;
+  }
+
+  /**
+   * Get node zone from metadata
+   */
+  get zone(): string {
+    return this.metadata.zone;
+  }
+
+  /**
    * Start the node and all its subsystems
    */
   async start(): Promise<void> {

@@ -1,5 +1,5 @@
 import fs from 'fs/promises';
-import path from 'path';
+import path from 'path'
 import { WALEntry, WALFile } from './types';
 
 export class WALFileImpl implements WALFile {

@@ -4,6 +4,7 @@
 
 import { EventEmitter } from 'events';
 import { StateConflict, LogicalService, VectorClock } from '../introspection/ClusterIntrospection';
+import { ResourceMetadata } from '../../resources/types';
 
 /**
  * Resolution strategy type
@@ -18,6 +19,19 @@ export type ResolutionStrategy =
   | 'average'             // Take the average of numeric values
   | 'majority'            // Take the value that appears most frequently
   | 'custom';             // Use a custom resolution function
+
+/**
+ * Resource conflict during delta application
+ */
+export interface ResourceConflict {
+  resourceId: string;
+  conflictType: 'version' | 'ownership' | 'placement' | 'missing-dependency' | 'already-deleted';
+  conflictingVersions: Map<string, ResourceMetadata>; // nodeId -> resource version
+  expectedVersion?: number;
+  actualVersion?: number;
+  description: string;
+  timestamp: number;
+}
 
 /**
  * Configuration for conflict resolution
@@ -478,5 +492,199 @@ export class StateReconciler extends EventEmitter {
       return strings.reduce((longest, current) => 
         current.length > longest.length ? current : longest, '');
     });
+  }
+
+  // ===== RESOURCE CONFLICT RESOLUTION =====
+
+  /**
+   * Resolve a resource conflict using the specified strategy
+   */
+  async resolveResourceConflict(
+    conflict: ResourceConflict, 
+    strategy: ResolutionStrategy = 'last-writer-wins'
+  ): Promise<ResourceMetadata> {
+    const resources = Array.from(conflict.conflictingVersions.values());
+    
+    if (resources.length === 0) {
+      throw new Error(`No resource versions available to resolve conflict for ${conflict.resourceId}`);
+    }
+
+    if (resources.length === 1) {
+      return resources[0];
+    }
+
+    let resolvedResource: ResourceMetadata;
+
+    switch (strategy) {
+      case 'last-writer-wins':
+        resolvedResource = this.resolveResourceByTimestamp(resources, true);
+        break;
+      case 'first-writer-wins':
+        resolvedResource = this.resolveResourceByTimestamp(resources, false);
+        break;
+      case 'max-value':
+        resolvedResource = this.resolveResourceByVersion(resources, true);
+        break;
+      case 'min-value':
+        resolvedResource = this.resolveResourceByVersion(resources, false);
+        break;
+      case 'union-merge':
+        resolvedResource = this.mergeResourceVersions(resources);
+        break;
+      case 'majority':
+        resolvedResource = this.resolveResourceByMajority(resources);
+        break;
+      default:
+        throw new Error(`Resource conflict resolution strategy '${strategy}' not supported`);
+    }
+
+    // Emit resolution event
+    this.emit('resource-conflict-resolved', {
+      conflict,
+      strategy,
+      resolvedResource,
+      timestamp: Date.now()
+    });
+
+    return resolvedResource;
+  }
+
+  /**
+   * Resolve resource conflict by timestamp (newest or oldest)
+   */
+  private resolveResourceByTimestamp(resources: ResourceMetadata[], takeNewest: boolean): ResourceMetadata {
+    return resources.reduce((chosen, current) => {
+      const chosenTime = chosen.timestamp || 0;
+      const currentTime = current.timestamp || 0;
+      
+      if (takeNewest) {
+        return currentTime > chosenTime ? current : chosen;
+      } else {
+        return currentTime < chosenTime ? current : chosen;
+      }
+    });
+  }
+
+  /**
+   * Resolve resource conflict by version number (using timestamp as version)
+   */
+  private resolveResourceByVersion(resources: ResourceMetadata[], takeHighest: boolean): ResourceMetadata {
+    return resources.reduce((chosen, current) => {
+      const chosenTime = chosen.timestamp || 0;
+      const currentTime = current.timestamp || 0;
+      
+      if (takeHighest) {
+        return currentTime > chosenTime ? current : chosen;
+      } else {
+        return currentTime < chosenTime ? current : chosen;
+      }
+    });
+  }
+
+  /**
+   * Merge multiple resource versions using union strategy
+   */
+  private mergeResourceVersions(resources: ResourceMetadata[]): ResourceMetadata {
+    const base = { ...resources[0] };
+    
+    for (let i = 1; i < resources.length; i++) {
+      const resource = resources[i];
+      
+      // Merge capacity (take maximum values)
+      if (resource.capacity) {
+        base.capacity = {
+          current: Math.max(base.capacity?.current || 0, resource.capacity.current || 0),
+          maximum: Math.max(base.capacity?.maximum || 0, resource.capacity.maximum || 0),
+          reserved: Math.max(base.capacity?.reserved || 0, resource.capacity.reserved || 0),
+          unit: base.capacity?.unit || resource.capacity.unit
+        };
+      }
+      
+      // Merge performance (take best values)
+      if (resource.performance) {
+        base.performance = {
+          latency: Math.min(base.performance?.latency || Infinity, resource.performance.latency || Infinity),
+          throughput: Math.max(base.performance?.throughput || 0, resource.performance.throughput || 0),
+          errorRate: Math.min(base.performance?.errorRate || Infinity, resource.performance.errorRate || Infinity)
+        };
+      }
+      
+      // Take latest timestamp
+      base.timestamp = Math.max(base.timestamp || 0, resource.timestamp || 0);
+      
+      // Merge applicationData
+      if (resource.applicationData) {
+        base.applicationData = { ...base.applicationData, ...resource.applicationData };
+      }
+    }
+    
+    return base;
+  }
+
+  /**
+   * Resolve resource conflict by majority vote (most common version)
+   */
+  private resolveResourceByMajority(resources: ResourceMetadata[]): ResourceMetadata {
+    // Group resources by their serialized representation
+    const versionCounts = new Map<string, { resource: ResourceMetadata, count: number }>();
+    
+    for (const resource of resources) {
+      const key = this.serializeResourceForComparison(resource);
+      const existing = versionCounts.get(key);
+      
+      if (existing) {
+        existing.count++;
+      } else {
+        versionCounts.set(key, { resource, count: 1 });
+      }
+    }
+    
+    // Find the version with the highest count
+    let majorityResource: ResourceMetadata = resources[0];
+    let maxCount = 0;
+    
+    for (const { resource, count } of versionCounts.values()) {
+      if (count > maxCount) {
+        maxCount = count;
+        majorityResource = resource;
+      }
+    }
+    
+    return majorityResource;
+  }
+
+  /**
+   * Serialize resource for comparison (exclude timestamps for version comparison)
+   */
+  private serializeResourceForComparison(resource: ResourceMetadata): string {
+    const comparable = {
+      resourceId: resource.resourceId,
+      resourceType: resource.resourceType,
+      nodeId: resource.nodeId,
+      capacity: resource.capacity,
+      performance: resource.performance,
+      distribution: resource.distribution,
+      state: resource.state,
+      health: resource.health
+    };
+    return JSON.stringify(comparable);
+  }
+
+  /**
+   * Create a resource conflict from multiple resource versions
+   */
+  createResourceConflict(
+    resourceId: string,
+    conflictingVersions: Map<string, ResourceMetadata>,
+    conflictType: ResourceConflict['conflictType'] = 'version',
+    description?: string
+  ): ResourceConflict {
+    return {
+      resourceId,
+      conflictType,
+      conflictingVersions,
+      description: description || `Resource ${resourceId} has conflicting versions across nodes`,
+      timestamp: Date.now()
+    };
   }
 }

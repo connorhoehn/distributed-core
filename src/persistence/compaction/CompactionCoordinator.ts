@@ -3,7 +3,7 @@ import { CompactionStrategy, WALMetrics, CheckpointMetrics, WALSegment, Compacti
 import { CompactionStrategyFactory, CompactionStrategyType } from './CompactionStrategyFactory';
 
 export interface CompactionCoordinatorConfig {
-  strategy: CompactionStrategy | CompactionStrategyType | { type: CompactionStrategyType; config: Record<string, any> };
+  strategy: CompactionStrategyType | { type: CompactionStrategyType; config: Record<string, any> } | CompactionStrategy;
   walPath: string;
   checkpointPath: string;
   schedulingInterval?: number; // How often to check if compaction is needed (ms)
@@ -15,7 +15,7 @@ export interface CompactionCoordinatorConfig {
  * Coordinates compaction across the cluster and integrates with existing WAL + checkpoint systems
  */
 export class CompactionCoordinator extends EventEmitter {
-  private strategy: CompactionStrategy;
+  private strategy: ReturnType<typeof CompactionStrategyFactory.create>;
   private config: Required<CompactionCoordinatorConfig>;
   private schedulingTimer: NodeJS.Timeout | null = null;
   private runningCompactions = new Set<string>();
@@ -33,11 +33,11 @@ export class CompactionCoordinator extends EventEmitter {
 
     // Initialize strategy
     if (typeof config.strategy === 'string') {
-      this.strategy = CompactionStrategyFactory.create(config.strategy);
+      this.strategy = CompactionStrategyFactory.create(config.strategy as CompactionStrategyType);
     } else if (typeof config.strategy === 'object' && 'type' in config.strategy) {
       this.strategy = CompactionStrategyFactory.createFromConfig(config.strategy);
     } else {
-      this.strategy = config.strategy;
+      this.strategy = config.strategy as ReturnType<typeof CompactionStrategyFactory.create>;
     }
   }
 

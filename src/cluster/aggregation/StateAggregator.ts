@@ -4,6 +4,7 @@ import { ClusterState, LogicalService, PerformanceMetrics, StateConflict, Vector
 import { ClusterHealth, ClusterTopology, ClusterMetadata } from '../types';
 import { Message, MessageType } from '../../types';
 import { StateReconciler, ResolutionResult } from '../reconciliation/StateReconciler';
+import { ResourceMetadata } from '../resources/types';
 
 /**
  * Aggregated cluster state from multiple nodes
@@ -15,6 +16,10 @@ export interface AggregatedClusterState {
   aggregatedMetrics: PerformanceMetrics;
   consistencyScore: number;
   partitionInfo: PartitionInfo;
+  // Resource state tracking
+  resources: Map<string, ResourceMetadata>;
+  resourcesByType: Map<string, ResourceMetadata[]>;
+  resourcesByNode: Map<string, ResourceMetadata[]>;
   timestamp: number;
 }
 
@@ -62,6 +67,11 @@ export class StateAggregator extends EventEmitter {
     reject: (error: Error) => void;
     timeout: NodeJS.Timeout;
   }>();
+  
+  // Resource state tracking
+  private clusterResources = new Map<string, ResourceMetadata>();
+  private resourcesByType = new Map<string, ResourceMetadata[]>();
+  private resourcesByNode = new Map<string, ResourceMetadata[]>();
 
   constructor(
     clusterManager: ClusterManager,
@@ -383,6 +393,10 @@ export class StateAggregator extends EventEmitter {
       aggregatedMetrics,
       consistencyScore,
       partitionInfo,
+      // Include resource state
+      resources: new Map(this.clusterResources),
+      resourcesByType: new Map(this.resourcesByType),
+      resourcesByNode: new Map(this.resourcesByNode),
       timestamp: Date.now()
     };
   }
@@ -724,5 +738,136 @@ export class StateAggregator extends EventEmitter {
    */
   getResolutionHistory(limit?: number) {
     return this.reconciler.getResolutionHistory(limit);
+  }
+
+  // ===== RESOURCE MANAGEMENT METHODS =====
+
+  /**
+   * Add a resource to cluster state
+   */
+  addResource(resource: ResourceMetadata): void {
+    this.clusterResources.set(resource.resourceId, resource);
+    
+    // Update by-type index
+    const typeList = this.resourcesByType.get(resource.resourceType) || [];
+    typeList.push(resource);
+    this.resourcesByType.set(resource.resourceType, typeList);
+    
+    // Update by-node index
+    const nodeList = this.resourcesByNode.get(resource.nodeId) || [];
+    nodeList.push(resource);
+    this.resourcesByNode.set(resource.nodeId, nodeList);
+    
+    this.emit('resource:added', resource);
+    this.emit('stateChanged', this.getLastAggregatedState());
+  }
+
+  /**
+   * Update a resource in cluster state
+   */
+  updateResource(resource: ResourceMetadata): void {
+    const existing = this.clusterResources.get(resource.resourceId);
+    if (!existing) {
+      throw new Error(`Resource ${resource.resourceId} not found for update`);
+    }
+    
+    // Remove from old indices if node or type changed
+    if (existing.resourceType !== resource.resourceType) {
+      this.removeFromTypeIndex(existing);
+      this.addToTypeIndex(resource);
+    }
+    
+    if (existing.nodeId !== resource.nodeId) {
+      this.removeFromNodeIndex(existing);
+      this.addToNodeIndex(resource);
+    }
+    
+    this.clusterResources.set(resource.resourceId, resource);
+    this.emit('resource:updated', resource, existing);
+    this.emit('stateChanged', this.getLastAggregatedState());
+  }
+
+  /**
+   * Remove a resource from cluster state
+   */
+  removeResource(resourceId: string): void {
+    const resource = this.clusterResources.get(resourceId);
+    if (!resource) {
+      throw new Error(`Resource ${resourceId} not found for removal`);
+    }
+    
+    this.clusterResources.delete(resourceId);
+    this.removeFromTypeIndex(resource);
+    this.removeFromNodeIndex(resource);
+    
+    this.emit('resource:removed', resource);
+    this.emit('stateChanged', this.getLastAggregatedState());
+  }
+
+  /**
+   * Get all cluster resources
+   */
+  getAllResources(): ResourceMetadata[] {
+    return Array.from(this.clusterResources.values());
+  }
+
+  /**
+   * Get resources by type
+   */
+  getResourcesByType(resourceType: string): ResourceMetadata[] {
+    return this.resourcesByType.get(resourceType) || [];
+  }
+
+  /**
+   * Get resources by node
+   */
+  getResourcesByNode(nodeId: string): ResourceMetadata[] {
+    return this.resourcesByNode.get(nodeId) || [];
+  }
+
+  /**
+   * Get resource by ID
+   */
+  getResource(resourceId: string): ResourceMetadata | undefined {
+    return this.clusterResources.get(resourceId);
+  }
+
+  // Helper methods for index management
+  private removeFromTypeIndex(resource: ResourceMetadata): void {
+    const typeList = this.resourcesByType.get(resource.resourceType);
+    if (typeList) {
+      const index = typeList.findIndex(r => r.resourceId === resource.resourceId);
+      if (index !== -1) {
+        typeList.splice(index, 1);
+        if (typeList.length === 0) {
+          this.resourcesByType.delete(resource.resourceType);
+        }
+      }
+    }
+  }
+
+  private addToTypeIndex(resource: ResourceMetadata): void {
+    const typeList = this.resourcesByType.get(resource.resourceType) || [];
+    typeList.push(resource);
+    this.resourcesByType.set(resource.resourceType, typeList);
+  }
+
+  private removeFromNodeIndex(resource: ResourceMetadata): void {
+    const nodeList = this.resourcesByNode.get(resource.nodeId);
+    if (nodeList) {
+      const index = nodeList.findIndex(r => r.resourceId === resource.resourceId);
+      if (index !== -1) {
+        nodeList.splice(index, 1);
+        if (nodeList.length === 0) {
+          this.resourcesByNode.delete(resource.nodeId);
+        }
+      }
+    }
+  }
+
+  private addToNodeIndex(resource: ResourceMetadata): void {
+    const nodeList = this.resourcesByNode.get(resource.nodeId) || [];
+    nodeList.push(resource);
+    this.resourcesByNode.set(resource.nodeId, nodeList);
   }
 }

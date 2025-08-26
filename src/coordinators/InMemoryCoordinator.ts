@@ -1,13 +1,6 @@
 import { EventEmitter } from 'events';
-import {
-  IClusterCoordinator,
-  ClusterView,
-  RangeId,
-  RingId,
-  RangeLease,
-  NodeStatus,
-  ClusterFrameworkEvents
-} from './types';
+import { IClusterCoordinator, ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents } from '../types';
+import type { NodeStatus } from './types';;
 import { createLogger, FrameworkLogger } from '../common/logger';
 
 /**

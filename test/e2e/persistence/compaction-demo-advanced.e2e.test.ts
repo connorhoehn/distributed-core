@@ -187,8 +187,8 @@ describe('Real TCP Distributed Compaction Demonstration', () => {
       await node.clusterManager.start();
       console.log(`  ✅ Started node: ${node.id}`);
       
-      // Small delay between starts
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Delay between starts to ensure transport is ready
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     // Allow time for cluster formation

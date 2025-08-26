@@ -20,7 +20,7 @@ import {
 
 // Import new modular components
 import { IClusterManagerContext } from './core/IClusterManagerContext';
-import { ClusterLifecycle } from './lifecycle/ClusterLifecycle';
+import { ClusterLifecycle } from './core';
 import { ClusterCommunication } from '../messaging/cluster/ClusterCommunication';
 import { ClusterIntrospection } from './introspection/ClusterIntrospection';
 import { ClusterSecurity } from '../identity/keys/ClusterSecurity';
