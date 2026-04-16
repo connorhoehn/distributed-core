@@ -70,6 +70,19 @@ export interface CompactionMetrics {
 }
 
 /**
+ * Provider interface for gathering WAL and checkpoint metrics.
+ * Implement this to wire real WAL/checkpoint systems into the CompactionCoordinator.
+ */
+export interface CompactionMetricsProvider {
+  /** Gather current WAL metrics (segment count, size, age, ratios). */
+  getWALMetrics(): Promise<WALMetrics>;
+  /** Gather current checkpoint metrics (last LSN, age, segments since). */
+  getCheckpointMetrics(): Promise<CheckpointMetrics>;
+  /** Load metadata for all WAL segments eligible for compaction. */
+  getWALSegments(): Promise<WALSegment[]>;
+}
+
+/**
  * Abstract base class for compaction strategies
  */
 export abstract class CompactionStrategy {

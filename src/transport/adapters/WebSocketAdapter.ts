@@ -57,7 +57,7 @@ export class WebSocketAdapter extends Transport {
     this.circuitBreaker = new CircuitBreaker({
       name: `websocket-adapter-${nodeId.id}`,
       failureThreshold: 5,
-      timeout: 30000, // Increased from 15000 to 30000 for test environment
+      timeout: this.options.upgradeTimeout,
       enableLogging: this.options.enableLogging
     });
 
@@ -76,19 +76,12 @@ export class WebSocketAdapter extends Transport {
   }
 
   async start(): Promise<void> {
-    console.log(`[WebSocketAdapter:${this.nodeId.id}] start() called, isStarted=${this.isStarted}`);
     if (this.isStarted) return;
 
     try {
-      console.log(`[WebSocketAdapter:${this.nodeId.id}] Executing circuit breaker`);
       await this.circuitBreaker.execute(async () => {
-        console.log(`[WebSocketAdapter:${this.nodeId.id}] Inside circuit breaker execution`);
-        // Create HTTP server
-        console.log(`[WebSocketAdapter:${this.nodeId.id}] Creating HTTP server`);
         this.server = http.createServer();
-        
-        // Create WebSocket server
-        console.log(`[WebSocketAdapter:${this.nodeId.id}] Creating WebSocket server`);
+
         this.wss = new WebSocket.Server({
           server: this.server,
           clientTracking: true,
@@ -105,32 +98,20 @@ export class WebSocketAdapter extends Transport {
         this.wss.on('error', (error) => this.handleServerError(error));
         this.wss.on('close', () => this.emit('server-closed'));
 
-        // Start HTTP server
-        console.log(`[WebSocketAdapter:${this.nodeId.id}] About to start server on ${this.options.host}:${this.options.port}`);
-        console.log(`[WebSocketAdapter:${this.nodeId.id}] Actual values: host='${this.options.host}', port=${this.options.port}, type=${typeof this.options.port}`);
-        
         await new Promise<void>((resolve, reject) => {
-          console.log(`[WebSocketAdapter:${this.nodeId.id}] Calling server.listen()`);
-          
-          // Add timeout to prevent hanging
           const timeout = setTimeout(() => {
-            console.log(`[WebSocketAdapter:${this.nodeId.id}] Server listen timeout after 5 seconds`);
             reject(new Error(`Server listen timeout on ${this.options.host}:${this.options.port}`));
-          }, 5000);
+          }, this.options.upgradeTimeout);
 
-          // Try just port first to see if that works
           this.server!.listen(this.options.port, () => {
-            console.log(`[WebSocketAdapter:${this.nodeId.id}] Server listen callback called`);
             clearTimeout(timeout);
-            
+
             // Get actual port when using ephemeral port (0)
             const address = this.server!.address();
-            console.log(`[WebSocketAdapter:${this.nodeId.id}] Server address:`, address);
             if (address && typeof address === 'object' && address.port) {
               this.options.port = address.port;
             }
-            
-            console.log(`[WebSocketAdapter:${this.nodeId.id}] Server listening on ${this.options.host}:${this.options.port}`);
+
             if (this.options.enableLogging) {
               this.log(`WebSocket server listening on ${this.options.host}:${this.options.port}`);
             }
@@ -138,7 +119,6 @@ export class WebSocketAdapter extends Transport {
           });
 
           this.server!.on('error', (err) => {
-            console.log(`[WebSocketAdapter:${this.nodeId.id}] Server error:`, err);
             clearTimeout(timeout);
             reject(err);
           });
@@ -198,10 +178,6 @@ export class WebSocketAdapter extends Transport {
 
     // If target is specified, send directly to that target
     if (target) {
-      const localInfo = this.getLocalNodeInfo();
-      console.log(`[WebSocketAdapter:${localInfo.id}] Sending message to target: ${target.id}`);
-      
-      // First try to establish connection if needed
       try {
         await this.connect(target);
         const connection = this.connections.get(target.id);
@@ -210,17 +186,15 @@ export class WebSocketAdapter extends Transport {
           throw new Error(`Failed to establish connection to ${target.id}`);
         }
         
-        // Create a simple message to send
         const messageToSend = {
           ...message,
           target: target
         };
         
-        // Send raw message data through the connection
         connection.ws.send(JSON.stringify(messageToSend));
         return;
       } catch (error) {
-        console.error(`[WebSocketAdapter:${localInfo.id}] Failed to send to ${target.id}:`, error);
+        console.error(`[WebSocketAdapter] Failed to send to ${target.id}:`, error);
         throw error;
       }
     }
@@ -432,8 +406,6 @@ export class WebSocketAdapter extends Transport {
 
   private startHeartbeat(): void {
     this.heartbeatTimer = setInterval(() => {
-      const now = Date.now();
-      
       this.connections.forEach((connection) => {
         if (!connection.isActive) return;
         

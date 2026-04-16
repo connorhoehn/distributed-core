@@ -1,4 +1,20 @@
 import { EventEmitter } from 'events';
+import { Message, NodeId } from '../types';
+import { Transport } from './Transport';
+
+export interface BatchConfig {
+  maxBatchSize?: number;
+  flushIntervalMs?: number;
+  enableCompression?: boolean;
+  enableLogging?: boolean;
+}
+
+export interface BatchedTransport {
+  send: (message: Message, target: NodeId) => Promise<void>;
+  flush: () => Promise<void>;
+  destroy: () => void;
+  readonly batcher: MessageBatcher;
+}
 
 export interface BatchOptions {
   maxBatchSize?: number;
@@ -499,5 +515,111 @@ export class MessageBatcher extends EventEmitter {
     this.removeAllListeners();
     this.emit('destroyed');
     this.log('Message batcher destroyed');
+  }
+
+  /**
+   * Wrap a Transport's send() method with batching.
+   * Messages are queued by destination and flushed through the real
+   * transport when size, time, or priority thresholds are met.
+   *
+   * Usage:
+   *   const batched = MessageBatcher.wrapTransport(myTransport, { maxBatchSize: 50 });
+   *   await batched.send(message, targetNode);
+   *   await batched.flush(); // force-flush remaining
+   *   batched.destroy();     // cleanup timers
+   */
+  static wrapTransport(
+    transport: Transport,
+    config?: BatchConfig
+  ): BatchedTransport {
+    const batcher = new MessageBatcher({
+      maxBatchSize: config?.maxBatchSize,
+      flushInterval: config?.flushIntervalMs,
+      enableCompression: config?.enableCompression ?? false,
+      enableLogging: config?.enableLogging ?? false
+    });
+
+    // Map from batcher message-id to { message, target, resolve, reject }
+    const pendingMessages = new Map<string, {
+      message: Message;
+      target: NodeId;
+      resolve: () => void;
+      reject: (err: Error) => void;
+    }>();
+
+    // Staging slot: addMessage may synchronously flush (emitting
+    // batch-ready) before returning the generated ID. We stage the
+    // pending entry here so the event handler can register it by ID
+    // using the message-queued event that fires before flush checks.
+    let staged: {
+      message: Message;
+      target: NodeId;
+      resolve: () => void;
+      reject: (err: Error) => void;
+    } | null = null;
+
+    // message-queued fires inside addMessage BEFORE any flush check,
+    // giving us the batcher-generated ID to register the pending entry.
+    batcher.on('message-queued', (event: { messageId: string }) => {
+      if (staged) {
+        pendingMessages.set(event.messageId, staged);
+        staged = null;
+      }
+    });
+
+    async function sendBatch(batch: MessageBatch): Promise<void> {
+      for (const batchedMsg of batch.messages) {
+        const pending = pendingMessages.get(batchedMsg.id);
+        if (!pending) continue;
+        pendingMessages.delete(batchedMsg.id);
+        try {
+          await transport.send(pending.message, pending.target);
+          pending.resolve();
+        } catch (err) {
+          pending.reject(err instanceof Error ? err : new Error(String(err)));
+        }
+      }
+    }
+
+    batcher.on('batch-ready', (batch: MessageBatch) => {
+      sendBatch(batch).catch(() => {});
+    });
+
+    batcher.on('urgent-batch-ready', (batch: MessageBatch) => {
+      sendBatch(batch).catch(() => {});
+    });
+
+    return {
+      send(message: Message, target: NodeId): Promise<void> {
+        return new Promise<void>((resolve, reject) => {
+          const data = Buffer.from(JSON.stringify(message.data));
+          staged = { message, target, resolve, reject };
+          batcher.addMessage(target.id, data);
+          // If message-queued didn't fire (shouldn't happen), clear staging
+          staged = null;
+        });
+      },
+
+      flush(): Promise<void> {
+        batcher.flushAll();
+        // flushAll is synchronous in its emission; batches are sent
+        // via the event handler above. Return resolved once all
+        // pending items have been dispatched.
+        return Promise.resolve();
+      },
+
+      destroy(): void {
+        // Reject any remaining pending messages
+        for (const [, pending] of pendingMessages) {
+          pending.reject(new Error('BatchedTransport destroyed'));
+        }
+        pendingMessages.clear();
+        batcher.destroy();
+      },
+
+      get batcher(): MessageBatcher {
+        return batcher;
+      }
+    };
   }
 }

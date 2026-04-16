@@ -1,6 +1,68 @@
 import { EventEmitter } from 'events';
-import { CompactionStrategy, WALMetrics, CheckpointMetrics, WALSegment, CompactionPlan, CompactionResult } from './types';
+import { CompactionStrategy, WALMetrics, CheckpointMetrics, WALSegment, CompactionPlan, CompactionResult, CompactionMetricsProvider } from './types';
 import { CompactionStrategyFactory, CompactionStrategyType } from './CompactionStrategyFactory';
+
+/**
+ * Default stub metrics provider that returns hardcoded values.
+ * Use this as a fallback when no real WAL/checkpoint system is wired in.
+ */
+export class StubMetricsProvider implements CompactionMetricsProvider {
+  async getWALMetrics(): Promise<WALMetrics> {
+    return {
+      segmentCount: 5,
+      totalSizeBytes: 500 * 1024 * 1024, // 500MB
+      oldestSegmentAge: 48 * 60 * 60 * 1000, // 48 hours
+      tombstoneRatio: 0.25, // 25%
+      duplicateEntryRatio: 0.15 // 15%
+    };
+  }
+
+  async getCheckpointMetrics(): Promise<CheckpointMetrics> {
+    return {
+      lastCheckpointLSN: 1000,
+      lastCheckpointAge: 12 * 60 * 60 * 1000, // 12 hours
+      segmentsSinceCheckpoint: 3
+    };
+  }
+
+  async getWALSegments(): Promise<WALSegment[]> {
+    return [
+      {
+        segmentId: 'segment-001',
+        filePath: '/data/wal/segment-001.wal',
+        startLSN: 1,
+        endLSN: 500,
+        createdAt: Date.now() - 48 * 60 * 60 * 1000,
+        sizeBytes: 100 * 1024 * 1024,
+        entryCount: 5000,
+        tombstoneCount: 1250,
+        isImmutable: true
+      },
+      {
+        segmentId: 'segment-002',
+        filePath: '/data/wal/segment-002.wal',
+        startLSN: 501,
+        endLSN: 800,
+        createdAt: Date.now() - 24 * 60 * 60 * 1000,
+        sizeBytes: 75 * 1024 * 1024,
+        entryCount: 3000,
+        tombstoneCount: 600,
+        isImmutable: true
+      },
+      {
+        segmentId: 'segment-003',
+        filePath: '/data/wal/segment-003.wal',
+        startLSN: 801,
+        endLSN: 1200,
+        createdAt: Date.now() - 6 * 60 * 60 * 1000,
+        sizeBytes: 120 * 1024 * 1024,
+        entryCount: 4000,
+        tombstoneCount: 400,
+        isImmutable: true
+      }
+    ];
+  }
+}
 
 export interface CompactionCoordinatorConfig {
   strategy: CompactionStrategyType | { type: CompactionStrategyType; config: Record<string, any> } | CompactionStrategy;
@@ -9,6 +71,7 @@ export interface CompactionCoordinatorConfig {
   schedulingInterval?: number; // How often to check if compaction is needed (ms)
   maxConcurrentCompactions?: number;
   enableAutoScheduling?: boolean;
+  metricsProvider?: CompactionMetricsProvider;
 }
 
 /**
@@ -17,17 +80,21 @@ export interface CompactionCoordinatorConfig {
 export class CompactionCoordinator extends EventEmitter {
   private strategy: ReturnType<typeof CompactionStrategyFactory.create>;
   private config: Required<CompactionCoordinatorConfig>;
+  private metricsProvider: CompactionMetricsProvider;
   private schedulingTimer: NodeJS.Timeout | null = null;
   private runningCompactions = new Set<string>();
   private isStarted = false;
 
   constructor(config: CompactionCoordinatorConfig) {
     super();
-    
+
+    this.metricsProvider = config.metricsProvider ?? new StubMetricsProvider();
+
     this.config = {
       schedulingInterval: 60000, // 1 minute
       maxConcurrentCompactions: 1,
       enableAutoScheduling: true,
+      metricsProvider: this.metricsProvider,
       ...config
     } as Required<CompactionCoordinatorConfig>;
 
@@ -197,70 +264,22 @@ export class CompactionCoordinator extends EventEmitter {
     return await this.strategy.executeCompaction(plan);
   }
 
-  // STUB: Integration points with existing WAL + checkpoint systems
+  /**
+   * Set or replace the metrics provider at runtime.
+   */
+  setMetricsProvider(provider: CompactionMetricsProvider): void {
+    this.metricsProvider = provider;
+  }
+
   private async gatherWALMetrics(): Promise<WALMetrics> {
-    // TODO: Integrate with existing WriteAheadLog system
-    // This would collect metrics about current WAL state
-    
-    return {
-      segmentCount: 5, // STUB
-      totalSizeBytes: 500 * 1024 * 1024, // STUB: 500MB
-      oldestSegmentAge: 48 * 60 * 60 * 1000, // STUB: 48 hours
-      tombstoneRatio: 0.25, // STUB: 25%
-      duplicateEntryRatio: 0.15 // STUB: 15%
-    };
+    return this.metricsProvider.getWALMetrics();
   }
 
   private async gatherCheckpointMetrics(): Promise<CheckpointMetrics> {
-    // TODO: Integrate with existing checkpoint system
-    // This would collect metrics about checkpoint state
-    
-    return {
-      lastCheckpointLSN: 1000, // STUB
-      lastCheckpointAge: 12 * 60 * 60 * 1000, // STUB: 12 hours
-      segmentsSinceCheckpoint: 3 // STUB
-    };
+    return this.metricsProvider.getCheckpointMetrics();
   }
 
   private async loadWALSegments(): Promise<WALSegment[]> {
-    // TODO: Load actual WAL segment metadata
-    // This would enumerate all WAL segments and their properties
-    
-    // STUB: Return mock segments
-    return [
-      {
-        segmentId: 'segment-001',
-        filePath: '/data/wal/segment-001.wal',
-        startLSN: 1,
-        endLSN: 500,
-        createdAt: Date.now() - 48 * 60 * 60 * 1000, // 48 hours ago
-        sizeBytes: 100 * 1024 * 1024, // 100MB
-        entryCount: 5000,
-        tombstoneCount: 1250, // 25%
-        isImmutable: true
-      },
-      {
-        segmentId: 'segment-002',
-        filePath: '/data/wal/segment-002.wal',
-        startLSN: 501,
-        endLSN: 800,
-        createdAt: Date.now() - 24 * 60 * 60 * 1000, // 24 hours ago
-        sizeBytes: 75 * 1024 * 1024, // 75MB
-        entryCount: 3000,
-        tombstoneCount: 600, // 20%
-        isImmutable: true
-      },
-      {
-        segmentId: 'segment-003',
-        filePath: '/data/wal/segment-003.wal',
-        startLSN: 801,
-        endLSN: 1200,
-        createdAt: Date.now() - 6 * 60 * 60 * 1000, // 6 hours ago
-        sizeBytes: 120 * 1024 * 1024, // 120MB
-        entryCount: 4000,
-        tombstoneCount: 400, // 10%
-        isImmutable: true
-      }
-    ];
+    return this.metricsProvider.getWALSegments();
   }
 }

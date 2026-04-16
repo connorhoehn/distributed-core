@@ -23,7 +23,7 @@ export class HTTPAdapter extends Transport {
   private server: http.Server | https.Server | null = null;
   private agents = new Map<string, http.Agent | https.Agent>();
   private isRunning = false;
-  private messageHandler?: (message: Message) => void;
+  private messageHandlers: Set<(message: Message) => void> = new Set();
   private circuitBreaker: CircuitBreaker;
   private retryManager: RetryManager;
   private stats = {
@@ -200,13 +200,11 @@ export class HTTPAdapter extends Transport {
   }
 
   onMessage(handler: (message: Message) => void): void {
-    this.messageHandler = handler;
+    this.messageHandlers.add(handler);
   }
 
   removeMessageListener(callback: (message: Message) => void): void {
-    if (this.messageHandler === callback) {
-      this.messageHandler = undefined;
-    }
+    this.messageHandlers.delete(callback);
   }
 
   getConnectedNodes(): NodeId[] {
@@ -292,9 +290,11 @@ export class HTTPAdapter extends Transport {
       try {
         const message: Message = JSON.parse(body);
         
-        if (this.messageHandler) {
+        if (this.messageHandlers.size > 0) {
           this.stats.messagesReceived++;
-          this.messageHandler(message);
+          this.messageHandlers.forEach(handler => {
+            handler(message);
+          });
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

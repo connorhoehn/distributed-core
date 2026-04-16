@@ -23,3 +23,9 @@ export type {
 export type {
   CompactionCoordinatorConfig
 } from './CompactionCoordinator';
+
+export { StubMetricsProvider } from './CompactionCoordinator';
+
+export type {
+  CompactionMetricsProvider
+} from './types';

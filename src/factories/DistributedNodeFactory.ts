@@ -9,7 +9,6 @@ import { ResourceOperation, VectorClock } from '../resources/core/ResourceOperat
 import { Transport } from '../transport/Transport';
 import { WebSocketAdapter } from '../transport/adapters/WebSocketAdapter';
 import { TCPAdapter } from '../transport/adapters/TCPAdapter';
-import { GRPCAdapter } from '../transport/adapters/GRPCAdapter';
 import { ConnectionManager } from '../connections/ConnectionManager';
 import { NodeId } from '../types';
 import { EntityRegistryType } from '../cluster/core/entity/EntityRegistryFactory';
@@ -303,15 +302,7 @@ export class DistributedNodeFactory {
         });
 
       case 'grpc':
-        return new GRPCAdapter({
-          id: config.id,
-          address: config.network.address,
-          port: effectivePort
-        }, {
-          host: config.network.host || '0.0.0.0',
-          port: effectivePort,
-          ...transportOptions
-        });
+        throw new Error('gRPC transport is not yet supported. Use "websocket" or "tcp" instead.');
 
       default:
         throw new Error(`Unsupported transport type: ${transportType}`);

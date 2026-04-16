@@ -1,7 +1,6 @@
 import { Transport } from '../transport/Transport';
 import { WebSocketAdapter } from '../transport/adapters/WebSocketAdapter';
 import { TCPAdapter } from '../transport/adapters/TCPAdapter';
-import { GRPCAdapter } from '../transport/adapters/GRPCAdapter';
 import { NodeId } from '../types';
 
 export interface TransportConfig {
@@ -57,7 +56,7 @@ export class TransportFactory {
         return new TCPAdapter(nodeIdObj, transportOptions);
 
       case 'grpc':
-        return new GRPCAdapter(nodeIdObj, transportOptions);
+        throw new Error('gRPC transport is not yet supported. Use "websocket" or "tcp" instead.');
 
       default:
         throw new Error(`Unsupported transport type: ${config.type}`);

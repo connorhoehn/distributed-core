@@ -51,6 +51,8 @@ export type {
 export * from './transport/Transport';
 export { GossipMessage } from './gossip/transport/GossipMessage';
 export * from './transport/Encryption';
+export * from './transport/EncryptedTransport';
+export { MessageBatcher, type BatchConfig, type BatchedTransport, type BatchOptions, type BatchedMessage, type MessageBatch, type BatchStats } from './transport/MessageBatcher';
 
 // Metrics modules
 export * from './monitoring/metrics/MetricsTracker';
@@ -64,6 +66,10 @@ export * from './diagnostics/ChaosInjector';
 export * from './persistence/StateStore';
 export * from './persistence/WriteAheadLog';
 export * from './persistence/BroadcastBuffer';
+export * from './persistence/recovery';
+export { AutoCheckpointer } from './persistence/checkpoint/AutoCheckpointer';
+export type { AutoCheckpointerConfig, SnapshotProvider } from './persistence/checkpoint/AutoCheckpointer';
+export type { WALAppendListener } from './persistence/wal/WALWriter';
 
 // Identity modules
 export * from './identity/NodeMetadata';
