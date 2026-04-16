@@ -297,7 +297,7 @@ export class YamlSeedConfiguration extends EventEmitter {
       cluster: {
         name: clusterName,
         version: '1.0.0',
-        environment: environment as any
+        environment: environment as 'development' | 'staging' | 'production'
       },
       seed_providers: [{
         class_name: 'org.apache.cassandra.locator.SimpleSeedProvider',

@@ -1,14 +1,14 @@
 import { WALReader, WALFile, WALEntry, WALCoordinator } from '../types';
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
-import { FrameworkLogger } from '../../common/logger';
+import { Logger } from '../../common/logger';
 import fs from 'fs/promises';
 import path from 'path';
 
 export class WALReaderImpl implements WALReader {
   private walFile: WALFile;
   private coordinator: WALCoordinator;
-  private logger: FrameworkLogger;
+  private logger = Logger.create('WALReader');
   private filePath: string;
   private segmentPaths: string[] | null = null;
   private segmentsDiscovered: boolean = false;
@@ -17,7 +17,7 @@ export class WALReaderImpl implements WALReader {
     this.filePath = filePath;
     this.walFile = new WALFileImpl(filePath);
     this.coordinator = new WALCoordinatorImpl();
-    this.logger = new FrameworkLogger({ enableFrameworkLogs: true });
+    // logger initialized at field level
   }
 
   async initialize(): Promise<void> {
@@ -94,7 +94,7 @@ export class WALReaderImpl implements WALReader {
     for (const entry of entries) {
       // Validate entry if coordinator supports it
       if (!this.coordinator.validateEntry(entry)) {
-        console.warn(`[WALReader] Invalid entry at LSN ${entry.logSequenceNumber}, skipping`);
+        this.logger.warn(`Invalid entry at LSN ${entry.logSequenceNumber}, skipping`);
         continue;
       }
 
@@ -109,7 +109,7 @@ export class WALReaderImpl implements WALReader {
     return entries.filter(entry => {
       const isValid = this.coordinator.validateEntry(entry);
       if (!isValid) {
-        console.warn(`[WALReader] Invalid entry at LSN ${entry.logSequenceNumber}, filtering out`);
+        this.logger.warn(`Invalid entry at LSN ${entry.logSequenceNumber}, filtering out`);
       }
       return isValid;
     });
@@ -135,7 +135,7 @@ export class WALReaderImpl implements WALReader {
   async replay(handler: (entry: WALEntry) => Promise<void>): Promise<void> {
     const entries = await this.readAll();
 
-    this.logger.framework(`[WALReader] Replaying ${entries.length} entries`);
+    this.logger.info(`[WALReader] Replaying ${entries.length} entries`);
 
     let processed = 0;
     let errors = 0;
@@ -146,17 +146,17 @@ export class WALReaderImpl implements WALReader {
         processed++;
       } catch (error) {
         errors++;
-        console.error(`[WALReader] Failed to replay entry at LSN ${entry.logSequenceNumber}:`, error);
+        this.logger.error(`Failed to replay entry at LSN ${entry.logSequenceNumber}:`, error);
 
         // Continue with next entry rather than failing completely
         // This allows partial recovery in case of corrupted entries
       }
     }
 
-    this.logger.framework(`[WALReader] Replay completed: ${processed} processed, ${errors} errors`);
+    this.logger.info(`[WALReader] Replay completed: ${processed} processed, ${errors} errors`);
 
     if (errors > 0) {
-      console.warn(`[WALReader] ${errors} entries failed during replay - check logs for details`);
+      this.logger.warn(`${errors} entries failed during replay - check logs for details`);
     }
   }
 

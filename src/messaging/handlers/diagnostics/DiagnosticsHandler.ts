@@ -1,7 +1,10 @@
 import { MessageHandler, RoutedMessage } from '../../types';
 import { Session } from '../../../connections/Session';
+import { Logger } from '../../../common/logger';
 
 export class DiagnosticsHandler implements MessageHandler {
+  private logger = Logger.create('DiagnosticsHandler');
+
   handle(message: RoutedMessage, session: Session): void {
     switch (message.type) {
       case 'diagnostics.ping':
@@ -20,14 +23,14 @@ export class DiagnosticsHandler implements MessageHandler {
   }
 
   private handlePing(message: RoutedMessage, session: Session): void {
-    console.log(`Ping from session ${session.id}`);
+    this.logger.info(`Ping from session ${session.id}`);
   }
 
   private handleStatus(message: RoutedMessage, session: Session): void {
-    console.log(`Status request from session ${session.id}`);
+    this.logger.info(`Status request from session ${session.id}`);
   }
 
   private handleDebug(message: RoutedMessage, session: Session): void {
-    console.log(`Debug request from session ${session.id}`);
+    this.logger.debug(`Debug request from session ${session.id}`);
   }
 }

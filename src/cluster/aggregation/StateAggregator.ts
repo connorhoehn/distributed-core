@@ -3,7 +3,7 @@ import { ClusterManager } from '../ClusterManager';
 import { ClusterState, LogicalService, PerformanceMetrics, StateConflict, VectorClock } from '../introspection/ClusterIntrospection';
 import { ClusterHealth, ClusterTopology, ClusterMetadata } from '../types';
 import { Message, MessageType } from '../../types';
-import { StateReconciler, ResolutionResult } from '../reconciliation/StateReconciler';
+import { StateReconciler, ResolutionResult, ResolutionStrategy } from '../reconciliation/StateReconciler';
 import type { ResourceMetadata } from '../../resources/types';
 
 /**
@@ -275,12 +275,37 @@ export class StateAggregator extends EventEmitter {
   }
 
   /**
+   * Get the NodeId for the local node from the membership table.
+   */
+  private getLocalNodeId(): { id: string; address: string; port: number } {
+    const nodeInfo = this.clusterManager.getNodeInfo();
+    return {
+      id: nodeInfo.id,
+      address: nodeInfo.metadata?.address ?? 'localhost',
+      port: nodeInfo.metadata?.port ?? 0
+    };
+  }
+
+  /**
+   * Look up a remote node's address info from the membership table.
+   */
+  private getMemberNodeId(nodeId: string): { id: string; address: string; port: number } {
+    const membership = this.clusterManager.getMembership();
+    const member = membership.get(nodeId);
+    return {
+      id: nodeId,
+      address: member?.metadata?.address ?? 'localhost',
+      port: member?.metadata?.port ?? 0
+    };
+  }
+
+  /**
    * Collect state from a specific node
    */
   private async collectFromNode(nodeId: string): Promise<ClusterState> {
     return new Promise<ClusterState>((resolve, reject) => {
       const messageId = `state-request-${Date.now()}-${Math.random()}`;
-      
+
       const timeout = setTimeout(() => {
         this.pendingCollections.delete(messageId);
         reject(new Error(`Timeout collecting state from node ${nodeId}`));
@@ -292,19 +317,16 @@ export class StateAggregator extends EventEmitter {
       this.pendingCollections.set(messageId, { resolve, reject, timeout });
 
       // Send state collection request
+      const localNode = this.getLocalNodeId();
       const message: Message = {
         id: messageId,
         type: MessageType.CLUSTER_STATE_REQUEST,
         data: { requestType: 'full-state' },
-        sender: { 
-          id: this.clusterManager.getNodeInfo().id,
-          address: 'localhost', // TODO: Get actual address
-          port: 8080 // TODO: Get actual port
-        },
+        sender: localNode,
         timestamp: Date.now()
       };
 
-      this.clusterManager.transport.send(message, { id: nodeId, address: 'localhost', port: 8080 });
+      this.clusterManager.transport.send(message, this.getMemberNodeId(nodeId));
     });
   }
 
@@ -334,11 +356,7 @@ export class StateAggregator extends EventEmitter {
         originalRequestId: message.id,
         state: localState
       },
-      sender: { 
-        id: this.clusterManager.getNodeInfo().id,
-        address: 'localhost', // TODO: Get actual address
-        port: 8080 // TODO: Get actual port
-      },
+      sender: this.getLocalNodeId(),
       timestamp: Date.now()
     };
 
@@ -709,15 +727,15 @@ export class StateAggregator extends EventEmitter {
    * Manually resolve a specific conflict with a chosen strategy
    */
   async manualResolveConflict(
-    conflict: StateConflict, 
-    strategy: string
+    conflict: StateConflict,
+    strategy: ResolutionStrategy
   ): Promise<ResolutionResult> {
     if (!this.config.enableResolution) {
       throw new Error('Conflict resolution is disabled');
     }
 
     try {
-      const result = await this.reconciler.resolveConflict(conflict, strategy as any);
+      const result = await this.reconciler.resolveConflict(conflict, strategy);
       this.emit('manual-resolution', result);
       return result;
     } catch (error) {

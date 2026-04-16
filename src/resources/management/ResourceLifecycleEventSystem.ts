@@ -3,6 +3,7 @@ import { ResourceMetadata, ResourceState, ResourceHealth } from '../types';
 import { ResourceRegistry } from '../core/ResourceRegistry';
 import { ResourceSubscriptionManager } from '../management/ResourceSubscriptionManager';
 import { IClusterNode } from '../../cluster/ClusterEventBus';
+import { Logger } from '../../common/logger';
 
 export enum ResourceLifecycleEventType {
   // Basic lifecycle
@@ -82,6 +83,7 @@ export class ResourceLifecycleEventSystem extends EventEmitter {
   private resourceEvents = new Map<string, ResourceLifecycleEvent[]>(); // resourceId -> events
   private eventSubscriptions = new Map<string, EventFilter>(); // subscriptionId -> filter
   private maxHistorySize: number;
+  private logger = Logger.create('ResourceLifecycleEventSystem');
   
   constructor(
     private resourceRegistry: ResourceRegistry,
@@ -132,7 +134,7 @@ export class ResourceLifecycleEventSystem extends EventEmitter {
       this.propagateEventToCluster(event);
     }
 
-    console.log(`📋 Resource event: ${eventType} for ${resourceId} (${severity})`);
+    this.logger.info(`Resource event: ${eventType} for ${resourceId} (${severity})`);
   }
 
   /**
@@ -638,7 +640,7 @@ export class ResourceLifecycleEventSystem extends EventEmitter {
         event, 
         members.map(m => m.id)
       ).catch(error => {
-        console.error('Failed to propagate lifecycle event to cluster:', error);
+        this.logger.error('Failed to propagate lifecycle event to cluster:', error);
       });
     }
   }

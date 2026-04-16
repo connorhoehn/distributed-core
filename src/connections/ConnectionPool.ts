@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { Connection } from '../connections/Connection';
+import { Logger } from '../common/logger';
 
 export interface ConnectionPoolOptions {
   minConnections?: number;
@@ -61,6 +62,7 @@ export class ConnectionPool extends EventEmitter {
   private readonly nodeId: string;
   private readonly createConnection: () => Promise<Connection>;
   private readonly options: Required<ConnectionPoolOptions>;
+  private poolLogger!: Logger;
 
   constructor(
     nodeId: string,
@@ -71,6 +73,7 @@ export class ConnectionPool extends EventEmitter {
     
     this.nodeId = nodeId;
     this.createConnection = createConnection;
+    this.poolLogger = Logger.create(`ConnectionPool:${nodeId}`);
     this.options = {
       minConnections: options.minConnections || 2,
       maxConnections: options.maxConnections || 10,
@@ -504,7 +507,7 @@ export class ConnectionPool extends EventEmitter {
    */
   private getConnectionId(connection: Connection): string {
     // Use connection's ID if available, otherwise generate one
-    return (connection as any).id || `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    return connection.id || `conn-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
@@ -581,7 +584,7 @@ export class ConnectionPool extends EventEmitter {
    */
   private log(message: string): void {
     if (this.options.enableLogging) {
-      console.log(`[ConnectionPool:${this.nodeId}] ${message}`);
+      this.poolLogger.info(message);
     }
   }
 

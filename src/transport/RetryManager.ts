@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { Logger } from '../common/logger';
 
 export interface RetryOptions {
   maxRetries?: number;
@@ -58,6 +59,7 @@ export class RetryManager extends EventEmitter {
   private activeRetries = new Map<string, RetryAttempt[]>();
   private idempotencyCache = new Map<string, any>();
   private readonly options: Required<RetryOptions>;
+  private readonly logger = Logger.create('RetryManager');
 
   constructor(options: RetryOptions = {}) {
     super();
@@ -462,7 +464,7 @@ export class RetryManager extends EventEmitter {
    */
   private log(message: string): void {
     if (this.options.enableLogging) {
-      console.log(`[RetryManager:${this.options.name}] ${message}`);
+      this.logger.info(message);
     }
   }
 

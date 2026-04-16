@@ -3,6 +3,7 @@ import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
+import { Logger } from '../../common/logger';
 
 interface TCPConnection {
   socket: net.Socket;
@@ -40,6 +41,7 @@ export class TCPAdapter extends Transport {
   private retryManager: RetryManager;
   private keepAliveTimer?: NodeJS.Timeout;
   private messageHandlers: Set<(message: Message) => void> = new Set();
+  private readonly logger = Logger.create('TCPAdapter');
 
   private static readonly MESSAGE_DELIMITER = '\n\n';
   private static readonly MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
@@ -394,7 +396,7 @@ export class TCPAdapter extends Transport {
 
   private log(message: string): void {
     if (this.options.enableLogging) {
-      console.log(`[TCPAdapter:${this.nodeId.id}] ${message}`);
+      this.logger.info(message);
     }
   }
 }

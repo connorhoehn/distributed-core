@@ -66,12 +66,24 @@ describe('ClusterLifecycle', () => {
       gossipStrategy: {
         sendPeriodicGossip: jest.fn().mockResolvedValue(void 0)
       },
+      hashRing: {
+        rebuild: jest.fn()
+      },
+      communication: {
+        joinCluster: jest.fn().mockResolvedValue(void 0),
+        startGossipTimer: jest.fn(),
+        stopGossipTimer: jest.fn(),
+        handleMessage: jest.fn(),
+        runAntiEntropyCycle: jest.fn()
+      },
       recentUpdates: [],
       getLocalNodeInfo: jest.fn().mockReturnValue(createNodeInfo()),
       addToRecentUpdates: jest.fn(),
       incrementVersion: jest.fn(),
       isBootstrapped: jest.fn().mockReturnValue(false),
-      getClusterSize: jest.fn().mockReturnValue(1)
+      getClusterSize: jest.fn().mockReturnValue(1),
+      rebuildHashRing: jest.fn(),
+      migrateWorkloads: jest.fn().mockResolvedValue(void 0)
     } as any;
 
     lifecycle = new ClusterLifecycle({
@@ -143,7 +155,11 @@ describe('ClusterLifecycle', () => {
 
       expect(mockContext.getLocalNodeInfo).toHaveBeenCalled();
       expect(mockContext.membership.addLocalNode).toHaveBeenCalled();
+      expect(mockContext.rebuildHashRing).toHaveBeenCalled();
+      expect(mockContext.transport.onMessage).toHaveBeenCalled();
       expect(mockContext.transport.start).toHaveBeenCalled();
+      expect(mockContext.communication.joinCluster).toHaveBeenCalled();
+      expect(mockContext.communication.startGossipTimer).toHaveBeenCalled();
       expect(mockContext.failureDetector.start).toHaveBeenCalled();
       
       expect(startedSpy).toHaveBeenCalledWith({
@@ -187,9 +203,11 @@ describe('ClusterLifecycle', () => {
 
       await lifecycle.stop();
 
+      expect(mockContext.communication.stopGossipTimer).toHaveBeenCalled();
       expect(mockContext.failureDetector.stop).toHaveBeenCalled();
       expect(mockContext.transport.stop).toHaveBeenCalled();
       expect(mockContext.membership.clear).toHaveBeenCalled();
+      expect(mockContext.hashRing.rebuild).toHaveBeenCalledWith([]);
       
       expect(stoppedSpy).toHaveBeenCalledWith({
         nodeId: 'test-node-1',
@@ -230,7 +248,8 @@ describe('ClusterLifecycle', () => {
         })
       );
       expect(mockContext.addToRecentUpdates).toHaveBeenCalled();
-      
+      expect(mockContext.communication.runAntiEntropyCycle).toHaveBeenCalled();
+
       expect(leftSpy).toHaveBeenCalledWith({
         nodeId: 'test-node-1',
         timestamp: expect.any(Number)
@@ -324,6 +343,8 @@ describe('ClusterLifecycle', () => {
 
       await lifecycle.rebalanceCluster();
 
+      expect(mockContext.rebuildHashRing).toHaveBeenCalled();
+      expect(mockContext.communication.runAntiEntropyCycle).toHaveBeenCalled();
       expect(rebalancedSpy).toHaveBeenCalledWith({
         nodeCount: 2,
         timestamp: expect.any(Number)

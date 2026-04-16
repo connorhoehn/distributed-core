@@ -4,6 +4,7 @@ import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
+import { Logger } from '../../common/logger';
 
 export interface HTTPAdapterConfig {
   port?: number;
@@ -26,6 +27,7 @@ export class HTTPAdapter extends Transport {
   private messageHandlers: Set<(message: Message) => void> = new Set();
   private circuitBreaker: CircuitBreaker;
   private retryManager: RetryManager;
+  private readonly logger = Logger.create('HTTPAdapter');
   private stats = {
     messagesReceived: 0,
     messagesSent: 0,
@@ -350,7 +352,7 @@ export class HTTPAdapter extends Transport {
 
   private log(message: string): void {
     if (this.config.enableLogging) {
-      console.log(`[HTTPAdapter:${this.nodeId.id}] ${message}`);
+      this.logger.info(message);
     }
   }
 }

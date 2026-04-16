@@ -2,6 +2,7 @@ import { ConnectionManager } from '../../connections/ConnectionManager';
 import { ResourceOperation } from '../core/ResourceOperation';
 import { Principal } from '../security/ResourceAuthorizationService';
 import { BoundedQueue, OutboundQueue, BackpressureConfig } from '../../connections/ConnectionBackpressure';
+import { Logger } from '../../common/logger';
 
 
 export interface SubscriptionFilter {
@@ -40,6 +41,7 @@ export class ResourceAttachmentService {
   private resourceConnections: Map<string, Set<string>> = new Map(); // resourceId -> connectionIds
   private deliveryQueues: Map<string, OutboundQueue> = new Map(); // connectionId -> queue
   private listeners: Map<string, Function[]> = new Map(); // Simple event system
+  private logger = Logger.create('ResourceAttachmentService');
 
   constructor(connectionManager: ConnectionManager, private flowConfig?: BackpressureConfig) {
     this.connectionManager = connectionManager;
@@ -64,7 +66,7 @@ export class ResourceAttachmentService {
       try {
         handler(data);
       } catch (error) {
-        console.error(`Error in event handler for ${event}:`, error);
+        this.logger.error(`Error in event handler for ${event}:`, error);
       }
     });
   }
@@ -97,7 +99,7 @@ export class ResourceAttachmentService {
     }
     this.resourceConnections.get(resourceId)!.add(connId);
 
-    console.log(`🔗 Attached connection ${connId} to resource ${resourceId}`);
+    this.logger.info(`Attached connection ${connId} to resource ${resourceId}`);
     this.emit('attachment:created', { connId, resourceId, filter });
   }
 
@@ -122,7 +124,7 @@ export class ResourceAttachmentService {
       }
     }
 
-    console.log(`🔗 Detached connection ${connId} from resource ${resourceId}`);
+    this.logger.info(`Detached connection ${connId} from resource ${resourceId}`);
     this.emit('attachment:removed', { connId, resourceId });
   }
 
@@ -195,16 +197,16 @@ export class ResourceAttachmentService {
         } else {
           // Message was dropped due to backpressure
           stats.failed++;
-          console.warn(`📉 Message ${op.opId} ${result} for connection ${connId}`);
+          this.logger.warn(`Message ${op.opId} ${result} for connection ${connId}`);
         }
 
       } catch (error) {
-        console.error(`Failed to deliver to connection ${connId}:`, error);
+        this.logger.error(`Failed to deliver to connection ${connId}:`, error);
         stats.failed++;
       }
     }
 
-    console.log(`📨 Delivered operation ${op.opId} to ${stats.delivered}/${stats.attempted} local connections for resource ${resourceId}`);
+    this.logger.info(`Delivered operation ${op.opId} to ${stats.delivered}/${stats.attempted} local connections for resource ${resourceId}`);
     this.emit('delivery:completed', { resourceId, operation: op, stats });
 
     return stats;
@@ -252,7 +254,7 @@ export class ResourceAttachmentService {
       this.deliveryQueues.delete(connId);
     }
     
-    console.log(`🔌 Cleaned up attachments and queues for disconnected connection ${connId}`);
+    this.logger.info(`Cleaned up attachments and queues for disconnected connection ${connId}`);
     this.emit('connection:disconnected', { connId, resourceId: attachment.resourceId });
   }
 

@@ -2,6 +2,7 @@ import { Transport } from '../transport/Transport';
 import { WebSocketAdapter } from '../transport/adapters/WebSocketAdapter';
 import { TCPAdapter } from '../transport/adapters/TCPAdapter';
 import { NodeId } from '../types';
+import { Logger } from '../common/logger';
 
 export interface NetworkConfig {
   nodeId: string;
@@ -30,6 +31,7 @@ export interface NetworkTransports {
  */
 export class NetworkService {
   private transports?: NetworkTransports;
+  private logger = Logger.create('NetworkService');
 
   constructor(private config: NetworkConfig) {}
 
@@ -37,7 +39,7 @@ export class NetworkService {
    * Create and bind both cluster and client transports
    */
   async start(): Promise<NetworkTransports> {
-    console.log('[NETWORK] Creating cluster and client transports...');
+    this.logger.info('Creating cluster and client transports...');
     
     // Create cluster transport (node↔node communication)
     const clusterTransport = this.createTransport('cluster');
@@ -53,8 +55,8 @@ export class NetworkService {
 
     this.transports = { clusterTransport, clientTransport };
     
-    console.log(`[NETWORK] Bound cluster transport on ${this.config.address}:${this.config.port}`);
-    console.log(`[NETWORK] Bound client transport on ${this.config.address}:${this.config.port + 1000}`);
+    this.logger.info(`Bound cluster transport on ${this.config.address}:${this.config.port}`);
+    this.logger.info(`Bound client transport on ${this.config.address}:${this.config.port + 1000}`);
     
     return this.transports;
   }
@@ -65,7 +67,7 @@ export class NetworkService {
   async stop(): Promise<void> {
     if (!this.transports) return;
 
-    console.log('[NETWORK] Stopping transports...');
+    this.logger.info('Stopping transports...');
     
     await Promise.all([
       this.transports.clusterTransport.stop(),
@@ -73,7 +75,7 @@ export class NetworkService {
     ]);
 
     this.transports = undefined;
-    console.log('[NETWORK] Transports stopped');
+    this.logger.info('Transports stopped');
   }
 
   /**

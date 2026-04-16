@@ -1,4 +1,5 @@
 import { DistributedOperationsConfig, DEFAULT_DISTRIBUTED_OPS_CONFIG } from './DistributedOperationsSpec';
+import { Logger } from '../../../common/logger';
 
 
 /**
@@ -10,6 +11,7 @@ import { DistributedOperationsConfig, DEFAULT_DISTRIBUTED_OPS_CONFIG } from './D
 export class DistributedOperationsFlags {
   private flags: DistributedOperationsConfig;
   public readonly nodeId: string;
+  private logger = Logger.create('DistributedOperationsFlags');
 
   constructor(nodeId: string, overrides?: Partial<DistributedOperationsConfig>) {
     this.nodeId = nodeId;
@@ -95,7 +97,7 @@ export class DistributedOperationsFlags {
    */
   reset(): void {
     this.flags = { ...DEFAULT_DISTRIBUTED_OPS_CONFIG };
-    console.log(`[DistributedOpsFlags:${this.nodeId}] All flags reset to defaults`);
+    this.logger.info(`[${this.nodeId}] All flags reset to defaults`);
   }
 
   /**
@@ -135,7 +137,7 @@ export class DistributedOperationsFlags {
    * Log flag changes for audit trail
    */
   private logFlagChange(flag: keyof DistributedOperationsConfig, enabled: boolean): void {
-    console.log(`[DistributedOpsFlags:${this.nodeId}] ${flag} = ${enabled} (phase=${this.getCurrentPhase()})`);
+    this.logger.info(`[${this.nodeId}] ${flag} = ${enabled} (phase=${this.getCurrentPhase()})`);
   }
 
   /**

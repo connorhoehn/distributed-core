@@ -1,6 +1,7 @@
 import { IClientConnectionService } from '../ports';
 import { ConnectionManager } from '../../connections/ConnectionManager';
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
+import { Logger } from '../../common/logger';
 
 /**
  * ClientConnectionService manages client-facing connections and resource message routing
@@ -8,7 +9,8 @@ import { ResourceOperation } from '../../resources/core/ResourceOperation';
  */
 export class ClientConnectionService implements IClientConnectionService {
   readonly name = 'CLIENT';
-  
+  private logger = Logger.create('ClientConnectionService');
+
   private resourceMessageHandlers: Array<(connectionId: string, resourceId: string, operation: any) => void> = [];
 
   constructor(
@@ -98,22 +100,22 @@ export class ClientConnectionService implements IClientConnectionService {
               try {
                 handler(connectionId, resourceId, operation);
               } catch (error) {
-                console.error('Resource message handler error:', error);
+                this.logger.error('Resource message handler error:', error);
               }
             });
           }
         }
       } catch (error) {
-        console.error('Failed to process client request workflow:', error);
+        this.logger.error('Failed to process client request workflow:', error);
       }
     });
 
     // Handle connection cleanup
     this.connectionManager.on('connection:closed', async (connectionId: string) => {
-      console.log(`🔗 Connection ${connectionId} closed, resource attachments cleaned up`);
+      this.logger.info(`Connection ${connectionId} closed, resource attachments cleaned up`);
     });
 
-    console.log('✅ Client connection resource handlers registered');
+    this.logger.info('Client connection resource handlers registered');
   }
 
   onResourceMessage(handler: (connectionId: string, resourceId: string, operation: any) => void): void {

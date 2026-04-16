@@ -1,11 +1,13 @@
 import { Phase, ISeedRegistry, ICommunicationService } from '../../ports';
+import { Logger } from '../../../common/logger';
 
 /**
  * MembershipPhase - Phase 3: Join cluster and start gossip protocol
  */
 export class MembershipPhase implements Phase {
   readonly name = 'MEMBERSHIP';
-  
+  private logger = Logger.create('MembershipPhase');
+
   constructor(
     private seedRegistry: ISeedRegistry,
     private communicationService: ICommunicationService,
@@ -22,7 +24,7 @@ export class MembershipPhase implements Phase {
     // Start gossip protocol
     this.communicationService.startGossip();
     
-    console.log(`[MembershipPhase] Joined cluster via ${seeds.length} seeds and started gossip`);
+    this.logger.info(`Joined cluster via ${seeds.length} seeds and started gossip`);
   }
 
   async stop(): Promise<void> {

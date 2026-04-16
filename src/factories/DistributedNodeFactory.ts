@@ -11,11 +11,13 @@ import { WebSocketAdapter } from '../transport/adapters/WebSocketAdapter';
 import { TCPAdapter } from '../transport/adapters/TCPAdapter';
 import { ConnectionManager } from '../connections/ConnectionManager';
 import { NodeId } from '../types';
+import { Logger } from '../common/logger';
 import { EntityRegistryType } from '../cluster/core/entity/EntityRegistryFactory';
 import { ClusterRouting } from '../routing/ClusterRouting';
 import { ResourceManagementFactory } from '../resources/core/ResourceManagementFactory';
 import { IntegratedCommunicationLayer } from '../communication/core/IntegratedCommunicationLayer';
 import { SemanticsConfig } from '../communication/semantics/SemanticsConfig';
+import { TransportServer } from '../communication/core/ports';
 
 // NEW IMPORTS: Phase-based lifecycle services
 import { NodeLifecycle } from '../services/lifecycle/NodeLifecycle';
@@ -113,6 +115,7 @@ export interface DistributedNodeComponents {
  */
 export class DistributedNodeFactory {
   private static instance: DistributedNodeFactory;
+  private logger = Logger.create('DistributedNodeFactory');
 
   static getInstance(): DistributedNodeFactory {
     if (!DistributedNodeFactory.instance) {
@@ -195,7 +198,7 @@ export class DistributedNodeFactory {
     let comms: IntegratedCommunicationLayer | undefined;
     if (config.resources?.enableProductionScale !== false) {
       // Create client adapter interface for ResourceManagementFactory
-      const clientAdapter = {
+      const clientAdapter: TransportServer & { connectionManager: ConnectionManager } = {
         connectionManager: node.connections,
         async start() {
           await clientTransport.start();
@@ -218,7 +221,7 @@ export class DistributedNodeFactory {
       // Create integrated communication layer using SOLID factory
       const result = ResourceManagementFactory.createIntegratedCommunicationLayer({
         clusterManager,
-        clientAdapter: clientAdapter as any,
+        clientAdapter,
         semantics: config.semantics
       });
 
@@ -351,7 +354,7 @@ export class DistributedNodeFactory {
   private async wireComponents(components: DistributedNodeComponents): Promise<void> {
     // This method is now a no-op. All wiring logic has been moved to service layers.
     // The factory only composes services; runtime behavior is handled by services.
-    console.log('✅ Component wiring handled by service layer');
+    this.logger.debug('Component wiring handled by service layer');
   }
 
   /**

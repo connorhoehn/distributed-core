@@ -1,6 +1,7 @@
 import { ResourceMetadata } from '../../../resources';
 import { OpType, ResourceOperation, CorrelationContext } from './DistributedOperationsSpec';
 import { isDistributedOperationEnabled } from './DistributedOperationsFlags';
+import { Logger } from '../../../common/logger';
 
 
 /**
@@ -11,6 +12,7 @@ import { isDistributedOperationEnabled } from './DistributedOperationsFlags';
  */
 export class OperationEnvelopeManager {
   private nodeId: string;
+  private logger = Logger.create('OperationEnvelopeManager');
 
   constructor(nodeId: string) {
     this.nodeId = nodeId;
@@ -96,7 +98,7 @@ export class OperationEnvelopeManager {
       result
     };
 
-    console.log(JSON.stringify(logEntry));
+    this.logger.info(JSON.stringify(logEntry));
   }
 
   /**
@@ -125,7 +127,7 @@ export class OperationEnvelopeManager {
       result
     };
 
-    console.log(JSON.stringify(logEntry));
+    this.logger.info(JSON.stringify(logEntry));
   }
 
   /**

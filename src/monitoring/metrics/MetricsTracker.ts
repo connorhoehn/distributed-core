@@ -15,6 +15,8 @@ export interface UnifiedMetrics {
   network: NetworkMetrics;
   connections: ConnectionMetrics;
   health: HealthMetrics;
+  counters?: Record<string, number>;
+  gauges?: Record<string, number>;
 }
 
 export interface SystemMetrics {
@@ -702,9 +704,9 @@ export class MetricsTracker extends EventEmitter {
     const currentMetrics = this.getCurrentMetrics();
     if (currentMetrics) {
       // Add counter data to the metrics for persistence
-      (currentMetrics as any).counters = (currentMetrics as any).counters || {};
-      (currentMetrics as any).counters[counterName] = 
-        ((currentMetrics as any).counters[counterName] || 0) + value;
+      currentMetrics.counters = currentMetrics.counters || {};
+      currentMetrics.counters[counterName] =
+        (currentMetrics.counters[counterName] || 0) + value;
     }
   }
 
@@ -719,7 +721,7 @@ export class MetricsTracker extends EventEmitter {
     if (!currentMetrics) return undefined;
 
     // Simple implementation - look in current metrics or return default
-    const gauges = (currentMetrics as any).gauges || {};
+    const gauges = currentMetrics.gauges || {};
     
     if (tags) {
       // If tags are provided, look for specific gauge with those tags
@@ -754,13 +756,13 @@ export class MetricsTracker extends EventEmitter {
     // Store in current metrics
     const currentMetrics = this.getCurrentMetrics();
     if (currentMetrics) {
-      (currentMetrics as any).gauges = (currentMetrics as any).gauges || {};
-      
+      currentMetrics.gauges = currentMetrics.gauges || {};
+
       if (tags) {
         const taggedKey = `${gaugeName}_${Object.entries(tags).map(([k, v]) => `${k}:${v}`).join('_')}`;
-        (currentMetrics as any).gauges[taggedKey] = value;
+        currentMetrics.gauges[taggedKey] = value;
       } else {
-        (currentMetrics as any).gauges[gaugeName] = value;
+        currentMetrics.gauges[gaugeName] = value;
       }
     }
   }
@@ -809,12 +811,12 @@ export class MetricsTracker extends EventEmitter {
     }
 
     // Network latency alert (check if network metrics have latency info)
-    if ((metrics.network as any).latency && 
-        (metrics.network as any).latency > this.config.thresholds.networkLatency) {
+    if (metrics.network.latency &&
+        metrics.network.latency > this.config.thresholds.networkLatency) {
       alerts.push({
         id: `network-latency-${Date.now()}`,
         severity: 'error',
-        message: `High network latency: ${((metrics.network as any).latency).toFixed(2)}ms`,
+        message: `High network latency: ${metrics.network.latency.toFixed(2)}ms`,
         timestamp: metrics.timestamp,
         source: 'MetricsTracker'
       });

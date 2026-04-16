@@ -1,6 +1,7 @@
 import { INetworkService } from '../ports';
 import { Transport } from '../../transport/Transport';
 import { Message } from '../../types';
+import { Logger } from '../../common/logger';
 
 /**
  * NetworkService manages cluster and client transport lifecycle
@@ -8,7 +9,8 @@ import { Message } from '../../types';
  */
 export class NetworkService implements INetworkService {
   readonly name = 'NETWORK';
-  
+  private logger = Logger.create('NetworkService');
+
   private clusterMessageHandler?: (message: Message) => void;
   private clientMessageHandler?: (connectionId: string, message: any) => void;
 
@@ -18,9 +20,9 @@ export class NetworkService implements INetworkService {
   ) {}
 
   async run(): Promise<void> {
-    console.log('[NetworkService] Starting run() method');
+    this.logger.debug('Starting run() method');
     await this.bindCluster();
-    console.log('[NetworkService] bindCluster() completed');
+    this.logger.debug('bindCluster() completed');
   }
 
   async stop(): Promise<void> {
@@ -31,20 +33,20 @@ export class NetworkService implements INetworkService {
   }
 
   async bindCluster(): Promise<void> {
-    console.log('[NetworkService] Starting bindCluster()');
-    console.log('[NetworkService] Transport type:', this.clusterTransport.constructor.name);
-    
+    this.logger.debug('Starting bindCluster()');
+    this.logger.debug('Transport type:', this.clusterTransport.constructor.name);
+
     // Set up cluster message handler if registered
     if (this.clusterMessageHandler) {
-      console.log('[NetworkService] Setting up cluster message handler');
+      this.logger.debug('Setting up cluster message handler');
       this.clusterTransport.onMessage(this.clusterMessageHandler);
     } else {
-      console.log('[NetworkService] No cluster message handler registered yet');
+      this.logger.debug('No cluster message handler registered yet');
     }
-    
-    console.log('[NetworkService] About to start cluster transport...');
+
+    this.logger.debug('About to start cluster transport...');
     await this.clusterTransport.start();
-    console.log('[NetworkService] Cluster transport started successfully');
+    this.logger.info('Cluster transport started successfully');
   }
 
   async bindClient(): Promise<void> {

@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path'
 import { WALEntry, WALFile } from '../types';
+import { Logger } from '../../common/logger';
 
 function isNodeError(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && 'code' in err;
@@ -10,6 +11,7 @@ export class WALFileImpl implements WALFile {
   private filePath: string;
   private fileHandle: fs.FileHandle | null = null;
   private isOpen: boolean = false;
+  private logger = Logger.create('WALFile');
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -56,7 +58,7 @@ export class WALFileImpl implements WALFile {
           
           entries.push(entry);
         } catch (parseError) {
-          console.warn('[WALFile] Skipping malformed entry:', line);
+          this.logger.warn('Skipping malformed entry:', line);
         }
       }
       

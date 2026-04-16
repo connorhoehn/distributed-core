@@ -316,7 +316,8 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
     // Use cluster routing to determine which nodes should have this resource
     // This would integrate with your existing ClusterRouting component
     try {
-      return await (this.clusterCommunication as any).getResourceNodes(resourceId);
+      // clusterCommunication is typed as `any` — no shared interface exists yet for cluster communication
+      return await this.clusterCommunication.getResourceNodes(resourceId);
     } catch (error) {
       this.logger.error(`Error getting resource nodes for ${resourceId}:`, error);
       return [];

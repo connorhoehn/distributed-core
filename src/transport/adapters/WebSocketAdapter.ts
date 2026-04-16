@@ -5,6 +5,7 @@ import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
 import { GossipMessage } from '../../gossip/transport/GossipMessage';
+import { Logger } from '../../common/logger';
 
 interface WebSocketConnection {
   ws: WebSocket;
@@ -39,6 +40,7 @@ export class WebSocketAdapter extends Transport {
   private circuitBreaker: CircuitBreaker;
   private retryManager: RetryManager;
   private heartbeatTimer?: NodeJS.Timeout;
+  private readonly logger = Logger.create('WebSocketAdapter');
 
   constructor(nodeId: NodeId, options: WebSocketAdapterOptions = {}) {
     super();
@@ -194,7 +196,7 @@ export class WebSocketAdapter extends Transport {
         connection.ws.send(JSON.stringify(messageToSend));
         return;
       } catch (error) {
-        console.error(`[WebSocketAdapter] Failed to send to ${target.id}:`, error);
+        this.logger.error(`Failed to send to ${target.id}:`, error);
         throw error;
       }
     }
@@ -478,7 +480,7 @@ export class WebSocketAdapter extends Transport {
 
   private log(message: string): void {
     if (this.options.enableLogging) {
-      console.log(`[WebSocketAdapter:${this.nodeId.id}] ${message}`);
+      this.logger.info(message);
     }
   }
 }

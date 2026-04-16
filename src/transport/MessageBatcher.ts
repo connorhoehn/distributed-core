@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { Message, NodeId } from '../types';
 import { Transport } from './Transport';
+import { Logger } from '../common/logger';
 
 export interface BatchConfig {
   maxBatchSize?: number;
@@ -71,6 +72,7 @@ export class MessageBatcher extends EventEmitter {
   };
   
   private readonly options: Required<BatchOptions>;
+  private readonly logger = Logger.create('MessageBatcher');
 
   constructor(options: BatchOptions = {}) {
     super();
@@ -503,7 +505,7 @@ export class MessageBatcher extends EventEmitter {
    */
   private log(message: string): void {
     if (this.options.enableLogging) {
-      console.log(`[MessageBatcher] ${message}`);
+      this.logger.info(message);
     }
   }
 

@@ -56,22 +56,21 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       // Initialize local node in membership
       const localNode = this.context.getLocalNodeInfo();
       this.context.membership.addLocalNode(localNode);
-      
-      // TODO: Need to expose rebuildHashRing on context
-      // this.context.rebuildHashRing();
 
-      // Start transport layer
-      // TODO: Need to expose message handling on context  
-      // this.context.transport.onMessage(this.context.handleMessage.bind(this.context));
+      // Rebuild hash ring with initial membership
+      this.context.rebuildHashRing();
+
+      // Start transport layer with message handling via communication module
+      this.context.transport.onMessage((message) => {
+        this.context!.communication.handleMessage(message);
+      });
       await this.context.transport.start();
 
-      // Join cluster if not bootstrapping
-      // TODO: Need to expose joinCluster method on context
-      // await this.context.joinCluster();
+      // Join cluster via seed nodes
+      await this.context.communication.joinCluster();
 
-      // Start gossip protocol
-      // TODO: Need to expose gossip timer management on context
-      // this.context.startGossipTimer();
+      // Start periodic gossip protocol
+      this.context.communication.startGossipTimer();
 
       // Start failure detection
       this.context.failureDetector.start();
@@ -98,10 +97,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
 
     try {
       // Stop gossip timer
-      // TODO: Need to expose gossip timer management on context
-      // if (this.context.gossipTimer) {
-      //   clearInterval(this.context.gossipTimer);
-      // }
+      this.context.communication.stopGossipTimer();
 
       // Stop failure detector
       this.context.failureDetector.stop();
@@ -111,8 +107,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
 
       // Clear membership and hash ring
       this.context.membership.clear();
-      // TODO: Need to expose hash ring management on context
-      // this.context.hashRing.rebuild([]);
+      this.context.hashRing.rebuild([]);
 
       this.isStarted = false;
       this.emit('stopped', { nodeId: this.context.localNodeId, timestamp: Date.now() });
@@ -147,9 +142,8 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       this.context.membership.updateNode(leavingNode);
       this.context.addToRecentUpdates(leavingNode);
 
-      // Trigger immediate gossip to announce leaving
-      // TODO: Need to expose immediate gossip on context
-      // this.context.sendImmediateGossip();
+      // Trigger anti-entropy cycle to propagate leaving state
+      this.context.communication.runAntiEntropyCycle();
 
       // Wait for graceful shutdown period
       if (this.config.enableGracefulShutdown) {
@@ -195,9 +189,8 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       this.context.membership.updateNode(drainingNode);
       this.context.addToRecentUpdates(drainingNode);
 
-      // TODO: Implement actual workload migration logic
-      // For now, just wait for drain timeout
-      await new Promise(resolve => setTimeout(resolve, this.config.drainTimeout));
+      // Migrate workloads away from the draining node
+      await this.context.migrateWorkloads(targetNodeId);
 
       this.isDraining = false;
       this.emit('drained', { nodeId: targetNodeId, timestamp: Date.now() });
@@ -223,13 +216,11 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
         return; // Cannot rebalance with less than 2 nodes
       }
 
-      // TODO: Implement actual rebalancing logic
-      // For now, just rebuild the hash ring
-      // this.context.rebuildHashRing();
+      // Rebuild the hash ring from current alive membership
+      this.context.rebuildHashRing();
 
-      // Force anti-entropy to sync changes
-      // TODO: Need to expose anti-entropy on context
-      // this.context.runAntiEntropyCycle();
+      // Force anti-entropy to sync membership state across nodes
+      this.context.communication.runAntiEntropyCycle();
 
       this.emit('rebalanced', { 
         nodeCount: members.length, 

@@ -3,6 +3,7 @@ import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager, RetryOptions } from '../RetryManager';
+import { Logger } from '../../common/logger';
 
 interface UDPConnection {
   nodeId: NodeId;
@@ -39,6 +40,7 @@ export class UDPAdapter extends Transport {
   private circuitBreaker: CircuitBreaker;
   private retryManager: RetryManager;
   private messageHandlers: Set<(message: Message) => void> = new Set();
+  private readonly logger = Logger.create('UDPAdapter');
 
   private static readonly MAX_UDP_PACKET_SIZE = 65507; // Max UDP payload size
 
@@ -451,7 +453,7 @@ export class UDPAdapter extends Transport {
 
   private log(message: string): void {
     if (this.options.enableLogging) {
-      console.log(`[UDPAdapter:${this.nodeId.id}] ${message}`);
+      this.logger.info(message);
     }
   }
 }

@@ -1,3 +1,4 @@
+import { Logger } from '../common/logger';
 
 /**
  * Operation trace for debugging distributed operations
@@ -46,6 +47,7 @@ export interface DistributionMetrics {
  * Observability manager for distributed communication
  */
 export class ObservabilityManager {
+  private logger = Logger.create('ObservabilityManager');
   private traces: OperationTrace[] = [];
   private metrics: DistributionMetrics = {
     operations: {
@@ -106,7 +108,7 @@ export class ObservabilityManager {
     // Log important phases
     if (trace.phase === 'send' || trace.phase === 'recv' || trace.error) {
       const status = trace.error ? '❌' : '✅';
-      console.log(`${status} [${trace.phase.toUpperCase()}] ${trace.opId} on ${trace.nodeId} ${trace.duration ? `(${trace.duration}ms)` : ''}${trace.error ? `: ${trace.error}` : ''}`);
+      this.logger.info(`${status} [${trace.phase.toUpperCase()}] ${trace.opId} on ${trace.nodeId} ${trace.duration ? `(${trace.duration}ms)` : ''}${trace.error ? `: ${trace.error}` : ''}`);
     }
   }
 
@@ -125,14 +127,14 @@ export class ObservabilityManager {
     if (depth > maxDepth * 0.5) {
       if (!this.metrics.queues.slowConsumers.includes(connectionId)) {
         this.metrics.queues.slowConsumers.push(connectionId);
-        console.warn(`🐌 Slow consumer detected: ${connectionId} (queue depth: ${depth})`);
+        this.logger.warn(`Slow consumer detected: ${connectionId} (queue depth: ${depth})`);
       }
     } else {
       // Remove from slow consumers if recovered
       const index = this.metrics.queues.slowConsumers.indexOf(connectionId);
       if (index > -1) {
         this.metrics.queues.slowConsumers.splice(index, 1);
-        console.log(`⚡ Consumer recovered: ${connectionId} (queue depth: ${depth})`);
+        this.logger.info(`Consumer recovered: ${connectionId} (queue depth: ${depth})`);
       }
     }
   }
@@ -210,15 +212,15 @@ export class ObservabilityManager {
   printSummary(): void {
     const metrics = this.getMetrics();
     
-    console.log('\n📊 Distribution Metrics Summary:');
-    console.log(`   Operations: ${metrics.operations.total} total, ${metrics.operations.errors} errors`);
-    console.log(`   Avg Latency: ${metrics.operations.averageLatencyMs.toFixed(2)}ms`);
-    console.log(`   Routing: ${metrics.routing.localHits} local, ${metrics.routing.remoteHits} remote, ${metrics.routing.gossipFallbacks} gossip`);
-    console.log(`   WAL: ${metrics.wal.entries} entries (${metrics.wal.messageRecords} msg, ${metrics.wal.membershipRecords} membership)`);
-    console.log(`   Queues: ${Object.keys(metrics.queues.depth).length} active, ${metrics.queues.slowConsumers.length} slow`);
-    
+    this.logger.info('\nDistribution Metrics Summary:');
+    this.logger.info(`   Operations: ${metrics.operations.total} total, ${metrics.operations.errors} errors`);
+    this.logger.info(`   Avg Latency: ${metrics.operations.averageLatencyMs.toFixed(2)}ms`);
+    this.logger.info(`   Routing: ${metrics.routing.localHits} local, ${metrics.routing.remoteHits} remote, ${metrics.routing.gossipFallbacks} gossip`);
+    this.logger.info(`   WAL: ${metrics.wal.entries} entries (${metrics.wal.messageRecords} msg, ${metrics.wal.membershipRecords} membership)`);
+    this.logger.info(`   Queues: ${Object.keys(metrics.queues.depth).length} active, ${metrics.queues.slowConsumers.length} slow`);
+
     if (metrics.queues.slowConsumers.length > 0) {
-      console.log(`   Slow consumers: ${metrics.queues.slowConsumers.join(', ')}`);
+      this.logger.info(`   Slow consumers: ${metrics.queues.slowConsumers.join(', ')}`);
     }
   }
 

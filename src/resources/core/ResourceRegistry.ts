@@ -10,7 +10,7 @@ import {
   ResourceState,
   ResourceHealth
 } from '../types';
-import { StateAggregator } from '../../cluster/reconciliation/StateAggregator';
+import { StateAggregator } from '../../cluster/aggregation/StateAggregator';
 import { ResourceTopologyManager } from '../../cluster/topology/ResourceTopologyManager';
 import { StateDelta } from '../../cluster/delta-sync/StateDelta';
 import { ClusterManager } from '../../cluster/ClusterManager';

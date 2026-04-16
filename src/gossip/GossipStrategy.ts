@@ -1,8 +1,11 @@
 import { Transport } from '../transport/Transport';
 import { MembershipEntry, GossipMessage, NodeInfo } from '../cluster/types';
 import { Message, MessageType } from '../types';
+import { Logger } from '../common/logger';
 
 export class GossipStrategy {
+  private logger = Logger.create('GossipStrategy');
+
   constructor(
     private localNodeId: string,
     private transport: Transport,
@@ -40,7 +43,7 @@ export class GossipStrategy {
       } catch (error) {
         // Silently fail for unreachable nodes
         if (this.enableLogging) {
-          console.debug(`Failed to gossip to ${target.id}:`, error);
+          this.logger.debug(`Failed to gossip to ${target.id}:`, error);
         }
       }
     });

@@ -5,6 +5,7 @@ import { ResourceManager } from '../resources/management/ResourceManager';
 import { ClusterFanoutRouter } from '../resources/distribution/ClusterFanoutRouter';
 import { ClusterManager } from '../cluster/ClusterManager';
 import { ResourceOperation, VectorClock } from '../resources/core/ResourceOperation';
+import { Logger } from '../common/logger';
 
 export interface ClientConnectionConfig {
   nodeId: string;
@@ -26,6 +27,7 @@ export interface ClientConnectionConfig {
  */
 export class ClientConnectionService {
   private isStarted = false;
+  private logger = Logger.create('ClientConnectionService');
 
   constructor(
     private config: ClientConnectionConfig,
@@ -41,7 +43,7 @@ export class ClientConnectionService {
    * Start client connection handling
    */
   async start(): Promise<void> {
-    console.log('[CLIENT] Starting client connection service...');
+    this.logger.info('Starting client connection service...');
 
     try {
       // ConnectionManager doesn't have start/stop methods - it's always active
@@ -56,10 +58,10 @@ export class ClientConnectionService {
       this.setupConnectionLifecycle();
 
       this.isStarted = true;
-      console.log('[CLIENT] Client connection service started');
+      this.logger.info('Client connection service started');
 
     } catch (error) {
-      console.error('[CLIENT] Failed to start client connection service:', error);
+      this.logger.error('Failed to start client connection service:', error);
       throw new Error(`Client connection phase failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -70,14 +72,14 @@ export class ClientConnectionService {
   async stop(): Promise<void> {
     if (!this.isStarted) return;
 
-    console.log('[CLIENT] Stopping client connection service...');
+    this.logger.info('Stopping client connection service...');
     
     try {
       // ConnectionManager doesn't have stop method - connections are managed by transport
       this.isStarted = false;
-      console.log('[CLIENT] Client connection service stopped');
+      this.logger.info('Client connection service stopped');
     } catch (error) {
-      console.error('[CLIENT] Error stopping client connection service:', error);
+      this.logger.error('Error stopping client connection service:', error);
       throw error;
     }
   }
@@ -86,7 +88,7 @@ export class ClientConnectionService {
    * Set up routing from client messages to resource management
    */
   private setupClientMessageRouting(): void {
-    console.log('[CLIENT] Setting up client message routing to resource ports...');
+    this.logger.info('Setting up client message routing to resource ports...');
 
     // Route client messages through proper resource management ports
     this.connectionManager.on('message', async (connectionId: string, message: any) => {
@@ -96,7 +98,7 @@ export class ClientConnectionService {
           await this.handleResourceMessage(connectionId, message);
         }
       } catch (error) {
-        console.error('[CLIENT] Failed to route client message:', error);
+        this.logger.error('Failed to route client message:', error);
         
         // Send error response to client
         const errorConn = this.connectionManager.getConnection(connectionId);
@@ -116,7 +118,7 @@ export class ClientConnectionService {
    */
   private setupConnectionLifecycle(): void {
     this.connectionManager.on('connection:opened', (connectionId: string, metadata: any) => {
-      console.log(`[CLIENT] New client connection: ${connectionId}`);
+      this.logger.info(`New client connection: ${connectionId}`);
       
       // Apply rate limiting if configured
       if (this.config.rateLimits) {
@@ -125,7 +127,7 @@ export class ClientConnectionService {
     });
 
     this.connectionManager.on('connection:closed', (connectionId: string) => {
-      console.log(`[CLIENT] Client connection closed: ${connectionId}`);
+      this.logger.info(`Client connection closed: ${connectionId}`);
       
       // Clean up any resource attachments for this connection
       if (this.resourceAttachment) {

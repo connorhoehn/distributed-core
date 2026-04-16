@@ -61,6 +61,7 @@ import { ChaosInjector } from '../diagnostics/ChaosInjector';
 import { Transport } from '../transport/Transport';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
 import { NodeInfo, ClusterHealth, ClusterTopology, ClusterMetadata } from '../cluster/types';
+import { Logger } from './logger';
 
 /**
  * Configuration options for creating a {@link Node} instance.
@@ -125,6 +126,7 @@ export class Node {
   private transport: Transport;
   private isStarted = false;
   private enableLogging: boolean;
+  private logger: Logger;
 
   /**
    * Create a new Node with the given configuration.
@@ -133,6 +135,7 @@ export class Node {
   constructor(config: NodeConfig) {
     this.id = config.id;
     this.enableLogging = config.enableLogging ?? false;
+    this.logger = Logger.create(`Node:${config.id}`);
 
     // Initialize transport (default to InMemoryAdapter if not provided)
     this.transport = config.transport || new InMemoryAdapter({
@@ -219,11 +222,11 @@ export class Node {
 
       this.isStarted = true;
       if (this.enableLogging) {
-        console.log(`[Node ${this.id}] started successfully`);
+        this.logger.info('Started successfully');
       }
     } catch (error) {
       if (this.enableLogging) {
-        console.error(`[Node ${this.id}] failed to start:`, error);
+        this.logger.error('Failed to start:', error);
       }
       await this.stop(); // Cleanup on failure
       throw error;
@@ -243,13 +246,13 @@ export class Node {
       try {
         if (this.cluster && typeof this.cluster.leave === 'function') {
           if (this.enableLogging) {
-            console.log(`[Node ${this.id}] gracefully leaving cluster...`);
+            this.logger.info('Gracefully leaving cluster...');
           }
           await this.cluster.leave(5000); // 5 second timeout for departure
         }
       } catch (leaveError) {
         if (this.enableLogging) {
-          console.warn(`[Node ${this.id}] graceful cluster leave failed:`, leaveError);
+          this.logger.warn('Graceful cluster leave failed:', leaveError);
         }
         // Continue with shutdown even if graceful leave fails
       }
@@ -268,11 +271,11 @@ export class Node {
 
       this.isStarted = false;
       if (this.enableLogging) {
-        console.log(`[Node ${this.id}] stopped successfully`);
+        this.logger.info('Stopped successfully');
       }
     } catch (error) {
       if (this.enableLogging) {
-        console.error(`[Node ${this.id}] error during stop:`, error);
+        this.logger.error('Error during stop:', error);
       }
       throw error;
     }
@@ -295,7 +298,7 @@ export class Node {
       // }
     } catch (error) {
       if (this.enableLogging) {
-        console.error(`[Node ${this.id}] failed to route message:`, error);
+        this.logger.error('Failed to route message:', error);
       }
       // if (this.metrics) {
       //   this.metrics.track('messages.routing_errors', 1);
@@ -361,7 +364,7 @@ export class Node {
     //   this.chaos.inject(scenario, config);
     // }
     if (this.enableLogging) {
-      console.log(`[Node ${this.id}] Chaos injection requested: ${scenario}`, config);
+      this.logger.info(`Chaos injection requested: ${scenario}`, config);
     }
   }
 
@@ -415,7 +418,7 @@ export class Node {
     this.registerHandler('health', (message: RoutedMessage, session: Session) => {
       // For now, just log the health check - proper response handling would need Transport integration
       if (this.enableLogging) {
-        console.log(`[Node ${this.id}] Health check requested`, {
+        this.logger.info('Health check requested', {
           status: 'healthy',
           nodeId: this.id,
           uptime: this.isStarted ? Date.now() : 0,
@@ -427,7 +430,7 @@ export class Node {
     // Cluster info handler
     this.registerHandler('cluster-info', (message: RoutedMessage, session: Session) => {
       if (this.enableLogging) {
-        console.log(`[Node ${this.id}] Cluster info requested`, {
+        this.logger.info('Cluster info requested', {
           nodeInfo: this.getNodeInfo(),
           health: this.getClusterHealth(),
           topology: this.getClusterTopology(),
@@ -439,15 +442,15 @@ export class Node {
     // Metrics handler
     this.registerHandler('metrics', (message: RoutedMessage, session: Session) => {
       if (this.enableLogging) {
-        console.log(`[Node ${this.id}] Metrics requested`, this.getMetrics());
+        this.logger.info('Metrics requested', this.getMetrics());
       }
     });
 
     // Echo handler for testing
     this.registerHandler('echo', (message: RoutedMessage, session: Session) => {
       if (this.enableLogging) {
-        console.log(`[Node ${this.id}] Echo response`, {
-          echo: (message as any).payload,
+        this.logger.info('Echo response', {
+          echo: message['payload'] as unknown,
           from: this.id,
           timestamp: Date.now()
         });

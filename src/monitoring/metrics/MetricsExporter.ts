@@ -476,7 +476,7 @@ export class MetricsExporter extends EventEmitter {
    */
   private async exportToDatadog(metrics: UnifiedMetrics[], destination: ExportDestination): Promise<void> {
     const datadogMetrics = {
-      series: [] as any[]
+      series: [] as Array<{ metric: string; points: number[][]; tags: string[]; type: string }>
     };
 
     metrics.forEach(metric => {

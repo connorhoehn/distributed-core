@@ -1,6 +1,7 @@
 import { ResourceOperation } from '../core/ResourceOperation';
 import { IClusterNode } from '../../cluster/ClusterEventBus';
 import { DeliveryTracker, DeliveryReceipt } from './DeliveryTracker';
+import { Logger } from '../../common/logger';
 
 
 export interface NodeRoute {
@@ -26,6 +27,7 @@ export class ClusterFanoutRouter {
   private clusterNode: IClusterNode;
   private defaultStrategy: RoutingStrategy;
   public readonly deliveryTracker: DeliveryTracker;
+  private logger = Logger.create('ClusterFanoutRouter');
 
   constructor(
     clusterNode: IClusterNode,
@@ -98,11 +100,11 @@ export class ClusterFanoutRouter {
         }
       }
 
-      console.log(`🧭 Routed operation for resource ${resourceId} to ${routes.length} nodes`);
+      this.logger.info(`Routed operation for resource ${resourceId} to ${routes.length} nodes`);
       return routes;
 
     } catch (error) {
-      console.error(`Failed to route operation for resource ${resourceId}:`, error);
+      this.logger.error(`Failed to route operation for resource ${resourceId}:`, error);
       
       // Fallback to gossip if direct routing fails
       if (semantics.useGossipFallback) {

@@ -2,11 +2,13 @@ import { Connection } from './Connection';
 import { Session } from './Session';
 import { SendFunction, SessionMetadata, ConnectionConfig, MessageRouterFunction } from './types';
 import { ConnectionBackpressureManager, BackpressureConfig, BackpressureStats } from './ConnectionBackpressure';
+import { Logger } from '../common/logger';
 
 
 // Simple EventEmitter implementation for this environment
 class SimpleEventEmitter {
   private listeners = new Map<string, Function[]>();
+  private static emitterLogger = Logger.create('SimpleEventEmitter');
 
   emit(event: string, data?: any): boolean {
     const handlers = this.listeners.get(event);
@@ -15,7 +17,7 @@ class SimpleEventEmitter {
         try {
           handler(data);
         } catch (error) {
-          console.error(`Event handler error for ${event}:`, error);
+          SimpleEventEmitter.emitterLogger.error(`Event handler error for ${event}:`, error);
         }
       });
       return true;

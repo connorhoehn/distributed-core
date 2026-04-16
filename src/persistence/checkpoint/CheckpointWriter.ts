@@ -1,9 +1,11 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { CheckpointWriter, CheckpointSnapshot, EntityState, CheckpointConfig } from '../types';
+import { Logger } from '../../common/logger';
 
 export class CheckpointWriterImpl implements CheckpointWriter {
   private config: Required<CheckpointConfig> & { filePath: string };
+  private logger = Logger.create('CheckpointWriter');
 
   constructor(config: CheckpointConfig = {}) {
     this.config = {
@@ -120,7 +122,7 @@ export class CheckpointWriterImpl implements CheckpointWriter {
       }
     } catch (error) {
       // Don't fail the checkpoint if cleanup fails
-      console.warn('[CheckpointWriter] Cleanup failed:', error);
+      this.logger.warn('Cleanup failed:', error);
     }
   }
 

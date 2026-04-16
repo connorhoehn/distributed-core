@@ -1,7 +1,7 @@
 import { EventEmitter } from 'eventemitter3';
-import { 
-  EntityRegistry, 
-  EntityRecord, 
+import {
+  EntityRegistry,
+  EntityRecord,
   EntitySnapshot,
   EntityUpdate
 } from './types';
@@ -11,6 +11,7 @@ import { WALReaderImpl } from '../../../persistence/wal/WALReader';
 import { CheckpointWriterImpl } from '../../../persistence/checkpoint/CheckpointWriter';
 import { CheckpointReaderImpl } from '../../../persistence/checkpoint/CheckpointReader';
 import { CheckpointConfig, EntityState } from '../../../persistence/checkpoint/types';
+import { Logger } from '../../../common/logger';
 
 export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityRegistry {
   private entities: Map<string, EntityRecord> = new Map();
@@ -24,6 +25,7 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
   private checkpointTimer: NodeJS.Timeout | null = null;
   private lastCheckpointLSN: number = 0;
   private config: WALConfig & CheckpointConfig;
+  private logger = Logger.create('WriteAheadLogEntityRegistry');
 
   constructor(nodeId: string, config: WALConfig & CheckpointConfig = {}) {
     super();
@@ -261,7 +263,7 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
       
       return true;
     } catch (error) {
-      console.error(`[EntityRegistry] Failed to apply remote update for ${update.entityId}:`, error);
+      this.logger.error(`Failed to apply remote update for ${update.entityId}:`, error);
       return false;
     }
   }
@@ -371,7 +373,7 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
         break;
 
       default:
-        console.warn(`[EntityRegistry] Unknown operation: ${operation}`);
+        this.logger.warn(`Unknown operation: ${operation}`);
     }
 
     // Update global version
@@ -428,7 +430,7 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
         try {
           await this.createCheckpoint();
         } catch (error) {
-          console.error('[EntityRegistry] Checkpoint failed:', error);
+          this.logger.error('Checkpoint failed:', error);
         }
       }, this.config.interval);
       

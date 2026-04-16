@@ -18,7 +18,8 @@ export class AuthHandler implements MessageHandler {
 
   private handleLogin(message: RoutedMessage, session: Session): void {
     // Assuming userId is in message.payload
-    const userId = (message as any).userId ?? (message.payload && (message.payload as any).userId);
+    const payload = message['payload'] as Record<string, unknown> | undefined;
+    const userId = (message['userId'] as string | undefined) ?? (payload && (payload.userId as string | undefined));
     
     if (userId) {
       session.setTag('user', userId);

@@ -1,4 +1,5 @@
 import { IStateSyncService } from '../ports';
+import { Logger } from '../../common/logger';
 
 /**
  * StateSyncService coordinates WAL catch-up, delta sync, and anti-entropy
@@ -6,7 +7,8 @@ import { IStateSyncService } from '../ports';
  */
 export class StateSyncService implements IStateSyncService {
   readonly name = 'STATE_SYNC';
-  
+  private logger = Logger.create('StateSyncService');
+
   private antiEntropyTimer?: NodeJS.Timeout;
 
   constructor(
@@ -34,9 +36,9 @@ export class StateSyncService implements IStateSyncService {
     try {
       // Start WAL coordinator if not already running
       await this.walCoordinator.start();
-      console.log('[StateSyncService] WAL catch-up completed');
+      this.logger.info('WAL catch-up completed');
     } catch (error) {
-      console.error('[StateSyncService] WAL catch-up failed:', error);
+      this.logger.error('WAL catch-up failed:', error);
       throw error;
     }
   }
@@ -47,9 +49,9 @@ export class StateSyncService implements IStateSyncService {
     try {
       // For now, this is a placeholder for delta sync logic
       // In practice, this would initiate delta sync with cluster peers
-      console.log('[StateSyncService] Delta sync completed');
+      this.logger.info('Delta sync completed');
     } catch (error) {
-      console.error('[StateSyncService] Delta sync failed:', error);
+      this.logger.error('Delta sync failed:', error);
       throw error;
     }
   }
@@ -60,7 +62,7 @@ export class StateSyncService implements IStateSyncService {
       try {
         await this.runAntiEntropyCycle();
       } catch (error) {
-        console.error('[StateSyncService] Anti-entropy cycle failed:', error);
+        this.logger.error('Anti-entropy cycle failed:', error);
       }
     }, 30000);
     
@@ -70,6 +72,6 @@ export class StateSyncService implements IStateSyncService {
 
   async runAntiEntropyCycle(): Promise<void> {
     // This would be called by external triggers or periodic timer
-    console.log('[StateSyncService] Running anti-entropy cycle');
+    this.logger.info('Running anti-entropy cycle');
   }
 }

@@ -359,8 +359,12 @@ export class ResourceQuotaManager {
     currentValue: number, 
     limitValue: number
   ): QuotaViolation {
+    const validTypes: QuotaViolation['type'][] = ['subscribers', 'ops-rate', 'bytes-rate', 'connections', 'resources-per-conn'];
+    const violationType: QuotaViolation['type'] = validTypes.includes(type as QuotaViolation['type'])
+      ? (type as QuotaViolation['type'])
+      : 'ops-rate'; // fallback for unknown types
     const violation: QuotaViolation = {
-      type: type as any,
+      type: violationType,
       resourceId,
       connectionId,
       currentValue,

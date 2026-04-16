@@ -5,32 +5,28 @@ import {
   EntityUpdate, 
   EntitySnapshot 
 } from './types';
-import { FrameworkLogger } from '../../../common/logger';
+import { Logger } from '../../../common/logger';
 import { CheckpointEntityState } from './types';
 export class InMemoryEntityRegistry extends EventEmitter implements EntityRegistry {
   private entities: Map<string, EntityRecord> = new Map();
   private nodeId: string;
   private isRunning: boolean = false;
   private globalVersion: number = 0;
-  private logger: FrameworkLogger;
+  private logger = Logger.create('InMemoryEntityRegistry');
 
   constructor(nodeId: string, logConfig?: { enableTestMode?: boolean }) {
     super();
     this.nodeId = nodeId;
-    this.logger = new FrameworkLogger({ 
-      enableFrameworkLogs: true,
-      enableTestMode: logConfig?.enableTestMode // Let it auto-detect if not specified
-    });
   }
 
   async start(): Promise<void> {
     this.isRunning = true;
-    this.logger.framework(`[InMemoryEntityRegistry] Started for node ${this.nodeId}`);
+    this.logger.info(`Started for node ${this.nodeId}`);
   }
 
   async stop(): Promise<void> {
     this.isRunning = false;
-    this.logger.framework(`[InMemoryEntityRegistry] Stopped for node ${this.nodeId}`);
+    this.logger.info(`Stopped for node ${this.nodeId}`);
   }
 
   async proposeEntity(entityId: string, metadata?: Record<string, any>): Promise<EntityRecord> {
@@ -203,7 +199,7 @@ export class InMemoryEntityRegistry extends EventEmitter implements EntityRegist
       this.globalVersion = Math.max(this.globalVersion, update.version);
       return true;
     } catch (error) {
-      console.error(`[InMemoryEntityRegistry] Failed to apply remote update for ${update.entityId}:`, error);
+      this.logger.error(`Failed to apply remote update for ${update.entityId}:`, error);
       return false;
     }
   }

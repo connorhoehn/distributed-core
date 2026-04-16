@@ -230,7 +230,7 @@ describe('StateAggregator Conflict Resolution Integration', () => {
         severity: 'medium' as any
       };
 
-      await expect(aggregator.manualResolveConflict(mockConflict, 'invalid-strategy'))
+      await expect(aggregator.manualResolveConflict(mockConflict, 'invalid-strategy' as any))
         .rejects.toThrow();
 
       expect(resolutionErrors.length).toBeGreaterThan(0);

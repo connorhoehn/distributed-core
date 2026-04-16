@@ -45,8 +45,8 @@ export * from './core/operations/DistributedOperationsSpec';
 // Seeding
 export * from './core/seeding/SeedNodeRegistry';
 
-// Aggregation
-export * from './reconciliation/StateAggregator';
+// Aggregation (selective export to avoid PartitionInfo collision with ./types)
+export { StateAggregator, type AggregatedClusterState, type StateAggregatorConfig } from './aggregation/StateAggregator';
 
 // Cluster types (canonical definitions)
 export * from './types';

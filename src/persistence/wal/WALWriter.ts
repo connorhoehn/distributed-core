@@ -5,6 +5,7 @@ import { WALCoordinatorImpl } from './WALCoordinator';
 import path from 'path';
 import fs from 'fs/promises';
 import type { EntityUpdate } from '../types';
+import { Logger } from '../../common/logger';
 
 export type WALAppendListener = (lsn: number) => void;
 
@@ -16,6 +17,7 @@ export class WALWriterImpl implements WALWriter {
   private appendListeners: WALAppendListener[] = [];
   private currentSegment: number = 0;
   private segments: string[] = [];
+  private logger = Logger.create('WALWriter');
 
   constructor(config: WALConfig = {}) {
     this.config = {
@@ -96,8 +98,8 @@ export class WALWriterImpl implements WALWriter {
     // Convert EntityUpdate from ../types to ./types.EntityUpdate
     const walUpdate = {
       ...update,
-      version: (update as any).version ?? 1, // Provide default or map as needed
-      operation: (update as any).operation ?? 'update' // Provide default or map as needed
+      version: update.version ?? 1,
+      operation: update.operation ?? 'update'
     };
     const entry = this.coordinator.createEntry(walUpdate);
 
@@ -178,7 +180,7 @@ export class WALWriterImpl implements WALWriter {
         try {
           await this.sync();
         } catch (error) {
-          console.error('[WALWriter] Periodic sync failed:', error);
+          this.logger.error('Periodic sync failed:', error);
         }
       }, this.config.syncInterval);
       this.syncTimer.unref(); // Allow process to exit if only sync timer is running

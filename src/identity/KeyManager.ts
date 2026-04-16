@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { Logger } from '../common/logger';
 
 export interface KeyManagerConfig {
   privateKeyPem?: string;
@@ -35,6 +36,7 @@ export class KeyManager {
   private privateKey: Buffer;
   private publicKey: Buffer;
   private config: Required<KeyManagerConfig>;
+  private logger = Logger.create('KeyManager');
   
   constructor(config: KeyManagerConfig = {}) {
     this.config = {
@@ -57,7 +59,7 @@ export class KeyManager {
     }
 
     if (this.config.enableLogging) {
-      console.log(`[KeyManager] Initialized with ${this.config.algorithm.toUpperCase()} keys`);
+      this.logger.info(`Initialized with ${this.config.algorithm.toUpperCase()} keys`);
     }
   }
 
@@ -106,7 +108,7 @@ export class KeyManager {
       const signature = sign.sign(this.privateKey, 'hex');
 
       if (this.config.enableLogging) {
-        console.log(`[KeyManager] Signed message of length ${message.length}`);
+        this.logger.info(`Signed message of length ${message.length}`);
       }
 
       return {
@@ -116,7 +118,7 @@ export class KeyManager {
       };
     } catch (error) {
       if (this.config.enableLogging) {
-        console.error('[KeyManager] Signing failed:', error);
+        this.logger.error('Signing failed:', error);
       }
       throw new Error(`Failed to sign message: ${error}`);
     }
@@ -185,7 +187,7 @@ export class KeyManager {
   verifyClusterPayload(payload: any): boolean {
     if (!payload.signature || !payload.signedBy) {
       if (this.config.enableLogging) {
-        console.warn('[KeyManager] Payload missing signature or signedBy field');
+        this.logger.warn('Payload missing signature or signedBy field');
       }
       return false;
     }
@@ -197,7 +199,7 @@ export class KeyManager {
     const result = KeyManager.verify(message, signature, signedBy);
     
     if (this.config.enableLogging && !result.isValid) {
-      console.warn('[KeyManager] Payload signature verification failed:', result.error);
+      this.logger.warn('Payload signature verification failed:', result.error);
     }
     
     return result.isValid;
@@ -227,7 +229,7 @@ export class KeyManager {
     this.pinnedCertificates.set(nodeId, publicKey);
     
     if (this.config.enableLogging) {
-      console.log(`[KeyManager] Pinned certificate for node ${nodeId}`);
+      this.logger.info(`Pinned certificate for node ${nodeId}`);
     }
   }
 
@@ -243,7 +245,7 @@ export class KeyManager {
     const isValid = pinnedKey === publicKey;
     
     if (this.config.enableLogging && !isValid) {
-      console.warn(`[KeyManager] Certificate pinning failed for node ${nodeId}`);
+      this.logger.warn(`Certificate pinning failed for node ${nodeId}`);
     }
     
     return isValid;
@@ -263,7 +265,7 @@ export class KeyManager {
     const removed = this.pinnedCertificates.delete(nodeId);
     
     if (this.config.enableLogging && removed) {
-      console.log(`[KeyManager] Unpinned certificate for node ${nodeId}`);
+      this.logger.info(`Unpinned certificate for node ${nodeId}`);
     }
     
     return removed;

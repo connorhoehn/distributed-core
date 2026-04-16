@@ -1,7 +1,7 @@
 import { IWriteAheadLog } from '../types';
 
 export class WriteAheadLog implements IWriteAheadLog {
-  private log: any[] = [];
+  protected log: any[] = [];
 
   append(entry: any): void {
     this.log.push(entry);

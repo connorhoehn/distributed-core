@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { Logger } from '../common/logger';
 
 export enum CircuitState {
   CLOSED = 'closed',
@@ -48,6 +49,7 @@ export class CircuitBreaker<T = any> extends EventEmitter {
   private resetTimer?: NodeJS.Timeout;
   
   private readonly options: Required<CircuitBreakerOptions>;
+  private readonly logger = Logger.create('CircuitBreaker');
 
   constructor(options: CircuitBreakerOptions = {}) {
     super();
@@ -364,7 +366,7 @@ export class CircuitBreaker<T = any> extends EventEmitter {
    */
   private log(message: string): void {
     if (this.options.enableLogging) {
-      console.log(`[CircuitBreaker:${this.options.name}] ${message}`);
+      this.logger.info(message);
     }
   }
 

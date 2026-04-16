@@ -1,5 +1,6 @@
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
 import { Principal, ResourceAuthorizationService, AuthResult } from '../../resources/security/ResourceAuthorizationService';
+import { Logger } from '../../common/logger';
 
 
 /**
@@ -10,6 +11,7 @@ import { Principal, ResourceAuthorizationService, AuthResult } from '../../resou
  */
 export class DeliveryGuard {
   private authService: ResourceAuthorizationService;
+  private logger = Logger.create('DeliveryGuard');
 
   constructor(authService: ResourceAuthorizationService) {
     this.authService = authService;
@@ -32,15 +34,15 @@ export class DeliveryGuard {
       );
 
       if (!authResult.allowed) {
-        console.log(`🛡️ Delivery blocked for ${principal.id}: ${authResult.reason}`);
+        this.logger.warn(`Delivery blocked for ${principal.id}: ${authResult.reason}`);
         return false;
       }
 
-      console.log(`✅ Delivery authorized for ${principal.id} to resource ${resourceId}`);
+      this.logger.info(`Delivery authorized for ${principal.id} to resource ${resourceId}`);
       return true;
 
     } catch (error) {
-      console.error(`Failed to check delivery authorization for ${principal.id}:`, error);
+      this.logger.error(`Failed to check delivery authorization for ${principal.id}:`, error);
       
       // Fail closed - deny delivery on authorization errors
       return false;

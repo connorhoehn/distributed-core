@@ -5,6 +5,7 @@ export * from './VacuumBasedCompactionStrategy';
 export * from './LeveledCompactionStrategy';
 export * from './CompactionStrategyFactory';
 export * from './CompactionScheduler';
+export * from './WALMetricsProvider';
 
 // Re-export commonly used types for convenience
 export type {

@@ -1,6 +1,7 @@
 import { ICommunicationService } from '../ports';
 import { SeedNodeInfo } from '../../config/BootstrapConfig';
 import { Message } from '../../types';
+import { Logger } from '../../common/logger';
 
 /**
  * CommunicationService wraps ClusterCommunication for lifecycle management
@@ -8,7 +9,8 @@ import { Message } from '../../types';
  */
 export class CommunicationService implements ICommunicationService {
   readonly name = 'MEMBERSHIP';
-  
+  private logger = Logger.create('CommunicationService');
+
   private customMessageHandlers: Array<(type: string, payload: any, sender: string) => void> = [];
 
   constructor(
@@ -56,7 +58,7 @@ export class CommunicationService implements ICommunicationService {
         try {
           handler(customType, payload, message.sender.id);
         } catch (error) {
-          console.error(`Error in custom message handler for ${customType}:`, error);
+          this.logger.error(`Error in custom message handler for ${customType}:`, error);
         }
       });
     }

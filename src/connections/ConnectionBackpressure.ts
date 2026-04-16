@@ -1,3 +1,4 @@
+import { Logger } from '../common/logger';
 
 export interface BackpressureConfig {
   maxQueuePerConnection: number;
@@ -39,6 +40,7 @@ export interface BackpressureStats {
  */
 export class BoundedQueue implements OutboundQueue {
   private queue: QueuedMessage[] = [];
+  private logger: Logger;
   private stats = {
     totalEnqueued: 0,
     totalDropped: 0,
@@ -48,7 +50,9 @@ export class BoundedQueue implements OutboundQueue {
   constructor(
     private config: BackpressureConfig,
     private connectionId: string
-  ) {}
+  ) {
+    this.logger = Logger.create(`BoundedQueue:${connectionId}`);
+  }
 
   offer(data: any, meta: { opId?: string; priority?: number } = {}): 'enqueued' | 'dropped' | 'error' {
     const message: QueuedMessage = {
@@ -75,18 +79,18 @@ export class BoundedQueue implements OutboundQueue {
         const dropped = this.queue.shift();
         this.queue.push(message);
         this.stats.totalDropped++;
-        console.log(`📉 Dropped oldest message for connection ${this.connectionId}, opId: ${dropped?.meta.opId}`);
+        this.logger.warn(`Dropped oldest message, opId: ${dropped?.meta.opId}`);
         return 'dropped';
 
       case 'newest':
         // Drop the new message
         this.stats.totalDropped++;
-        console.log(`📉 Dropped newest message for connection ${this.connectionId}, opId: ${message.meta.opId}`);
+        this.logger.warn(`Dropped newest message, opId: ${message.meta.opId}`);
         return 'dropped';
 
       case 'error':
         // Return error without dropping
-        console.warn(`🚫 Queue full for connection ${this.connectionId}, rejecting message`);
+        this.logger.warn('Queue full, rejecting message');
         return 'error';
 
       default:
@@ -108,11 +112,11 @@ export class BoundedQueue implements OutboundQueue {
 
         // Check for timeout
         if (Date.now() - startTime > this.config.writeTimeoutMs) {
-          console.warn(`⏰ Write timeout for connection ${this.connectionId}, processed ${processed} messages`);
+          this.logger.warn(`Write timeout, processed ${processed} messages`);
           break;
         }
       } catch (error) {
-        console.error(`❌ Failed to write message for connection ${this.connectionId}:`, error);
+        this.logger.error('Failed to write message:', error);
         
         // Put message back at front of queue for retry
         this.queue.unshift(message);
@@ -159,6 +163,7 @@ export class BoundedQueue implements OutboundQueue {
 export class ConnectionBackpressureManager {
   private queues = new Map<string, OutboundQueue>();
   private defaultConfig: BackpressureConfig;
+  private logger = Logger.create('ConnectionBackpressureManager');
 
   constructor(config: Partial<BackpressureConfig> = {}) {
     this.defaultConfig = {
@@ -183,7 +188,7 @@ export class ConnectionBackpressureManager {
     if (queue) {
       queue.clear();
       this.queues.delete(connectionId);
-      console.log(`🗑️ Removed queue for connection ${connectionId}`);
+      this.logger.info(`Removed queue for connection ${connectionId}`);
     }
   }
 

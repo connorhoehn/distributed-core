@@ -2,6 +2,7 @@ import WebSocket = require('ws');
 import * as http from 'http';
 import { EventEmitter } from 'events';
 import { NodeId } from '../../types';
+import { Logger } from '../../common/logger';
 
 export interface ClientConnection {
   id: string;
@@ -39,6 +40,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
   private connections = new Map<string, ClientConnection>();
   private isStarted = false;
   private heartbeatTimer?: NodeJS.Timeout;
+  private readonly logger = Logger.create('ClientWebSocketAdapter');
 
   constructor(options: ClientWebSocketAdapterOptions = {}) {
     super();
@@ -80,7 +82,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
     await new Promise<void>((resolve, reject) => {
       this.server!.listen(this.options.port, this.options.host, () => {
         if (this.options.enableLogging) {
-          console.log(`ClientWebSocketAdapter listening on ${this.options.host}:${this.options.port}${this.options.path}`);
+          this.logger.info(`Listening on ${this.options.host}:${this.options.port}${this.options.path}`);
         }
         resolve();
       });
@@ -129,7 +131,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
     this.wss!.on('error', (error: Error) => {
       this.emit('server-error', error);
       if (this.options.enableLogging) {
-        console.error('WebSocket server error:', error);
+        this.logger.error('WebSocket server error:', error);
       }
     });
   }
@@ -137,7 +139,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
   private handleNewConnection(ws: WebSocket, request: http.IncomingMessage): void {
     if (this.connections.size >= this.options.maxConnections) {
       if (this.options.enableLogging) {
-        console.log(`Max connections reached, rejecting connection from ${request.socket.remoteAddress}`);
+        this.logger.warn(`Max connections reached, rejecting connection from ${request.socket.remoteAddress}`);
       }
       ws.close(1013, 'Server overloaded');
       return;
@@ -160,7 +162,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
     this.setupConnectionHandlers(connection);
 
     if (this.options.enableLogging) {
-      console.log(`Client ${clientId} connected from ${request.socket.remoteAddress}`);
+      this.logger.info(`Client ${clientId} connected from ${request.socket.remoteAddress}`);
     }
 
     // Send welcome message
@@ -207,7 +209,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
       this.emit('client-message', { clientId: connection.id, message, connection });
 
       if (this.options.enableLogging) {
-        console.log(`Message from client ${connection.id}: ${message.type}`);
+        this.logger.info(`Message from client ${connection.id}: ${message.type}`);
       }
 
     } catch (error) {
@@ -235,7 +237,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
     this.connections.delete(connection.id);
     
     if (this.options.enableLogging) {
-      console.log(`Client ${connection.id} disconnected with code ${code}: ${reason.toString()}`);
+      this.logger.info(`Client ${connection.id} disconnected with code ${code}: ${reason.toString()}`);
     }
 
     this.emit('client-disconnected', { 
@@ -375,7 +377,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
 
   private log(...args: any[]): void {
     if (this.options.enableLogging) {
-      console.log('[ClientWebSocketAdapter]', ...args);
+      this.logger.info(args.join(' '));
     }
   }
 }

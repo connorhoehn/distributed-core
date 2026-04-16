@@ -56,7 +56,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
 
   // Modular components
   private lifecycle: ClusterLifecycle;
-  private communication: ClusterCommunication;
+  readonly communication: ClusterCommunication;
   private introspection: ClusterIntrospection;
   private security: ClusterSecurity;
   private quorum: ClusterQuorum;
@@ -264,6 +264,16 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
   rebuildHashRing(): void {
     const aliveMembers = this.membership.getAliveMembers();
     this.hashRing.rebuild(aliveMembers);
+  }
+
+  /**
+   * Migrate workloads away from a node (stub — emits event for external handlers).
+   * Called by ClusterLifecycle during drain operations.
+   */
+  async migrateWorkloads(nodeId: string): Promise<void> {
+    this.emit('workload-migration-started', { nodeId, timestamp: Date.now() });
+    // Actual migration logic is application-specific; emit so consumers can act.
+    this.emit('workload-migration-completed', { nodeId, timestamp: Date.now() });
   }
 
   /** Return the full membership table as a map of node ID to {@link MembershipEntry}. */

@@ -14,8 +14,9 @@
  */
 
 import { ClusterManager } from '../cluster/ClusterManager';
+import { MembershipEntry } from '../cluster/types';
 import { Transport } from '../transport/Transport';
-import { NodeId } from '../types';
+import { NodeId, Message, MessageType } from '../types';
 
 export interface ClusterFacadeConfig {
   nodeId: string;
@@ -111,15 +112,22 @@ export class ClusterFacade {
     const transport = this.clusterManager.getTransport();
     for (const nodeId of targetNodeIds) {
       const membership = this.clusterManager.getMembership();
-      const member = membership.get(nodeId) as any;
+      const member: MembershipEntry | undefined = membership.get(nodeId);
       if (member) {
-        const target: import('../types').NodeId = {
+        const target: NodeId = {
           id: nodeId,
-          address: member.address || 'unknown',
-          port: member.port || 0
+          address: member.metadata?.address || 'unknown',
+          port: member.metadata?.port || 0
+        };
+        const message: Message = {
+          id: `${messageType}-${Date.now()}`,
+          type: MessageType.CUSTOM,
+          data: { messageType, payload },
+          sender: target,
+          timestamp: Date.now()
         };
         await transport.send(
-          { type: messageType, payload, sender: target, timestamp: Date.now(), version: 0 } as any,
+          message,
           target
         );
       }
@@ -172,7 +180,7 @@ export class ClusterFacade {
    * Register handler for incoming cluster messages
    */
   onMessage(messageType: string, handler: (payload: any, fromNodeId: string) => Promise<void>): void {
-    (this.clusterManager as any).on('custom-message', async (data: any) => {
+    this.clusterManager.on('custom-message', async (data: { message?: { type: string; payload: unknown }; fromNodeId: string }) => {
       if (data.message && data.message.type === messageType) {
         await handler(data.message.payload, data.fromNodeId);
       }

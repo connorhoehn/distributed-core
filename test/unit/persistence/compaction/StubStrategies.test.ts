@@ -53,13 +53,26 @@ describe('Stub Compaction Strategies', () => {
       expect(strategy).toBeInstanceOf(SizeTieredCompactionStrategy);
     });
 
-    test('should return false for shouldCompact (stub implementation)', () => {
+    test('should return true for shouldCompact when segment count exceeds threshold', () => {
       const strategy = new SizeTieredCompactionStrategy();
+      // mockWALMetrics has segmentCount=5, exceeds default maxSegmentsPerTier=4
       const result = strategy.shouldCompact(mockWALMetrics, mockCheckpointMetrics);
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
-    test('should return null for planCompaction (stub implementation)', () => {
+    test('should return false for shouldCompact when conditions are below thresholds', () => {
+      const strategy = new SizeTieredCompactionStrategy();
+      const lowMetrics: WALMetrics = {
+        segmentCount: 2,
+        totalSizeBytes: 10 * 1024 * 1024,
+        oldestSegmentAge: 1000,
+        tombstoneRatio: 0.1,
+        duplicateEntryRatio: 0.1
+      };
+      expect(strategy.shouldCompact(lowMetrics, mockCheckpointMetrics)).toBe(false);
+    });
+
+    test('should return null for planCompaction with single segment', () => {
       const strategy = new SizeTieredCompactionStrategy();
       const result = strategy.planCompaction(mockSegments, mockCheckpointMetrics);
       expect(result).toBeNull();
@@ -90,10 +103,11 @@ describe('Stub Compaction Strategies', () => {
       expect(strategy).toBeInstanceOf(VacuumBasedCompactionStrategy);
     });
 
-    test('should return false for shouldCompact (stub implementation)', () => {
+    test('should return true for shouldCompact when dead tuple ratio exceeds threshold', () => {
       const strategy = new VacuumBasedCompactionStrategy();
+      // mockWALMetrics: tombstoneRatio 0.25 + duplicateEntryRatio 0.15 = 0.40, exceeds default 0.2
       const result = strategy.shouldCompact(mockWALMetrics, mockCheckpointMetrics);
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     test('should return a plan when segments exceed dead tuple threshold', () => {
@@ -129,18 +143,35 @@ describe('Stub Compaction Strategies', () => {
       expect(strategy).toBeInstanceOf(LeveledCompactionStrategy);
     });
 
-    test('should return false for shouldCompact (stub implementation)', () => {
+    test('should return true for shouldCompact when segment count exceeds level0 limit', () => {
       const strategy = new LeveledCompactionStrategy();
       const result = strategy.shouldCompact(mockWALMetrics, mockCheckpointMetrics);
+      expect(result).toBe(true);
+    });
+
+    test('should return false for shouldCompact when conditions are below thresholds', () => {
+      const strategy = new LeveledCompactionStrategy();
+      const lowMetrics: WALMetrics = {
+        segmentCount: 2,
+        totalSizeBytes: 1024, // well below baseLevelSize
+        oldestSegmentAge: 1000,
+        tombstoneRatio: 0.1,
+        duplicateEntryRatio: 0.05
+      };
+      const result = strategy.shouldCompact(lowMetrics, mockCheckpointMetrics);
       expect(result).toBe(false);
     });
 
-    test('should return a basic plan for planCompaction', () => {
+    test('should return a plan for planCompaction with sufficient segments', () => {
       const strategy = new LeveledCompactionStrategy();
-      const result = strategy.planCompaction(mockSegments, mockCheckpointMetrics);
+      // Need multiple immutable segments with overlapping LSN ranges for a plan
+      const multiSegments: WALSegment[] = [
+        { ...mockSegments[0], segmentId: 'seg-1', startLSN: 1, endLSN: 500 },
+        { ...mockSegments[0], segmentId: 'seg-2', startLSN: 200, endLSN: 700 },
+      ];
+      const result = strategy.planCompaction(multiSegments, mockCheckpointMetrics);
       expect(result).not.toBeNull();
       expect(result!.planId).toContain('leveled-');
-      expect(result!.inputSegments).toHaveLength(1);
     });
 
     test('should return initial metrics', () => {
@@ -153,8 +184,8 @@ describe('Stub Compaction Strategies', () => {
     });
   });
 
-  describe('Stub Strategy Consistency', () => {
-    test('all stub strategies should implement base interface correctly', () => {
+  describe('Strategy Consistency', () => {
+    test('all implemented strategies should have proper initial metrics', () => {
       const strategies = [
         new SizeTieredCompactionStrategy(),
         new VacuumBasedCompactionStrategy(),
@@ -162,10 +193,6 @@ describe('Stub Compaction Strategies', () => {
       ];
 
       strategies.forEach(strategy => {
-        // All strategies should return false for shouldCompact (stubs)
-        expect(strategy.shouldCompact(mockWALMetrics, mockCheckpointMetrics)).toBe(false);
-
-        // All strategies should have proper initial metrics
         const metrics = strategy.getMetrics();
         expect(metrics.totalRuns).toBe(0);
         expect(metrics.isRunning).toBe(false);
@@ -174,11 +201,15 @@ describe('Stub Compaction Strategies', () => {
       });
     });
 
-    test('stub strategies should handle executeCompaction gracefully', async () => {
+    test('all strategies should handle executeCompaction and return correct planId', async () => {
       const mockPlan = {
         planId: 'test-plan',
         inputSegments: mockSegments,
-        outputSegments: [],
+        outputSegments: [{
+          segmentId: 'output-1',
+          estimatedSize: 50 * 1024 * 1024,
+          lsnRange: { start: 1, end: 500 }
+        }],
         estimatedSpaceSaved: 0,
         estimatedDuration: 0,
         priority: 'low' as const
@@ -186,18 +217,15 @@ describe('Stub Compaction Strategies', () => {
 
       const strategies = [
         new SizeTieredCompactionStrategy(),
-        new VacuumBasedCompactionStrategy(), 
+        new VacuumBasedCompactionStrategy(),
         new LeveledCompactionStrategy()
       ];
 
       for (const strategy of strategies) {
         const result = await strategy.executeCompaction(mockPlan);
-
-        // All strategies should return the correct planId
         expect(result.planId).toBe(mockPlan.planId);
-        // Result shape should always include metrics
         expect(result.metrics).toBeDefined();
-        expect(result.metrics.entriesProcessed).toBe(0);
+        expect(result.success).toBe(true);
       }
     });
   });

@@ -17,10 +17,10 @@ export interface FlowControlManager {
 
 /**
  * Integrated Communication Layer - Single façade for all resource communication
- * 
+ *
  * This is the composition root that the factory returns, providing a clean
  * interface that hides all internal wiring and EventEmitter dependencies.
- * 
+ *
  * Enforces:
  * - WAL-before-send semantics
  * - Proper operation ordering (causal, dedup)
@@ -28,34 +28,30 @@ export interface FlowControlManager {
  * - Flow control and backpressure
  * - Clean lifecycle management
  */
-export class IntegratedCommunicationLayer {
+export interface IntegratedCommunicationLayer {
   // Public façades for client interactions
-  public publisher!: ResourcePublisher;
-  public subscriber!: ResourceSubscriber;
+  publisher: ResourcePublisher;
+  subscriber: ResourceSubscriber;
 
   // Core services (exposed for advanced use cases)
-  public attachment!: ResourceAttachmentService;
-  public distribution!: ResourceDistributionEngine;
-  public router!: ClusterFanoutRouter;
-  public authz!: ResourceAuthorizationService;
-  public wal!: WriteAheadLog;
-  public flow!: FlowControlManager;
-  public dedup!: OperationDeduplicator;
-  public causal!: CausalOrderingEngine;
+  attachment: ResourceAttachmentService;
+  distribution: ResourceDistributionEngine;
+  router: ClusterFanoutRouter;
+  authz: ResourceAuthorizationService;
+  wal: WriteAheadLog;
+  flow: FlowControlManager;
+  dedup: OperationDeduplicator;
+  causal: CausalOrderingEngine;
 
   // Optional observability property
-  public observability?: {
+  observability?: {
     getMetrics: () => any;
     printSummary: () => void;
   };
 
   // Lifecycle management
-  public async start(): Promise<void> {
-    // Implementation here
-  }
-  public async stop(): Promise<void> {
-    // Implementation here
-  }
+  start(): Promise<void>;
+  stop(): Promise<void>;
 }
 
 /**

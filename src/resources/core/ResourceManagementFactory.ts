@@ -448,7 +448,7 @@ class SimpleWriteAheadLog extends WriteAheadLog {
     }
     
     this.entries.push(walRecord);
-    (this as any).log.push(walRecord);
+    this.log.push(walRecord);
     factoryLogger.debug(`WAL append: ${walRecord.kind} ${walRecord.op.opId || 'unknown'}`);
   }
 
@@ -472,7 +472,7 @@ class SimpleWriteAheadLog extends WriteAheadLog {
 
   async clear(): Promise<void> {
     this.entries = [];
-    (this as any).log = [];
+    this.log = [];
   }
 
   async getLastIndex(): Promise<number> { 
@@ -498,10 +498,8 @@ class AttachmentServiceWrapper {
     await this.baseService.deliverLocal(resourceId, operation, correlationId || 'default');
   }
 
-  async members(resourceId: string): Promise<Set<string>> {
-    // Return local members for this resource
-    const attachments = (this.baseService as any).attachments || new Map();
-    return attachments.get(resourceId) || new Set();
+  async members(resourceId: string): Promise<ReadonlySet<string>> {
+    return this.baseService.members(resourceId);
   }
 }
 
@@ -557,7 +555,7 @@ export class ResourceManagementFactory {
     const receiver: ClusterReceiver = {
       onMessage(handler: (from: string, bytes: Uint8Array) => void): void {
         // Listen for raw bytes messages and decode base64 once
-        (args.clusterManager as any).on('custom-message', (data: any) => {
+        args.clusterManager.on('custom-message', (data: any) => {
           if (data.message && data.message.type === 'resource:bytes' && data.message.b64) {
             const bytes = new Uint8Array(Buffer.from(data.message.b64, 'base64'));
             handler(data.senderId, bytes);
@@ -716,11 +714,11 @@ export class ResourceManagementFactory {
     const layer: IntegratedCommunicationLayer = {
       publisher,
       subscriber,
-      attachment: baseAttachment as any, // Real service with members()
+      attachment: baseAttachment,
       distribution,
       router,
       authz,
-      wal: wal as any, // Add readSince method
+      wal,
       flow,
       dedup,
       causal,

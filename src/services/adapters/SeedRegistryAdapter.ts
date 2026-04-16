@@ -1,10 +1,13 @@
 import { ISeedRegistry } from '../ports';
 import { SeedNodeInfo } from '../../config/BootstrapConfig';
+import { Logger } from '../../common/logger';
 
 /**
  * SeedRegistryAdapter adapts BootstrapConfig to ISeedRegistry interface
  */
 export class SeedRegistryAdapter implements ISeedRegistry {
+  private logger = Logger.create('SeedRegistryAdapter');
+
   constructor(private config: any) {}
 
   getBootstrapSeeds(): SeedNodeInfo[] {
@@ -20,19 +23,19 @@ export class SeedRegistryAdapter implements ISeedRegistry {
 
   startHealthMonitoring(): void {
     // Placeholder for seed health monitoring
-    console.log('[SeedRegistry] Started health monitoring');
+    this.logger.info('Started health monitoring');
   }
 
   stopHealthMonitoring(): void {
     // Placeholder for stopping health monitoring
-    console.log('[SeedRegistry] Stopped health monitoring');
+    this.logger.info('Stopped health monitoring');
   }
 
   markSuccess(id: string): void {
-    console.log(`[SeedRegistry] Marked seed ${id} as successful`);
+    this.logger.info(`Marked seed ${id} as successful`);
   }
 
   markFailure(id: string, err?: Error): void {
-    console.log(`[SeedRegistry] Marked seed ${id} as failed:`, err?.message);
+    this.logger.warn(`Marked seed ${id} as failed:`, err?.message);
   }
 }

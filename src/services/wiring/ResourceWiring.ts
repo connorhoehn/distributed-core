@@ -1,8 +1,11 @@
+import { Logger } from '../../common/logger';
+
 /**
  * ResourceWiring handles resource registry events and cluster distribution
  * MOVED FROM DistributedNodeFactory.wireComponents() - Workflow 2
  */
 export class ResourceWiring {
+  private logger = Logger.create('ResourceWiring');
   constructor(
     private resourceManager: any,        // ResourceManager
     private resourceDistribution: any,   // ResourceDistributionEngine  
@@ -46,7 +49,7 @@ export class ResourceWiring {
           }
         }
       } catch (error) {
-        console.error('Failed to distribute resource creation:', error);
+        this.logger.error('Failed to distribute resource creation:', error);
       }
     });
 
@@ -70,7 +73,7 @@ export class ResourceWiring {
           }
         }
       } catch (error) {
-        console.error('Failed to distribute resource update:', error);
+        this.logger.error('Failed to distribute resource update:', error);
       }
     });
 
@@ -94,7 +97,7 @@ export class ResourceWiring {
           }
         }
       } catch (error) {
-        console.error('Failed to distribute resource deletion:', error);
+        this.logger.error('Failed to distribute resource deletion:', error);
       }
     });
   }
@@ -148,7 +151,7 @@ export class ResourceWiring {
           }
         }
       } catch (error) {
-        console.error('Failed to process incoming cluster message:', error);
+        this.logger.error('Failed to process incoming cluster message:', error);
       }
     });
   }
