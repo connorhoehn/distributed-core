@@ -1,5 +1,5 @@
 /**
- * ClusterCoordinator - High-level cluster coordination abstraction
+ * ClusterFacade - High-level cluster coordination facade
  * 
  * Hides the complexity of:
  * - Transport management (WebSocket, TCP, gRPC)
@@ -17,7 +17,7 @@ import { ClusterManager } from '../cluster/ClusterManager';
 import { Transport } from '../transport/Transport';
 import { NodeId } from '../types';
 
-export interface ClusterCoordinatorConfig {
+export interface ClusterFacadeConfig {
   nodeId: string;
   clusterTransport: Transport;
   clientTransport: Transport;
@@ -45,10 +45,10 @@ export interface ClusterHealth {
 }
 
 /**
- * High-level cluster coordination abstraction
+ * High-level cluster facade
  * Hides transport, membership, and routing complexity
  */
-export class ClusterCoordinator {
+export class ClusterFacade {
   private clusterManager: ClusterManager;
   private clusterTransport: Transport;
   private clientTransport: Transport;

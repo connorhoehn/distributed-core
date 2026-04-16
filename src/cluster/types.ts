@@ -128,3 +128,44 @@ export interface PartitionInfo {
 }
 export const QuorumStrategy = undefined; // TODO: Implement QuorumStrategy
 export const QuorumStrategyType = undefined; // TODO: Implement QuorumStrategyType
+
+// ============================================================================
+// Resource interfaces for breaking the Cluster -> Resources circular dependency.
+// Cluster code depends on these interfaces; the concrete classes in src/resources/
+// implement them.  The allowed dependency direction is Resources -> Cluster.
+// ============================================================================
+
+import type { ResourceMetadata, ResourceTypeDefinition } from '../resources/types';
+import type { ResourceOperation } from '../resources/core/ResourceOperation';
+
+/**
+ * Minimal interface that Cluster code needs from ResourceRegistry.
+ * The real ResourceRegistry in src/resources/ should implement this.
+ */
+export interface IResourceRegistry {
+  on(event: string, listener: (...args: any[]) => void): this;
+  emit(event: string, ...args: any[]): boolean;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  getResource(resourceId: string): ResourceMetadata | null;
+  getAllResources(): ResourceMetadata[];
+  getResourcesByType(resourceType: string): ResourceMetadata[];
+  getLocalResources(): ResourceMetadata[];
+}
+
+/**
+ * Minimal interface that Cluster code needs from ResourceTypeRegistry.
+ */
+export interface IResourceTypeRegistry {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  getResourceType(typeName: string): ResourceTypeDefinition | undefined;
+  getAllResourceTypes(): ResourceTypeDefinition[];
+}
+
+/**
+ * Minimal interface that Cluster code needs from ResourceDistributionEngine.
+ */
+export interface IResourceDistributionEngine {
+  processIncomingOperation(operation: ResourceOperation): Promise<boolean>;
+}

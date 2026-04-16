@@ -1,5 +1,5 @@
-import { ResourceOperation } from '../../resources/core/ResourceOperation';
-import { ResourceDistributionEngine } from '../../resources/distribution/ResourceDistributionEngine';
+import type { ResourceOperation } from '../../resources/core/ResourceOperation';
+import type { IResourceDistributionEngine } from '../types';
 
 
 // Simple interface for state fingerprinting
@@ -43,14 +43,14 @@ export interface RepairSession {
  */
 export class AntiEntropyRepairManager implements AntiEntropyRepair {
   private config: RepairConfig;
-  private distributionEngine: ResourceDistributionEngine;
+  private distributionEngine: IResourceDistributionEngine;
   private fingerprinter: StateFingerprint;
   private nodeId: string;
   private activeSessions = new Map<string, RepairSession>();
   private clusterCommunication: any; // ClusterCommunication
 
   constructor(
-    distributionEngine: ResourceDistributionEngine,
+    distributionEngine: IResourceDistributionEngine,
     fingerprinter: StateFingerprint,
     clusterCommunication: any,
     nodeId: string,

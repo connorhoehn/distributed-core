@@ -1,8 +1,8 @@
 import { EventEmitter } from 'events';
 import { IClusterManagerContext, IRequiresContext } from '../core/IClusterManagerContext';
 import { ClusterHealth, ClusterTopology, ClusterMetadata, MembershipEntry } from '../types';
-import { ResourceMetadata } from '../../resources/types';
-import { ResourceRegistry } from '../../resources/core/ResourceRegistry';
+import type { ResourceMetadata } from '../../resources/types';
+import type { IResourceRegistry } from '../types';
 
 /**
  * Real-time performance tracking interface
@@ -82,7 +82,7 @@ export interface ClusterState {
  */
 export class ClusterIntrospection extends EventEmitter implements IRequiresContext {
   private context?: IClusterManagerContext;
-  private resourceRegistry?: ResourceRegistry;
+  private resourceRegistry?: IResourceRegistry;
   private logicalServices = new Map<string, LogicalService>();
   private performanceHistory: PerformanceMetrics[] = [];
   private maxHistorySize = 100;
@@ -90,7 +90,7 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
   private lastGossipCount = 0;
   private lastMessageCount = 0;
 
-  constructor(resourceRegistry?: ResourceRegistry) {
+  constructor(resourceRegistry?: IResourceRegistry) {
     super();
     this.resourceRegistry = resourceRegistry;
   }

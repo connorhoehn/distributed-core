@@ -1,6 +1,19 @@
 /**
- * Type definitions for the distributed core library
+ * Core type definitions for the distributed-core library.
+ *
+ * This file contains only COMMON / cross-cutting types that are not owned
+ * by any single module.  Domain-specific types live in their own modules:
+ *   - Cluster types        -> src/cluster/types.ts
+ *   - Coordinator types    -> src/coordinators/types.ts
+ *   - Messaging types      -> src/messaging/types.ts
+ *   - Persistence types    -> src/persistence/types.ts
+ *   - Connection types     -> src/connections/types.ts
+ *   - Resource types       -> src/resources/types.ts
  */
+
+// ---------------------------------------------------------------------------
+// Node identity
+// ---------------------------------------------------------------------------
 
 export interface NodeId {
   id: string;
@@ -8,17 +21,9 @@ export interface NodeId {
   port: number;
 }
 
-// NodeInfo and NodeStatus are canonically defined in src/cluster/types.ts
-import { NodeInfo, NodeStatus } from './cluster/types';
-export { NodeInfo, NodeStatus };
-
-export interface GossipMessageData {
-  type: MessageType;
-  payload: any;
-  sender: NodeId;
-  timestamp: number;
-  version: number;
-}
+// ---------------------------------------------------------------------------
+// Message primitives
+// ---------------------------------------------------------------------------
 
 export enum MessageType {
   PING = 'ping',
@@ -33,12 +38,20 @@ export enum MessageType {
   CUSTOM = 'custom'
 }
 
-export interface TransportConfig {
-  maxRetries: number;
-  timeout: number;
-  bufferSize: number;
-  encryption?: EncryptionConfig;
+export interface Message {
+  id: string;
+  type: MessageType;
+  // TODO: Replace `any` with a proper generic or discriminated union once
+  // all consumers use typed access patterns instead of raw property access.
+  data: any; // eslint-disable-line @typescript-eslint/no-explicit-any
+  sender: NodeId;
+  timestamp: number;
+  headers?: Record<string, string>;
 }
+
+// ---------------------------------------------------------------------------
+// Transport configuration
+// ---------------------------------------------------------------------------
 
 export interface EncryptionConfig {
   algorithm: string;
@@ -46,50 +59,10 @@ export interface EncryptionConfig {
   enabled: boolean;
 }
 
-export interface ClusterConfig {
-  bootstrapNodes: NodeId[];
-  gossipInterval: number;
-  failureTimeout: number;
-  maxGossipTargets: number;
-}
+// ---------------------------------------------------------------------------
+// Persistence layer interfaces
+// ---------------------------------------------------------------------------
 
-export interface MetricsData {
-  timestamp: number;
-  nodeId: string;
-  metrics: Record<string, number | string>;
-}
-
-export interface PersistenceConfig {
-  storePath: string;
-  walEnabled: boolean;
-  syncInterval: number;
-}
-
-export interface Message {
-  id: string;
-  type: MessageType;
-  data: any;
-  sender: NodeId;
-  timestamp: number;
-  headers?: Record<string, string>;
-}
-
-export interface GossipData {
-  nodes: NodeInfo[];
-  version: number;
-  timestamp: number;
-  checksum?: string;
-}
-
-export type EventCallback<T = any> = (data: T) => void;
-
-export interface EventEmitter {
-  on(event: string, callback: EventCallback): void;
-  off(event: string, callback: EventCallback): void;
-  emit(event: string, data?: any): void;
-}
-
-// Persistence Layer Interfaces
 export interface IStateStore {
   get<T>(key: string): T | undefined;
   set<T>(key: string, value: T): void;
@@ -99,13 +72,13 @@ export interface IStateStore {
 }
 
 export interface IWriteAheadLog {
-  append(entry: any): void;
-  readAll(): any[];
+  append(entry: unknown): void;
+  readAll(): unknown[];
   clear(): void;
 }
 
 export interface IBroadcastBuffer {
-  add(message: any): void;
-  drain(): any[];
+  add(message: unknown): void;
+  drain(): unknown[];
   size(): number;
 }

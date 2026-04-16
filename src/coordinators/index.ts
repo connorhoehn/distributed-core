@@ -1,6 +1,5 @@
-// Re-export types for convenience
-export * from '../types';
-export type { CoordinatorType, TransportType, ClusterNodeConfig, RangeHandler, ClusterMessage, ClusterInfo, RangeId, RingId } from './types';
+// Re-export coordinator domain types
+export type { CoordinatorType, TransportType, ClusterNodeConfig, RangeHandler, ClusterMessage, ClusterInfo, RangeId, RingId, CoordinatorNodeStatus, ClusterView, RangeLease, ClusterFrameworkEvents, IClusterCoordinator, ITransport, RangeAllocationStrategy, LoggingConfig } from './types';
 export { RangeCoordinator, createClusterNode, createRangeHandler } from './RangeCoordinator';
 
 // Re-export coordinators for advanced usage

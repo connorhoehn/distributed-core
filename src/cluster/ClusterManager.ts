@@ -26,8 +26,9 @@ import { ClusterIntrospection } from './introspection/ClusterIntrospection';
 import { ClusterSecurity } from '../identity/keys/ClusterSecurity';
 import { ClusterQuorum } from './quorum/ClusterQuorum';
 import { ClusterRouting } from '../routing/ClusterRouting';
+import { IClusterInfo, IClusterEventBus } from './ClusterEventBus';
 
-export class ClusterManager extends EventEmitter implements IClusterManagerContext {
+export class ClusterManager extends EventEmitter implements IClusterManagerContext, IClusterInfo, IClusterEventBus {
   // Core components (exposed via IClusterManagerContext)
   readonly membership: MembershipTable;
   readonly gossipStrategy: GossipStrategy;

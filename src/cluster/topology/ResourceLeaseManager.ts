@@ -1,4 +1,4 @@
-import { ResourceOperation } from '../../resources/core/ResourceOperation';
+import type { ResourceOperation } from '../../resources/core/ResourceOperation';
 
 
 /**

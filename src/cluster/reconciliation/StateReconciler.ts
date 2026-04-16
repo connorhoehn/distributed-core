@@ -4,7 +4,7 @@
 
 import { EventEmitter } from 'events';
 import { StateConflict, LogicalService, VectorClock } from '../introspection/ClusterIntrospection';
-import { ResourceMetadata } from '../../resources/types';
+import type { ResourceMetadata } from '../../resources/types';
 
 /**
  * Resolution strategy type

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { IClusterCoordinator, ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents, NodeStatus } from './types';
+import { IClusterCoordinator, ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents, CoordinatorNodeStatus } from './types';
 import { createLogger, FrameworkLogger } from '../common/logger';
 
 /**
@@ -12,7 +12,7 @@ import { createLogger, FrameworkLogger } from '../common/logger';
 export class InMemoryCoordinator extends EventEmitter implements IClusterCoordinator {
   private nodeId!: string;
   private ringId!: RingId;
-  private nodes = new Map<string, NodeStatus>();
+  private nodes = new Map<string, CoordinatorNodeStatus>();
   private leases = new Map<RangeId, RangeLease>();
   private ownedRanges = new Set<RangeId>();
   private started = false;

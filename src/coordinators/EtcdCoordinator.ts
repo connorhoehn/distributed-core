@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { IClusterCoordinator, ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents, NodeStatus } from './types';
+import { IClusterCoordinator, ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents, CoordinatorNodeStatus } from './types';
 import { createLogger, FrameworkLogger } from '../common/logger';
 
 /**
@@ -62,7 +62,7 @@ export class EtcdCoordinator extends EventEmitter implements IClusterCoordinator
   async getClusterView(): Promise<ClusterView> {
     // Stub cluster view
     return {
-      nodes: new Map<string, NodeStatus>([[this.nodeId, {
+      nodes: new Map<string, CoordinatorNodeStatus>([[this.nodeId, {
         nodeId: this.nodeId,
         lastSeen: Date.now(),
         metadata: {},

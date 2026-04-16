@@ -3,6 +3,9 @@ import { StateFingerprintGenerator } from './delta-sync/StateFingerprint';
 // Main cluster manager
 export { ClusterManager } from './ClusterManager';
 
+// Cluster interfaces (for consumers that don't need the full ClusterManager)
+export { IClusterEventBus, IClusterInfo, IClusterNode } from './ClusterEventBus';
+
 // Core
 export * from './core/IClusterManagerContext';
 export * from './core/lifecycle/ClusterLifecycle';
@@ -48,5 +51,5 @@ export * from './reconciliation/StateAggregator';
 // Cluster types (canonical definitions)
 export * from './types';
 
-// Shared types
-export * from '../types';
+// Common types (NodeId, Message, MessageType, etc.) are exported from
+// src/types.ts via the main index — no need to re-export here.

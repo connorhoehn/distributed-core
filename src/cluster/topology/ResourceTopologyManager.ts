@@ -2,12 +2,11 @@ import { EventEmitter } from 'events';
 import { ClusterManager } from '../ClusterManager';
 import { StateAggregator, AggregatedClusterState } from '../aggregation/StateAggregator';
 import { ClusterState, LogicalService, PerformanceMetrics } from '../introspection/ClusterIntrospection';
-import { ClusterHealth, ClusterTopology, ClusterMetadata, NodeInfo } from '../types';
+import { ClusterHealth, ClusterTopology, ClusterMetadata, NodeInfo, IResourceRegistry, IResourceTypeRegistry } from '../types';
+import type { DistributionStrategy } from '../types';
 import { MetricsTracker, UnifiedMetrics } from '../../monitoring/metrics/MetricsTracker';
-import { ResourceRegistry } from '../../resources/core/ResourceRegistry';
-import { ResourceTypeRegistry } from '../../resources';
-import { DistributionStrategy } from '../types';
-import { ResourceHealth, ResourceMetadata, ResourceState } from '../../resources';
+import { ResourceHealth } from '../../resources/types';
+import type { ResourceMetadata, ResourceState } from '../../resources/types';
 /**
  * Generic Resource Topology Manager
  * 
@@ -151,11 +150,11 @@ export interface ResourceClusterTopology {
  */
 export class ResourceTopologyManager extends EventEmitter {
   private clusterManager: ClusterManager;
-  private resourceRegistry: ResourceRegistry;
-  private resourceTypeRegistry: ResourceTypeRegistry;
+  private resourceRegistry: IResourceRegistry;
+  private resourceTypeRegistry: IResourceTypeRegistry;
   private stateAggregator: StateAggregator;
   private metricsTracker: MetricsTracker;
-  
+
   private nodeCapacities = new Map<string, NodeResourceCapacity>();
   private isRunning = false;
   private topologyUpdateInterval?: NodeJS.Timeout;
@@ -163,8 +162,8 @@ export class ResourceTopologyManager extends EventEmitter {
 
   constructor(
     clusterManager: ClusterManager,
-    resourceRegistry: ResourceRegistry,
-    resourceTypeRegistry: ResourceTypeRegistry,
+    resourceRegistry: IResourceRegistry,
+    resourceTypeRegistry: IResourceTypeRegistry,
     stateAggregator: StateAggregator,
     metricsTracker: MetricsTracker
   ) {

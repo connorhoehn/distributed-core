@@ -64,7 +64,7 @@ export class StubMetricsProvider implements CompactionMetricsProvider {
   }
 }
 
-export interface CompactionCoordinatorConfig {
+export interface CompactionSchedulerConfig {
   strategy: CompactionStrategyType | { type: CompactionStrategyType; config: Record<string, any> } | CompactionStrategy;
   walPath: string;
   checkpointPath: string;
@@ -75,17 +75,17 @@ export interface CompactionCoordinatorConfig {
 }
 
 /**
- * Coordinates compaction across the cluster and integrates with existing WAL + checkpoint systems
+ * Schedules compaction across the cluster and integrates with existing WAL + checkpoint systems
  */
-export class CompactionCoordinator extends EventEmitter {
+export class CompactionScheduler extends EventEmitter {
   private strategy: ReturnType<typeof CompactionStrategyFactory.create>;
-  private config: Required<CompactionCoordinatorConfig>;
+  private config: Required<CompactionSchedulerConfig>;
   private metricsProvider: CompactionMetricsProvider;
   private schedulingTimer: NodeJS.Timeout | null = null;
   private runningCompactions = new Set<string>();
   private isStarted = false;
 
-  constructor(config: CompactionCoordinatorConfig) {
+  constructor(config: CompactionSchedulerConfig) {
     super();
 
     this.metricsProvider = config.metricsProvider ?? new StubMetricsProvider();
@@ -96,7 +96,7 @@ export class CompactionCoordinator extends EventEmitter {
       enableAutoScheduling: true,
       metricsProvider: this.metricsProvider,
       ...config
-    } as Required<CompactionCoordinatorConfig>;
+    } as Required<CompactionSchedulerConfig>;
 
     // Initialize strategy
     if (typeof config.strategy === 'string') {
@@ -146,7 +146,7 @@ export class CompactionCoordinator extends EventEmitter {
    */
   async triggerCompactionCheck(): Promise<CompactionResult | null> {
     if (!this.isStarted) {
-      throw new Error('CompactionCoordinator not started');
+      throw new Error('CompactionScheduler not started');
     }
 
     if (this.runningCompactions.size >= this.config.maxConcurrentCompactions) {

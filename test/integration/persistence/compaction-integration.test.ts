@@ -1,4 +1,4 @@
-import { CompactionCoordinator } from '../../../src/persistence/compaction/CompactionCoordinator';
+import { CompactionScheduler } from '../../../src/persistence/compaction/CompactionScheduler';
 import { TimeBasedCompactionStrategy } from '../../../src/persistence/compaction/TimeBasedCompactionStrategy';
 import { CompactionStrategyFactory } from '../../../src/persistence/compaction/CompactionStrategyFactory';
 
@@ -6,7 +6,7 @@ describe('Compaction Integration Tests', () => {
   describe('End-to-End Compaction Flow', () => {
     test('should create and run time-based compaction strategy', async () => {
       // Create coordinator with time-based strategy
-      const coordinator = new CompactionCoordinator({
+      const coordinator = new CompactionScheduler({
         strategy: 'time-based',
         walPath: '/test/wal',
         checkpointPath: '/test/checkpoint',
@@ -27,7 +27,7 @@ describe('Compaction Integration Tests', () => {
     });
 
     test('should switch strategies at runtime', async () => {
-      const coordinator = new CompactionCoordinator({
+      const coordinator = new CompactionScheduler({
         strategy: new TimeBasedCompactionStrategy(),
         walPath: '/test/wal',
         checkpointPath: '/test/checkpoint',
@@ -62,7 +62,7 @@ describe('Compaction Integration Tests', () => {
     });
 
     test('should handle compaction lifecycle events', async () => {
-      const coordinator = new CompactionCoordinator({
+      const coordinator = new CompactionScheduler({
         strategy: 'time-based',
         walPath: '/test/wal',
         checkpointPath: '/test/checkpoint',
@@ -107,7 +107,7 @@ describe('Compaction Integration Tests', () => {
     });
 
     test('strategies should be swappable in coordinator', async () => {
-      const coordinator = new CompactionCoordinator({
+      const coordinator = new CompactionScheduler({
         strategy: 'time-based',
         walPath: '/test/wal',
         checkpointPath: '/test/checkpoint',
@@ -134,7 +134,7 @@ describe('Compaction Integration Tests', () => {
       // This test verifies that the compaction system can work with the existing
       // WriteAheadLog and checkpoint systems when they're integrated
       
-      const coordinator = new CompactionCoordinator({
+      const coordinator = new CompactionScheduler({
         strategy: 'time-based',
         walPath: '/test/wal',
         checkpointPath: '/test/checkpoint',
@@ -154,7 +154,7 @@ describe('Compaction Integration Tests', () => {
     });
 
     test('should respect checkpoint boundaries during compaction', async () => {
-      const coordinator = new CompactionCoordinator({
+      const coordinator = new CompactionScheduler({
         strategy: new TimeBasedCompactionStrategy({
           maxSegmentAge: 1, // Very low threshold to force compaction
           tombstoneThreshold: 0.1 // Low threshold to force compaction

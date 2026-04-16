@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import { ResourceMetadata, ResourceState, ResourceHealth } from '../types';
 import { ResourceRegistry } from '../core/ResourceRegistry';
 import { ResourceSubscriptionManager } from '../management/ResourceSubscriptionManager';
-import { ClusterManager } from '../../cluster/ClusterManager';
+import { IClusterNode } from '../../cluster/ClusterEventBus';
 
 export enum ResourceLifecycleEventType {
   // Basic lifecycle
@@ -86,7 +86,7 @@ export class ResourceLifecycleEventSystem extends EventEmitter {
   constructor(
     private resourceRegistry: ResourceRegistry,
     private subscriptionManager: ResourceSubscriptionManager,
-    private clusterManager: ClusterManager,
+    private clusterManager: IClusterNode,
     config: { maxHistorySize?: number } = {}
   ) {
     super();
@@ -629,8 +629,8 @@ export class ResourceLifecycleEventSystem extends EventEmitter {
 
   private propagateEventToCluster(event: ResourceLifecycleEvent): void {
     // Send significant events to all cluster members
-    const members = this.clusterManager.membership.getAllMembers()
-      .filter(m => m.status === 'ALIVE' && m.id !== this.clusterManager.localNodeId);
+    const members = this.clusterManager.getAliveMembers()
+      .filter(m => m.id !== this.clusterManager.localNodeId);
     
     if (members.length > 0) {
       this.clusterManager.sendCustomMessage(

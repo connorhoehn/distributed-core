@@ -71,7 +71,7 @@ export interface CompactionMetrics {
 
 /**
  * Provider interface for gathering WAL and checkpoint metrics.
- * Implement this to wire real WAL/checkpoint systems into the CompactionCoordinator.
+ * Implement this to wire real WAL/checkpoint systems into the CompactionScheduler.
  */
 export interface CompactionMetricsProvider {
   /** Gather current WAL metrics (segment count, size, age, ratios). */
@@ -115,7 +115,7 @@ export abstract class CompactionStrategy {
   abstract planCompaction(segments: WALSegment[], checkpointMetrics: CheckpointMetrics): CompactionPlan | null;
 
   /**
-   * Execute the compaction plan (implemented by CompactionCoordinator)
+   * Execute the compaction plan (implemented by CompactionScheduler)
    */
   abstract executeCompaction(plan: CompactionPlan): Promise<CompactionResult>;
 

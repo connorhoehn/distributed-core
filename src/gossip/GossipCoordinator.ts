@@ -5,7 +5,7 @@ import {
   RangeId,
   RingId,
   RangeLease,
-  NodeStatus,
+  CoordinatorNodeStatus,
   ClusterFrameworkEvents
 } from '../coordinators/types';
 import { ClusterManager } from '../cluster/ClusterManager';
@@ -181,7 +181,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
 
   async getClusterView(): Promise<ClusterView> {
     const membership = this.clusterManager.getMembership();
-    const nodes = new Map<string, NodeStatus>();
+    const nodes = new Map<string, CoordinatorNodeStatus>();
     
     // Convert membership entries to node status
     for (const [nodeId, entry] of membership) {

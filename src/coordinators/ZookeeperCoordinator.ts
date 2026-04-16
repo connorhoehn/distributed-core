@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import {
   IClusterCoordinator,
   ClusterView,
-  NodeStatus,
+  CoordinatorNodeStatus,
   ClusterFrameworkEvents
 } from './types';
 import { createLogger, FrameworkLogger } from '../common/logger';
@@ -74,11 +74,11 @@ export class ZookeeperCoordinator extends EventEmitter implements IClusterCoordi
     };
   }
 
-  async updateNodeStatus(status: NodeStatus): Promise<void> {
+  async updateCoordinatorNodeStatus(status: CoordinatorNodeStatus): Promise<void> {
     this.logger.coordinator(`Updating node status via ZooKeeper (stub): ${status}`);
   }
 
-  async getNodeStatus(nodeId: string): Promise<NodeStatus | null> {
+  async getCoordinatorNodeStatus(nodeId: string): Promise<CoordinatorNodeStatus | null> {
     this.logger.coordinator(`Getting node status for ${nodeId} via ZooKeeper (stub)`);
     return null;
   }

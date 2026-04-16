@@ -1,10 +1,10 @@
-import { CompactionCoordinator, CompactionCoordinatorConfig } from '../../../../src/persistence/compaction/CompactionCoordinator';
+import { CompactionScheduler, CompactionSchedulerConfig } from '../../../../src/persistence/compaction/CompactionScheduler';
 import { TimeBasedCompactionStrategy } from '../../../../src/persistence/compaction/TimeBasedCompactionStrategy';
 import { WALMetrics, CheckpointMetrics } from '../../../../src/persistence/compaction/types';
 
-describe('CompactionCoordinator', () => {
-  let coordinator: CompactionCoordinator;
-  let mockConfig: CompactionCoordinatorConfig;
+describe('CompactionScheduler', () => {
+  let coordinator: CompactionScheduler;
+  let mockConfig: CompactionSchedulerConfig;
 
   beforeEach(() => {
     mockConfig = {
@@ -16,7 +16,7 @@ describe('CompactionCoordinator', () => {
       enableAutoScheduling: false // Disable for tests
     };
     
-    coordinator = new CompactionCoordinator(mockConfig);
+    coordinator = new CompactionScheduler(mockConfig);
   });
 
   afterEach(async () => {
@@ -28,14 +28,14 @@ describe('CompactionCoordinator', () => {
   describe('constructor', () => {
     test('should initialize with strategy instance', () => {
       const config = { ...mockConfig, strategy: new TimeBasedCompactionStrategy() };
-      const coord = new CompactionCoordinator(config);
-      expect(coord).toBeInstanceOf(CompactionCoordinator);
+      const coord = new CompactionScheduler(config);
+      expect(coord).toBeInstanceOf(CompactionScheduler);
     });
 
     test('should initialize with strategy type string', () => {
       const config = { ...mockConfig, strategy: 'time-based' as const };
-      const coord = new CompactionCoordinator(config);
-      expect(coord).toBeInstanceOf(CompactionCoordinator);
+      const coord = new CompactionScheduler(config);
+      expect(coord).toBeInstanceOf(CompactionScheduler);
     });
 
     test('should initialize with strategy config object', () => {
@@ -46,8 +46,8 @@ describe('CompactionCoordinator', () => {
           config: { maxSegmentAge: 12 * 60 * 60 * 1000 }
         }
       };
-      const coord = new CompactionCoordinator(config);
-      expect(coord).toBeInstanceOf(CompactionCoordinator);
+      const coord = new CompactionScheduler(config);
+      expect(coord).toBeInstanceOf(CompactionScheduler);
     });
   });
 

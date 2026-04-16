@@ -78,7 +78,7 @@ export interface RangeLease {
  * Cluster view from coordinator perspective
  */
 export interface ClusterView {
-  nodes: Map<string, NodeStatus>;
+  nodes: Map<string, CoordinatorNodeStatus>;
   leases: Map<RangeId, RangeLease>;
   ringId: RingId;
   version: number;
@@ -86,12 +86,12 @@ export interface ClusterView {
 }
 
 /**
- * Node status in the cluster
+ * Node status in the coordinator (distinct from cluster-level NodeStatus type alias)
  */
-export interface NodeStatus {
+export interface CoordinatorNodeStatus {
   nodeId: string;
   lastSeen: number;
-  metadata: Record<string, any>;
+  metadata: Record<string, unknown>;
   isAlive: boolean;
 }
 

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { ResourceRegistry } from '../core/ResourceRegistry';
-import { ClusterManager } from '../../cluster/ClusterManager';
+import { IClusterNode } from '../../cluster/ClusterEventBus';
 import { ResourceMetadata } from '../../resources/types';
 import { StateDelta, StateDeltaManager, ResourceDelta } from '../../cluster/delta-sync/StateDelta';
 import { StateReconciler, ResourceConflict } from '../../cluster/reconciliation/StateReconciler';
@@ -20,7 +20,7 @@ import { NodeRoute } from '../distribution/ClusterFanoutRouter';
  */
 export class ResourceDistributionEngine extends EventEmitter {
   private resourceRegistry: ResourceRegistry;
-  private clusterManager: ClusterManager;
+  private clusterManager: IClusterNode;
   private deltaSyncManager: StateDeltaManager;
   private stateReconciler: StateReconciler;
   private semanticsConfig: DistributedSemanticsConfig;
@@ -36,7 +36,7 @@ export class ResourceDistributionEngine extends EventEmitter {
   
   constructor(
     resourceRegistry: ResourceRegistry,
-    clusterManager: ClusterManager,
+    clusterManager: IClusterNode,
     stateReconciler?: StateReconciler,
     semanticsConfig?: DistributedSemanticsConfig,
     options?: {
@@ -138,8 +138,8 @@ export class ResourceDistributionEngine extends EventEmitter {
       );
 
       // Get all cluster members except ourselves
-      const members = this.clusterManager.membership.getAllMembers()
-        .filter(member => member.status === 'ALIVE' && member.id !== this.clusterManager.localNodeId);
+      const members = this.clusterManager.getAliveMembers()
+        .filter(member => member.id !== this.clusterManager.localNodeId);
 
       console.log(`📡 [ResourceDistributionEngine] Distributing ${resource.resourceType} ${resource.resourceId} (${operation}) to ${members.length} nodes via StateDelta + Gossip`);
 
@@ -149,21 +149,6 @@ export class ResourceDistributionEngine extends EventEmitter {
         delta,
         members.map(m => m.id)
       );
-
-      // Also propagate via gossip for redundancy and eventual consistency
-      if (this.clusterManager.gossipStrategy && members.length > 0) {
-        const gossipPayload = {
-          type: 'resource:delta',
-          delta,
-          sourceNodeId: this.clusterManager.localNodeId,
-          timestamp: Date.now()
-        };
-        
-        // Use the gossip strategy to send to a subset of nodes (gossip fanout)
-        const gossipTargets = members.slice(0, Math.min(3, members.length)); // Gossip to max 3 nodes
-        await this.clusterManager.gossipStrategy.sendGossip(gossipTargets, gossipPayload as any);
-        console.log(`🗣️ [ResourceDistributionEngine] Also broadcasted via gossip protocol to ${gossipTargets.length} nodes`);
-      }
 
       this.emit('resource:distributed', resource, members.map(m => m.id));
     } catch (error) {
@@ -603,7 +588,7 @@ export class ResourceDistributionEngine extends EventEmitter {
     if (this.isFeatureEnabled('obs.trace')) {
       const logData = {
         message,
-        nodeId: this.clusterManager.getNodeInfo().id,
+        nodeId: this.clusterManager.localNodeId,
         timestamp: Date.now(),
         correlationId,
         ...metadata

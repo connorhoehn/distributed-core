@@ -1,7 +1,7 @@
 import { MetricsExporter, ExportDestination, MetricsExporterConfig } from '../../../src/monitoring/metrics/MetricsExporter';
 import { UnifiedMetrics, Alert } from '../../../src/monitoring/metrics/MetricsTracker';
 import { NodeHealthStatus } from '../../../src/monitoring/FailureDetector';
-import { NodeStatus } from '../../../src/types';
+import { NodeStatus } from '../../../src/cluster/types';
 import { EventEmitter } from 'eventemitter3';
 
 // Mock unified metrics for testing

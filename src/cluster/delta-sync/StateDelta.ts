@@ -4,7 +4,7 @@
 
 import { LogicalService, VectorClock } from '../introspection/ClusterIntrospection';
 import { StateFingerprint, FingerprintComparison } from './StateFingerprint';
-import { ResourceMetadata } from '../../resources/types';
+import type { ResourceMetadata } from '../../resources/types';
 
 /**
  * Types of delta operations

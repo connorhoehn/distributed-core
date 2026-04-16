@@ -2,29 +2,19 @@ import { EventEmitter } from 'events';
 import { EntityRegistryFactory, EntityRegistryType } from '../../cluster/core/entity/EntityRegistryFactory';
 import { InMemoryEntityRegistry } from '../../cluster/core/entity/InMemoryEntityRegistry';
 import { EntityRecord, EntityRegistry } from '../../cluster/core/entity/types';
-import { 
-  ResourceMetadata, 
-  ResourceTypeDefinition, 
-  ResourceEvent, 
+import {
+  ResourceMetadata,
+  ResourceTypeDefinition,
+  ResourceEvent,
   ResourceEventType,
   ResourceState,
-  ResourceHealth 
+  ResourceHealth
 } from '../types';
 import { StateAggregator } from '../../cluster/reconciliation/StateAggregator';
 import { ResourceTopologyManager } from '../../cluster/topology/ResourceTopologyManager';
 import { StateDelta } from '../../cluster/delta-sync/StateDelta';
 import { ClusterManager } from '../../cluster/ClusterManager';
-import { ResourceQueryEngine } from '../../observability/ResourceQueryEngine';
-import { ResourceSubscriptionManager } from '../management/ResourceSubscriptionManager';
-import { ResourceLifecycleEventSystem } from '../management/ResourceLifecycleEventSystem';
 import { DistributedSemanticsConfig, DistributedSemanticsFlags, globalSemanticsConfig } from '../../communication/semantics/DistributedSemanticsConfig';
-import { ResourceMonitoringSystem } from '../../observability/ResourceMonitoringSystem';
-import { ResourceOptimizationEngine } from '../../observability/ResourceOptimizationEngine';
-import { 
-  DistributedOperationsConfig, 
-  DistributedOperationsConfigFactory,
-  DEFAULT_DISTRIBUTED_OPS_CONFIG 
-} from '../../communication/semantics/DistributedOperationsConfig';
 
 
 /**
@@ -51,12 +41,22 @@ export interface ResourceRegistryConfig {
 }
 
 /**
- * ResourceRegistry: A facade over EntityRegistry for resource management
- * 
- * This bridges the gap between the existing EntityRegistry infrastructure
- * and the new ResourceMetadata system, allowing us to leverage the
- * distributed entity management capabilities for generic resources.
- * 
+ * ResourceRegistry: A focused facade over EntityRegistry for resource management.
+ *
+ * RESPONSIBILITIES (kept):
+ * - CRUD operations on resources (create, read, update, remove)
+ * - Resource type registration
+ * - Event emission for resource lifecycle (created, updated, destroyed, migrated)
+ * - Entity registry bridging (maps ResourceMetadata to EntityRecord)
+ * - Cluster integration (state propagation, remote creation)
+ *
+ * EXTERNAL CONCERNS (removed - wire these externally via ResourceRegistry events):
+ * - ResourceQueryEngine: subscribe to events and index resources externally
+ * - ResourceSubscriptionManager: listen to ResourceRegistry events externally
+ * - ResourceLifecycleEventSystem: listen to ResourceRegistry events externally
+ * - ResourceMonitoringSystem: wire externally, consumes events
+ * - ResourceOptimizationEngine: wire externally, consumes events
+ *
  * EVENT ARCHITECTURE:
  * - LOCAL EVENTS: emit() calls notify local EventEmitter listeners within the same node
  * - CLUSTER EVENTS: propagateResourceEventToCluster() sends events to all cluster members
@@ -71,13 +71,6 @@ export class ResourceRegistry extends EventEmitter {
   private resourceTopologyManager?: ResourceTopologyManager;
   private clusterManager?: ClusterManager;
   private semanticsConfig: DistributedSemanticsConfig;
-  
-  // New enhanced components
-  public queryEngine?: ResourceQueryEngine;
-  public subscriptionManager?: ResourceSubscriptionManager;
-  public lifecycleEventSystem?: ResourceLifecycleEventSystem;
-  public monitoringSystem?: ResourceMonitoringSystem;
-  public optimizationEngine?: ResourceOptimizationEngine;
 
   constructor(config: ResourceRegistryConfig) {
     super();
@@ -86,7 +79,7 @@ export class ResourceRegistry extends EventEmitter {
     this.stateAggregator = config.stateAggregator;
     this.resourceTopologyManager = config.resourceTopologyManager;
     this.clusterManager = config.clusterManager;
-    
+
     // Create the underlying EntityRegistry using the factory
     this.entityRegistry = EntityRegistryFactory.create({
       type: config.entityRegistryType,
@@ -96,12 +89,9 @@ export class ResourceRegistry extends EventEmitter {
 
     // Bridge entity events to resource events
     this.setupEntityEventBridge();
-    
+
     // Setup cluster integration if available
     this.setupClusterIntegration();
-    
-    // Initialize enhanced components if cluster manager is available
-    this.initializeEnhancedComponents();
   }
 
   /**
@@ -127,7 +117,7 @@ export class ResourceRegistry extends EventEmitter {
 
     // Get optimal placement suggestion from topology manager
     const suggestedNodeId = await this.getResourcePlacementSuggestion(resourceMetadata);
-    
+
     // If placement suggests a different node, create resource there instead
     if (suggestedNodeId !== this.nodeId) {
       console.log(`🎯 [ResourceRegistry] Topology suggests creating ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on node ${suggestedNodeId} instead of ${this.nodeId}`);
@@ -136,7 +126,7 @@ export class ResourceRegistry extends EventEmitter {
 
     // Create resource locally as topology suggests this node is optimal
     console.log(`🎯 [ResourceRegistry] Creating ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} locally on optimal node ${this.nodeId}`);
-    
+
     // Create entity record with resource metadata
     const entityRecord = await this.entityRegistry.proposeEntity(
       resourceMetadata.resourceId,
@@ -181,11 +171,11 @@ export class ResourceRegistry extends EventEmitter {
     try {
       // Send to target node and wait for response
       await this.clusterManager?.sendCustomMessage('resource:create-request', createRequest.payload, [targetNodeId]);
-      
+
       // For now, return the resource metadata (in a full implementation, we'd wait for confirmation)
       // The actual resource creation will be handled by the target node's ResourceRegistry
       console.log(`📨 [ResourceRegistry] Sent create request for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} to node ${targetNodeId}`);
-      
+
       return remoteResourceMetadata;
     } catch (error) {
       console.error(`❌ [ResourceRegistry] Failed to create resource on node ${targetNodeId}:`, error);
@@ -231,7 +221,7 @@ export class ResourceRegistry extends EventEmitter {
   async createRemoteResource(resourceMetadata: ResourceMetadata): Promise<ResourceMetadata> {
     // Skip validation and placement logic for remote resources
     // These resources are already validated and placed by their origin node
-    
+
     try {
       // Check if resource already exists
       const existingEntity = this.entityRegistry.getEntity(resourceMetadata.resourceId);
@@ -267,14 +257,14 @@ export class ResourceRegistry extends EventEmitter {
   private async handleRemoteResourceCreationRequest(payload: any, senderId: string): Promise<void> {
     try {
       const { resourceMetadata, requestId, sourceNodeId } = payload;
-      
+
       console.log(`📨 [ResourceRegistry] Received create request for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} from node ${sourceNodeId}`);
-      
+
       // Create the resource locally
       const createdResource = await this.createResourceLocally(resourceMetadata);
-      
+
       console.log(`✅ [ResourceRegistry] Successfully created ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on behalf of node ${sourceNodeId}`);
-      
+
       // Send confirmation back to the requesting node (optional)
       if (this.clusterManager) {
         await this.clusterManager.sendCustomMessage('resource:create-response', {
@@ -286,7 +276,7 @@ export class ResourceRegistry extends EventEmitter {
       }
     } catch (error) {
       console.error(`❌ [ResourceRegistry] Failed to handle remote creation request from ${senderId}:`, error);
-      
+
       // Send error response (optional)
       if (this.clusterManager && payload.requestId) {
         await this.clusterManager.sendCustomMessage('resource:create-response', {
@@ -306,11 +296,12 @@ export class ResourceRegistry extends EventEmitter {
   private async handleClusterResourceEvent(clusterEvent: any, senderId: string): Promise<void> {
     try {
       const { eventType, resource, previousResource, sourceNodeId, timestamp } = clusterEvent;
-      
+
       console.log(`📨 [ResourceRegistry] Received cluster event ${eventType} for ${resource.resourceId} from node ${sourceNodeId}`);
-      
-      // Emit the event locally so that local listeners (like enhanced components) can react
-      // This allows ResourceLifecycleEventSystem, ResourceSubscriptionManager, etc. to process cluster events
+
+      // Emit the event locally so that external listeners can react
+      // External components (e.g. ResourceLifecycleEventSystem, ResourceSubscriptionManager)
+      // can subscribe to these events to process cluster-wide resource changes
       switch (eventType) {
         case 'resource:created':
           this.emit('resource:created', resource);
@@ -324,7 +315,7 @@ export class ResourceRegistry extends EventEmitter {
         default:
           console.warn(`Unknown cluster resource event type: ${eventType}`);
       }
-      
+
     } catch (error) {
       console.error(`❌ [ResourceRegistry] Failed to handle cluster resource event from ${senderId}:`, error);
     }
@@ -375,10 +366,10 @@ export class ResourceRegistry extends EventEmitter {
     });
 
     const finalResource = this.entityToResource(updatedEntity);
-    
-    // Emit resource:updated event locally with previous state for enhanced components
+
+    // Emit resource:updated event locally with previous state for external listeners
     this.emit('resource:updated', finalResource, existingResource);
-    
+
     // ALSO propagate to cluster members directly
     await this.propagateResourceEventToCluster('resource:updated', finalResource, existingResource);
 
@@ -499,7 +490,7 @@ export class ResourceRegistry extends EventEmitter {
     }
 
     const resourceMetadata = entity.metadata.resourceMetadata as ResourceMetadata;
-    
+
     // Ensure the resource metadata has correct ownership info from entity
     return {
       ...resourceMetadata,
@@ -512,7 +503,7 @@ export class ResourceRegistry extends EventEmitter {
    * Check if an entity represents a resource
    */
   private isResourceEntity(entity: EntityRecord): boolean {
-    return entity.metadata?.registryType === 'resource' && 
+    return entity.metadata?.registryType === 'resource' &&
            entity.metadata?.resourceMetadata != null;
   }
 
@@ -632,15 +623,9 @@ export class ResourceRegistry extends EventEmitter {
    * Handle cluster state changes that affect resources
    */
   private handleClusterStateChange(aggregatedState: any): void {
-    // Monitor for resource placement changes, node failures, etc.
-    // This is where we'd detect if resources need to be migrated
-    // due to cluster topology changes
-    
     if (aggregatedState.resources) {
-      // Process resource state from cluster
       Object.entries(aggregatedState.resources).forEach(([resourceId, resourceState]: [string, any]) => {
         if (resourceState.ownerNodeId !== this.nodeId && resourceState.previousOwner === this.nodeId) {
-          // Resource was migrated away from this node
           this.handleResourceMigration(resourceId, resourceState);
         }
       });
@@ -668,7 +653,6 @@ export class ResourceRegistry extends EventEmitter {
         }
       } catch (error) {
         console.error(`Failed to propagate resource ${operation} to StateAggregator:`, error);
-        // Fallback to event emission for backward compatibility
         this.emit('resource:cluster-update', {
           resourceId: resource.resourceId,
           resourceType: resource.resourceType,
@@ -684,22 +668,21 @@ export class ResourceRegistry extends EventEmitter {
 
   /**
    * Propagate resource events directly to cluster members
-   * This ensures all cluster nodes receive resource events, not just local listeners
    */
   private async propagateResourceEventToCluster(
-    eventType: string, 
-    resource: ResourceMetadata, 
+    eventType: string,
+    resource: ResourceMetadata,
     previousResource?: ResourceMetadata
   ): Promise<void> {
     if (!this.clusterManager) {
-      return; // No cluster to propagate to
+      return;
     }
 
     const members = this.clusterManager.membership.getAllMembers()
       .filter(m => m.status === 'ALIVE' && m.id !== this.clusterManager!.localNodeId);
 
     if (members.length === 0) {
-      return; // No other cluster members
+      return;
     }
 
     const clusterEvent = {
@@ -717,7 +700,7 @@ export class ResourceRegistry extends EventEmitter {
         clusterEvent,
         members.map(m => m.id)
       );
-      
+
       console.log(`📡 Propagated ${eventType} for ${resource.resourceId} to ${members.length} cluster members`);
     } catch (error) {
       console.error(`❌ Failed to propagate ${eventType} to cluster:`, error);
@@ -728,8 +711,6 @@ export class ResourceRegistry extends EventEmitter {
    * Handle resource migration from cluster state changes
    */
   private handleResourceMigration(resourceId: string, resourceState: any): void {
-    // Resource was migrated to another node
-    // Remove from local registry and emit migration event
     this.emit('resource:cluster-migrated', {
       resourceId,
       fromNodeId: this.nodeId,
@@ -744,209 +725,18 @@ export class ResourceRegistry extends EventEmitter {
   async getResourcePlacementSuggestion(resourceMetadata: ResourceMetadata): Promise<string> {
     if (this.resourceTopologyManager) {
       try {
-        // Use existing topology manager for placement decisions
         const distribution = await this.resourceTopologyManager.getResourceDistribution(
           resourceMetadata.resourceId,
           resourceMetadata.resourceType
         );
-        
-        // Return the recommended primary node or current node as fallback
+
         return distribution.recommendedDistribution?.primaryNode || distribution.currentDistribution.primaryNode;
       } catch (error) {
         console.warn(`Failed to get placement recommendation for ${resourceMetadata.resourceId}:`, error);
       }
     }
-    
-    // Fallback to local node
+
     return this.nodeId;
-  }
-
-  /**
-   * Initialize enhanced resource management components
-   */
-  private initializeEnhancedComponents(): void {
-    if (!this.clusterManager) {
-      console.log('🔧 ClusterManager not available - enhanced resource components disabled');
-      return;
-    }
-
-    try {
-      // Initialize ResourceQueryEngine
-      this.queryEngine = new ResourceQueryEngine();
-      console.log('✅ ResourceQueryEngine initialized');
-
-      // Initialize ResourceSubscriptionManager  
-      this.subscriptionManager = new ResourceSubscriptionManager(this, this.clusterManager, {
-        maxInactiveTime: 300000, // 5 minutes
-        cleanupInterval: 60000   // 1 minute
-      });
-      console.log('✅ ResourceSubscriptionManager initialized');
-
-      // Initialize ResourceLifecycleEventSystem
-      this.lifecycleEventSystem = new ResourceLifecycleEventSystem(
-        this, 
-        this.subscriptionManager, 
-        this.clusterManager, 
-        {
-          maxHistorySize: 10000 // Store last 10,000 events
-        }
-      );
-      console.log('✅ ResourceLifecycleEventSystem initialized');
-
-      // Initialize ResourceMonitoringSystem
-      this.monitoringSystem = new ResourceMonitoringSystem();
-      console.log('✅ ResourceMonitoringSystem initialized');
-
-      // Initialize ResourceOptimizationEngine
-      this.optimizationEngine = new ResourceOptimizationEngine();
-      console.log('✅ ResourceOptimizationEngine initialized');
-
-    } catch (error) {
-      console.error('❌ Failed to initialize enhanced resource components:', error);
-    }
-  }
-
-  /**
-   * Enhanced query methods using ResourceQueryEngine
-   */
-  async queryResources(query: any): Promise<any> {
-    if (!this.queryEngine) {
-      throw new Error('QueryEngine not available - ensure ClusterManager is configured');
-    }
-    return this.queryEngine.queryResources(query);
-  }
-
-  async queryClusterWideResources(query: any): Promise<any> {
-    if (!this.queryEngine) {
-      throw new Error('QueryEngine not available - ensure ClusterManager is configured');
-    }
-    return this.queryEngine.queryClusterWideResources(query);
-  }
-
-  searchResources(searchText: string, limit = 50): ResourceMetadata[] {
-    if (!this.queryEngine) {
-      throw new Error('QueryEngine not available - ensure ClusterManager is configured');
-    }
-    return this.queryEngine.searchResources(searchText, limit)
-      .map((resource: any) => resource as ResourceMetadata);
-  }
-
-  getResourceRecommendations(targetCapacity: number, resourceType?: string): ResourceMetadata[] {
-    if (!this.queryEngine) {
-      throw new Error('QueryEngine not available - ensure ClusterManager is configured');
-    }
-    return this.queryEngine.getResourceRecommendations(targetCapacity, resourceType)
-      .map((resource: any) => resource as ResourceMetadata);
-  }
-
-  /**
-   * Subscription management methods
-   */
-  async subscribeToResources(clientId: string, filter: any): Promise<string> {
-    if (!this.subscriptionManager) {
-      throw new Error('SubscriptionManager not available - ensure ClusterManager is configured');
-    }
-    return this.subscriptionManager.subscribe(clientId, filter);
-  }
-
-  async unsubscribeFromResources(subscriptionId: string): Promise<boolean> {
-    if (!this.subscriptionManager) {
-      throw new Error('SubscriptionManager not available - ensure ClusterManager is configured');
-    }
-    return this.subscriptionManager.unsubscribe(subscriptionId);
-  }
-
-  /**
-   * Lifecycle event methods
-   */
-  queryLifecycleEvents(filter: any): any[] {
-    if (!this.lifecycleEventSystem) {
-      throw new Error('LifecycleEventSystem not available - ensure ClusterManager is configured');
-    }
-    return this.lifecycleEventSystem.queryEvents(filter);
-  }
-
-  getResourceEventHistory(resourceId: string): any[] {
-    if (!this.lifecycleEventSystem) {
-      throw new Error('LifecycleEventSystem not available - ensure ClusterManager is configured');
-    }
-    return this.lifecycleEventSystem.getResourceEventHistory(resourceId);
-  }
-
-  getCriticalEvents(timeRangeMs = 3600000): any[] {
-    if (!this.lifecycleEventSystem) {
-      throw new Error('LifecycleEventSystem not available - ensure ClusterManager is configured');
-    }
-    return this.lifecycleEventSystem.getCriticalEvents(timeRangeMs);
-  }
-
-  /**
-   * Monitoring system methods
-   */
-  getResourceHealthStatus(resourceId: string): any {
-    if (!this.monitoringSystem) {
-      throw new Error('MonitoringSystem not available - ensure ClusterManager is configured');
-    }
-    return this.monitoringSystem.getResourceHealthStatus(resourceId);
-  }
-
-  getPerformanceAnalytics(resourceId: string): any {
-    if (!this.monitoringSystem) {
-      throw new Error('MonitoringSystem not available - ensure ClusterManager is configured');
-    }
-    return this.monitoringSystem.getPerformanceAnalytics(resourceId);
-  }
-
-  getActiveAlerts(resourceId?: string): any[] {
-    if (!this.monitoringSystem) {
-      throw new Error('MonitoringSystem not available - ensure ClusterManager is configured');
-    }
-    return this.monitoringSystem.getActiveAlerts(resourceId);
-  }
-
-  getMonitoringStats(): any {
-    if (!this.monitoringSystem) {
-      throw new Error('MonitoringSystem not available - ensure ClusterManager is configured');
-    }
-    return this.monitoringSystem.getMonitoringStats();
-  }
-
-  acknowledgeAlert(alertId: string, acknowledgedBy?: string): boolean {
-    if (!this.monitoringSystem) {
-      throw new Error('MonitoringSystem not available - ensure ClusterManager is configured');
-    }
-    return this.monitoringSystem.acknowledgeAlert(alertId, acknowledgedBy);
-  }
-
-  /**
-   * Optimization engine methods
-   */
-  async generateOptimizationRecommendations(): Promise<any[]> {
-    if (!this.optimizationEngine) {
-      throw new Error('OptimizationEngine not available - ensure ClusterManager is configured');
-    }
-    return this.optimizationEngine.generateOptimizationRecommendations();
-  }
-
-  async findOptimalPlacement(resourceMetadata: ResourceMetadata, constraints?: any): Promise<any> {
-    if (!this.optimizationEngine) {
-      throw new Error('OptimizationEngine not available - ensure ClusterManager is configured');
-    }
-    return this.optimizationEngine.findOptimalPlacement(resourceMetadata, constraints);
-  }
-
-  async analyzeClusterEfficiency(): Promise<any> {
-    if (!this.optimizationEngine) {
-      throw new Error('OptimizationEngine not available - ensure ClusterManager is configured');
-    }
-    return this.optimizationEngine.analyzeClusterEfficiency();
-  }
-
-  async getCapacityForecast(timeHorizonHours = 24): Promise<any> {
-    if (!this.optimizationEngine) {
-      throw new Error('OptimizationEngine not available - ensure ClusterManager is configured');
-    }
-    return this.optimizationEngine.getCapacityForecast(timeHorizonHours);
   }
 
   /**
@@ -987,6 +777,7 @@ export class ResourceRegistry extends EventEmitter {
       console.log('[ResourceRegistry]', message);
     }
   }
+
   async destroyResource(resourceId: string): Promise<void> {
     const resource = this.getResource(resourceId);
     if (!resource) {
@@ -995,6 +786,7 @@ export class ResourceRegistry extends EventEmitter {
     await this.entityRegistry.releaseEntity(resourceId);
     this.emit('resource:destroyed', resource);
   }
+
   async listResources(): Promise<ResourceMetadata[]> {
     return this.entityRegistry.getAllKnownEntities()
       .filter((entity: EntityRecord) => this.isResourceEntity(entity))

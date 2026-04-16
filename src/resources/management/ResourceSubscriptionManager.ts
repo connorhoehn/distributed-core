@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { ResourceMetadata, ResourceState, ResourceHealth } from '../types';
 import { ResourceRegistry } from '../core/ResourceRegistry';
-import { ClusterManager } from '../../cluster/ClusterManager';
+import { IClusterNode } from '../../cluster/ClusterEventBus';
 import { ResourceAttachmentService } from '../attachment/ResourceAttachmentService';
 import { DeliveryGuard } from '../../communication/delivery/DeliveryGuard';
 
@@ -51,7 +51,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
   
   constructor(
     private resourceRegistry: ResourceRegistry,
-    private clusterManager: ClusterManager,
+    private clusterManager: IClusterNode,
     private config: {
       maxInactiveTime?: number;
       cleanupInterval?: number;
@@ -442,8 +442,8 @@ export class ResourceSubscriptionManager extends EventEmitter {
     subscription: ResourceSubscription,
     operation: 'create' | 'delete'
   ): Promise<void> {
-    const members = this.clusterManager.membership.getAllMembers()
-      .filter(m => m.status === 'ALIVE' && m.id !== this.clusterManager.localNodeId);
+    const members = this.clusterManager.getAliveMembers()
+      .filter(m => m.id !== this.clusterManager.localNodeId);
     
     if (members.length === 0) return;
     

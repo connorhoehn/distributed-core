@@ -60,7 +60,7 @@ export class SizeTieredCompactionStrategy extends CompactionStrategy {
   }
 
   async executeCompaction(plan: CompactionPlan): Promise<CompactionResult> {
-    // STUB: Execution will be handled by CompactionCoordinator
+    // STUB: Execution will be handled by CompactionScheduler
     
     this.metrics.isRunning = true;
     const startTime = Date.now();
