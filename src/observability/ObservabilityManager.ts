@@ -1,5 +1,3 @@
-// Node.js environment access
-declare const console: any;
 
 /**
  * Operation trace for debugging distributed operations

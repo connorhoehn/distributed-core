@@ -5,8 +5,6 @@
 
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
 
-// Node.js environment declarations
-declare const Buffer: any;
 
 export interface MessageCodec {
   encode(operation: ResourceOperation): Uint8Array;

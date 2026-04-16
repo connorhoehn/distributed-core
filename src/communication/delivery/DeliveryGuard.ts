@@ -1,8 +1,6 @@
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
 import { Principal, ResourceAuthorizationService, AuthResult } from '../../resources/security/ResourceAuthorizationService';
 
-// Node.js environment access
-declare const console: any;
 
 /**
  * DeliveryGuard provides authorization checks at the delivery point

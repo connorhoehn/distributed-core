@@ -26,8 +26,6 @@ import {
   DEFAULT_DISTRIBUTED_OPS_CONFIG 
 } from '../../communication/semantics/DistributedOperationsConfig';
 
-// Node.js environment access
-declare const console: any;
 
 /**
  * Resource-Entity Bridge: Maps ResourceMetadata to EntityRecord

@@ -1,8 +1,5 @@
 import { DistributedOperationsConfig, DEFAULT_DISTRIBUTED_OPS_CONFIG } from './DistributedOperationsSpec';
 
-// Node.js environment access
-declare const process: any;
-declare const console: any;
 
 /**
  * Feature Flags Manager for Distributed Operations

@@ -2,8 +2,6 @@ import { ResourceMetadata } from '../../../resources';
 import { OpType, ResourceOperation, CorrelationContext } from './DistributedOperationsSpec';
 import { isDistributedOperationEnabled } from './DistributedOperationsFlags';
 
-// Node.js environment access
-declare const console: any;
 
 /**
  * Phase 1: Operation Envelope + Correlation Implementation

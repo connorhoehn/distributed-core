@@ -11,7 +11,7 @@ import {
 import { ClusterManager } from '../cluster/ClusterManager';
 import { BootstrapConfig } from '../config/BootstrapConfig';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
-import { NodeInfo } from '../types';
+import { NodeInfo } from '../cluster/types';
 import { NodeId } from '../types';
 
 /**

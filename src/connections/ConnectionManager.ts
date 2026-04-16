@@ -3,8 +3,6 @@ import { Session } from './Session';
 import { SendFunction, SessionMetadata, ConnectionConfig, MessageRouterFunction } from './types';
 import { ConnectionBackpressureManager, BackpressureConfig, BackpressureStats } from './ConnectionBackpressure';
 
-// Node.js environment access
-declare const console: any;
 
 // Simple EventEmitter implementation for this environment
 class SimpleEventEmitter {

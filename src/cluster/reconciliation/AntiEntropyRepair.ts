@@ -1,9 +1,6 @@
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
 import { ResourceDistributionEngine } from '../../resources/distribution/ResourceDistributionEngine';
 
-// Node.js environment access
-declare const console: any;
-declare function setInterval(callback: () => void, ms: number): any;
 
 // Simple interface for state fingerprinting
 export interface StateFingerprint {

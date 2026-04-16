@@ -10,7 +10,7 @@ export {
   RangeCoordinator,
   type ClusterNodeConfig,
   type RangeHandler as FrameworkRangeHandler,
-  type ClusterMessage as FrameworkClusterMessage,
+  type ClusterMessage,
   type ClusterInfo,
   type RangeId,
   type RingId,
@@ -81,3 +81,9 @@ export * from './connections/Connection';
 export * from './connections/ConnectionManager';
 export * from './connections/Session';
 export * from './connections/types';
+
+// Factory modules
+export * from './factories';
+
+// Service modules
+export * from './services';

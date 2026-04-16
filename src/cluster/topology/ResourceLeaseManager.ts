@@ -1,7 +1,5 @@
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
 
-// Node.js environment access
-declare const console: any;
 
 /**
  * ResourceLeaseManager provides distributed ownership coordination

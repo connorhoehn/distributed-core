@@ -1,4 +1,5 @@
-import { NodeId, NodeInfo, NodeStatus } from '../../src/types';
+import { NodeId } from '../../src/types';
+import { NodeInfo, NodeStatus } from '../../src/cluster/types';
 
 /**
  * Predefined node fixtures for testing
@@ -37,35 +38,35 @@ export const nodeFixtures: NodeId[] = [
 export const nodeInfoFixtures: NodeInfo[] = [
   {
     id: nodeFixtures[0].id,
-    status: NodeStatus.ALIVE,
+    status: 'ALIVE' as NodeStatus,
     version: 1,
     lastSeen: Date.now(),
     metadata: { region: 'us-east-1', role: 'leader' }
   },
   {
     id: nodeFixtures[1].id,
-    status: NodeStatus.ALIVE,
+    status: 'ALIVE' as NodeStatus,
     version: 1,
     lastSeen: Date.now() - 1000,
     metadata: { region: 'us-east-1', role: 'follower' }
   },
   {
     id: nodeFixtures[2].id,
-    status: NodeStatus.SUSPECTED,
+    status: 'SUSPECT' as NodeStatus,
     version: 2,
     lastSeen: Date.now() - 5000,
     metadata: { region: 'us-west-2', role: 'follower' }
   },
   {
     id: nodeFixtures[3].id,
-    status: NodeStatus.DEAD,
+    status: 'DEAD' as NodeStatus,
     version: 1,
     lastSeen: Date.now() - 30000,
     metadata: { region: 'eu-west-1', role: 'follower' }
   },
   {
     id: nodeFixtures[4].id,
-    status: NodeStatus.ALIVE,
+    status: 'ALIVE' as NodeStatus,
     version: 1,
     lastSeen: Date.now() - 500,
     metadata: { region: 'ap-southeast-1', role: 'follower' }
@@ -78,7 +79,7 @@ export const nodeInfoFixtures: NodeInfo[] = [
 export function createTestNode(id: string, port: number = 3000): NodeInfo {
   return {
     id: id,
-    status: NodeStatus.ALIVE,
+    status: 'ALIVE' as NodeStatus,
     version: 1,
     lastSeen: Date.now(),
     metadata: { }

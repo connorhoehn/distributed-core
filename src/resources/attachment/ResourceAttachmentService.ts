@@ -3,8 +3,6 @@ import { ResourceOperation } from '../core/ResourceOperation';
 import { Principal } from '../security/ResourceAuthorizationService';
 import { BoundedQueue, OutboundQueue, BackpressureConfig } from '../../connections/ConnectionBackpressure';
 
-// Node.js environment access
-declare const console: any;
 
 export interface SubscriptionFilter {
   resourceType?: string;

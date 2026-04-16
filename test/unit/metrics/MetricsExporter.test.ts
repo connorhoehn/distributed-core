@@ -44,7 +44,7 @@ const mockUnifiedMetrics: UnifiedMetrics = {
     nodeHealth: new Map<string, NodeHealthStatus>([
       ['node1', { 
         nodeId: 'node1', 
-        status: NodeStatus.ALIVE, // Use string literal if NodeStatus is only a type, or ensure NodeStatus.ALIVE is a value
+        status: 'ALIVE' as NodeStatus, // Use string literal if NodeStatus is only a type, or ensure NodeStatus.ALIVE is a value
         lastHeartbeat: Date.now(),
         lastPing: Date.now(),
         lastPong: Date.now(),
@@ -55,7 +55,7 @@ const mockUnifiedMetrics: UnifiedMetrics = {
       }],
       ['node2', { 
         nodeId: 'node2', 
-        status: NodeStatus.ALIVE, 
+        status: 'ALIVE' as NodeStatus, 
         lastHeartbeat: Date.now(),
         lastPing: Date.now(),
         lastPong: Date.now(),

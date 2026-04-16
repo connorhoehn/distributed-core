@@ -5,8 +5,6 @@
  * different types of operations in the distributed system.
  */
 
-// Node.js environment access
-declare const console: any;
 
 /**
  * Base WAL record structure with versioning and metadata

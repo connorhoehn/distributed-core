@@ -22,8 +22,6 @@ import { OperationEnvelopeManager } from '../../cluster/core/operations/Operatio
 import { ClusterFanoutRouter } from '../../resources/distribution/ClusterFanoutRouter';
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
 
-// Node.js environment access
-declare const console: any;
 
 /**
  * Chat room entity that represents a distributed room

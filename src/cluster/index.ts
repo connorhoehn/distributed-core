@@ -45,5 +45,8 @@ export * from './core/seeding/SeedNodeRegistry';
 // Aggregation
 export * from './reconciliation/StateAggregator';
 
-// Types
+// Cluster types (canonical definitions)
+export * from './types';
+
+// Shared types
 export * from '../types';

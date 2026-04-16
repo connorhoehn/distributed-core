@@ -11,8 +11,6 @@ import { CausalOrderingEngine } from '../../communication/ordering/CausalOrderin
 import { ResourceAttachmentService } from '../attachment/ResourceAttachmentService';
 import { NodeRoute } from '../distribution/ClusterFanoutRouter';
 
-// Node.js environment access
-declare const console: any;
 
 /**
  * ResourceDistributionEngine - Connects ResourceRegistry to cluster distribution infrastructure

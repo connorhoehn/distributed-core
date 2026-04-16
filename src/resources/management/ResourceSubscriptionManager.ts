@@ -5,8 +5,6 @@ import { ClusterManager } from '../../cluster/ClusterManager';
 import { ResourceAttachmentService } from '../attachment/ResourceAttachmentService';
 import { DeliveryGuard } from '../../communication/delivery/DeliveryGuard';
 
-// Node.js environment access
-declare const console: any;
 
 export interface SubscriptionFilter {
   resourceIds?: string[];

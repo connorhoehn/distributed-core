@@ -1,4 +1,4 @@
-import { NodeInfo } from '../../types';
+import { NodeInfo } from '../../cluster/types';
 /**
  * Communication and gossip management interface
  */

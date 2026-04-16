@@ -13,8 +13,6 @@
 
 import { ResourceOperation } from '../core/ResourceOperation';
 
-// Node.js environment access
-declare const console: any;
 
 export interface ResourceQuotas {
   maxSubscribersPerResource: number;        // Default: 10000

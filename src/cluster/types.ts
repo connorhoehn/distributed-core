@@ -40,7 +40,7 @@ export interface LeaveMessage {
   reason?: string;
 }
 
-export type ClusterMessage = JoinMessage | GossipMessage | LeaveMessage;
+export type GossipProtocolMessage = JoinMessage | GossipMessage | LeaveMessage;
 
 export interface ClusterEvents {
   'member-joined': [NodeInfo];

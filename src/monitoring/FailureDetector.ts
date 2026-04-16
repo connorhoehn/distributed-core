@@ -1,8 +1,7 @@
 import { EventEmitter } from 'events';
 import { Transport } from '../transport/Transport';
 import { MembershipTable } from '../cluster/membership/MembershipTable';
-import { NodeStatus } from '../types';
-import { NodeInfo } from '../types';
+import { NodeStatus, NodeInfo } from '../cluster/types';
 import { Message, MessageType, NodeId } from '../types';
 
 export interface FailureDetectorConfig {
@@ -589,7 +588,7 @@ export class FailureDetector extends EventEmitter {
 
     return {
       nodeId,
-      status: member ? member.status as NodeStatus : NodeStatus.DEAD,
+      status: member ? member.status as NodeStatus : 'DEAD' as NodeStatus,
       lastHeartbeat,
       lastPing,
       lastPong,

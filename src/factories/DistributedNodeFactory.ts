@@ -33,9 +33,6 @@ import { ClientConnectionService } from '../services/adapters/ClientConnectionSe
 import { SeedRegistryAdapter } from '../services/adapters/SeedRegistryAdapter';
 import { ResourceWiring } from '../services/wiring/ResourceWiring';
 
-// Node.js environment access
-declare const console: any;
-declare const TextEncoder: any;
 
 export interface DistributedNodeConfig extends Omit<NodeConfig, 'transport'> {
   // Network transport configuration

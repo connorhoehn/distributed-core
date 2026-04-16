@@ -1,5 +1,3 @@
-// Node.js environment access
-declare const console: any;
 
 export interface BackpressureConfig {
   maxQueuePerConnection: number;

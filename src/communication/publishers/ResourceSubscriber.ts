@@ -6,8 +6,6 @@ import { ClusterFanoutRouter } from '../../resources/distribution/ClusterFanoutR
 import { DeliveryGuard } from '../../communication/delivery/DeliveryGuard';
 import { Principal } from '../../resources/security/ResourceAuthorizationService';
 
-// Node.js environment access
-declare const console: any;
 
 export interface ResourceSubscriber {
   join(connId: string, resourceId: string, filters?: any): Promise<void>;

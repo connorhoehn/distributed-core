@@ -5,8 +5,6 @@ import { ResourceAttachmentService } from '../../resources/attachment/ResourceAt
 import { ClusterFanoutRouter } from '../../resources/distribution/ClusterFanoutRouter';
 import { Principal } from '../../resources/security/ResourceAuthorizationService';
 
-// Node.js environment access
-declare const console: any;
 
 export interface ResourcePublisher {
   publishFromClient(connId: string, resourceId: string, body: Uint8Array, meta?: any): Promise<void>;

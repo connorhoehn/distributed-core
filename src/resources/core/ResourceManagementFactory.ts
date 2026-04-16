@@ -28,9 +28,6 @@ import { ResourceOperation, OpType } from './ResourceOperation';
 import { MessageCodec, defaultCodec } from '../../communication/core/MessageCodec';
 import { ObservabilityManager } from '../../observability/ObservabilityManager';
 
-// Node.js environment access
-declare const console: any;
-declare const Buffer: any;
 
 /**
  * Phase E: Config validation with hard-fail for invalid semantics

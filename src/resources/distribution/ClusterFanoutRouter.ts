@@ -2,8 +2,6 @@ import { ResourceOperation } from '../core/ResourceOperation';
 import { ClusterRouting } from '../../routing/ClusterRouting';
 import { ClusterManager } from '../../cluster/ClusterManager';
 
-// Node.js environment access
-declare const console: any;
 
 export interface NodeRoute {
   nodeId: string;

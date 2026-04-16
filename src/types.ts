@@ -8,27 +8,9 @@ export interface NodeId {
   port: number;
 }
 
-export interface NodeInfo {
-  id: string;
-  status: NodeStatus;
-  lastSeen: number;
-  version: number;
-  metadata?: {
-    address?: string;
-    port?: number;
-    role?: string;
-    region?: string;
-    zone?: string;
-    tags?: Record<string, string>;
-  };
-}
-
-export enum NodeStatus {
-  ALIVE = 'ALIVE',
-  SUSPECTED = 'SUSPECTED',
-  DEAD = 'DEAD',
-  LEAVING = 'LEAVING'
-}
+// NodeInfo and NodeStatus are canonically defined in src/cluster/types.ts
+import { NodeInfo, NodeStatus } from './cluster/types';
+export { NodeInfo, NodeStatus };
 
 export interface GossipMessageData {
   type: MessageType;
