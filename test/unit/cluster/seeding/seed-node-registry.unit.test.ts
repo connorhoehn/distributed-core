@@ -1,4 +1,4 @@
-import { SeedNodeRegistry, SeedNodeInfo } from '../../../../src/cluster/seeding/SeedNodeRegistry';
+import { SeedNodeRegistry, SeedNodeInfo } from '../../../../src/cluster/core/seeding/SeedNodeRegistry';
 
 describe('SeedNodeRegistry', () => {
   let registry: SeedNodeRegistry;

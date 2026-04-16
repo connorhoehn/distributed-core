@@ -1,4 +1,4 @@
-import { WALReader, WALFile, WALEntry, WALCoordinator } from './types';
+import { WALReader, WALFile, WALEntry, WALCoordinator } from '../types';
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
 import { FrameworkLogger } from '../../common/logger';

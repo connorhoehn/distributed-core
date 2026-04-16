@@ -1,8 +1,8 @@
-import { WALWriter, WALFile, WALCoordinator, WALConfig } from './types';
+import { WALWriter, WALFile, WALCoordinator, WALConfig } from '../types';
 // Ensure WALWriter in ./types uses EntityUpdate from ../types for compatibility
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
-import type { EntityUpdate } from './types';
+import type { EntityUpdate } from '../types';
 export class WALWriterImpl implements WALWriter {
   private walFile: WALFile;
   private coordinator: WALCoordinator;
@@ -13,6 +13,7 @@ export class WALWriterImpl implements WALWriter {
     this.config = {
       filePath: config.filePath || './data/entity.wal',
       maxFileSize: config.maxFileSize || 100 * 1024 * 1024, // 100MB
+      retentionDays: config.retentionDays || 7,
       syncInterval: config.syncInterval !== undefined ? config.syncInterval : 1000, // 1 second
       compressionEnabled: config.compressionEnabled || false,
       checksumEnabled: config.checksumEnabled || true

@@ -4,7 +4,7 @@ import { ClusterState, LogicalService, PerformanceMetrics, StateConflict, Vector
 import { ClusterHealth, ClusterTopology, ClusterMetadata } from '../types';
 import { Message, MessageType } from '../../types';
 import { StateReconciler, ResolutionResult } from '../reconciliation/StateReconciler';
-import { ResourceMetadata } from '../resources/types';
+import { ResourceMetadata } from '../../resources/types';
 
 /**
  * Aggregated cluster state from multiple nodes

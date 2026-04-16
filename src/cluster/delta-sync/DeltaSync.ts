@@ -7,7 +7,6 @@ import { StateFingerprint, StateFingerprintGenerator, FingerprintComparison } fr
 import { LogicalService, ClusterState, PerformanceMetrics } from '../introspection/ClusterIntrospection';
 import { ClusterHealth, ClusterTopology, ClusterMetadata } from '../types';
 import { Encryption } from '../../transport/Encryption';
-import { MessageCache } from '../../transport/MessageCache';
 import { EventEmitter } from 'events';
 import * as zlib from 'zlib';
 import { promisify } from 'util';
@@ -151,7 +150,6 @@ export class DeltaSyncEngine extends EventEmitter {
   private fingerprintGenerator: StateFingerprintGenerator;
   private deltaManager: StateDeltaManager;
   private encryption: Encryption;
-  private messageCache: MessageCache;
   private activeSessions = new Map<string, SyncSession>();
   
   // Compression functions
@@ -172,7 +170,6 @@ export class DeltaSyncEngine extends EventEmitter {
     this.fingerprintGenerator = new StateFingerprintGenerator(fingerprintConfig);
     this.deltaManager = new StateDeltaManager(deltaConfig);
     this.encryption = new Encryption(encryptionConfig);
-    this.messageCache = new MessageCache();
   }
 
   /**

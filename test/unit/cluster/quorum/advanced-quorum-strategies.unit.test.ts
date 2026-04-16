@@ -52,19 +52,10 @@ describe('Advanced Quorum Strategies', () => {
     });
 
     it('should recommend appropriate strategies', () => {
-      const multiZoneRecommendation = QuorumStrategyFactory.recommendStrategy({
-        size: 5,
-        zones: 3,
-        roles: ['coordinator', 'worker']
-      });
+      const multiZoneRecommendation = QuorumStrategyFactory.recommendStrategy(5, 3, ['coordinator', 'worker']);
       expect(multiZoneRecommendation).toBe('zone-aware');
 
-      const consensusRecommendation = QuorumStrategyFactory.recommendStrategy({
-        size: 5,
-        zones: 1,
-        roles: ['node'],
-        consensusAlgorithm: 'raft'
-      });
+      const consensusRecommendation = QuorumStrategyFactory.recommendStrategy(5, 1, ['node']);
       expect(consensusRecommendation).toBe('consensus');
     });
   });

@@ -345,6 +345,7 @@ describe('Delta Sync Network Integration', () => {
           service,
           timestamp: Date.now()
         })),
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,

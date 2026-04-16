@@ -6,33 +6,67 @@ export interface WALEntry {
 }
 
 export interface WALFile {
-  path: string;
-  size: number;
-  entries: number;
+  path?: string;
+  size?: number;
+  entries?: number;
+  append(entry: WALEntry): Promise<void>;
+  readEntries(startLSN?: number, endLSN?: number): Promise<WALEntry[]>;
+  getSize(): Promise<number>;
+  getLastLSN(): Promise<number>;
+  truncate(beforeLSN: number): Promise<void>;
+  close(): Promise<void>;
 }
 
 export interface WALReader {
-  read(): Promise<WALEntry[]>;
+  read?(): Promise<WALEntry[]>;
+  readAll(): Promise<WALEntry[]>;
+  readFrom(logSequenceNumber: number): AsyncIterableIterator<WALEntry>;
+  readRange(startLSN: number, endLSN: number): Promise<WALEntry[]>;
+  replay(handler: (entry: WALEntry) => Promise<void>): Promise<void>;
+  getLastSequenceNumber(): Promise<number>;
+  getEntryCount(): Promise<number>;
+  close(): Promise<void>;
 }
 
 export interface WALWriter {
-  write(entry: WALEntry): Promise<void>;
+  write?(entry: WALEntry): Promise<void>;
+  append(update: EntityUpdate): Promise<number>;
+  flush(): Promise<void>;
+  sync(): Promise<void>;
+  close(): Promise<void>;
+  truncateBefore(lsn: number): Promise<void>;
+  getCurrentLSN(): number;
 }
 
 export interface WALCoordinator {
   start(): Promise<void>;
   stop(): Promise<void>;
+  getCurrentLSN(): number;
+  getNextLSN(): number;
+  calculateChecksum(data: any): string;
+  validateEntry(entry: WALEntry): boolean;
+  createEntry(update: EntityUpdate): WALEntry;
+  resetLSN(lsn: number): void;
 }
 
 export interface EntityUpdate {
   entityId: string;
-  changes: any;
+  changes?: any;
   timestamp: number;
+  version: number;
+  operation: 'CREATE' | 'UPDATE' | 'DELETE' | 'TRANSFER' | string;
+  ownerNodeId?: string;
+  metadata?: Record<string, any>;
+  previousVersion?: number;
 }
 
 export interface WALConfig {
+  filePath?: string;
   maxFileSize?: number;
   retentionDays?: number;
+  syncInterval?: number;
+  compressionEnabled?: boolean;
+  checksumEnabled?: boolean;
 }
 
 export interface CheckpointReader {
@@ -47,6 +81,7 @@ export interface CheckpointSnapshot {
   entities: Record<string, EntityState>;
   timestamp: number;
   version: string;
+  lsn?: number;
 }
 
 export interface CheckpointConfig {
@@ -62,6 +97,10 @@ export interface EntityState {
   id: string;
   state: any;
   version: number;
+  hostNodeId?: string;
+  createdAt?: number;
+  lastModified?: number;
+  metadata?: Record<string, any>;
 }
 
 export interface CompactionStrategy {

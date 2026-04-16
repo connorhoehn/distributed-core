@@ -328,6 +328,39 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     return this.introspection.getMetadata();
   }
 
+  // Communication & Routing API
+  getCommunication(): ClusterCommunication { return this.communication; }
+  getRouting(): ClusterRouting { return this.routing; }
+
+  /**
+   * Send a custom message to specific cluster nodes via transport
+   */
+  async sendCustomMessage(type: string, payload: any, targetNodeIds: string[]): Promise<void> {
+    const message: Message = {
+      id: `custom-${type}-${Date.now()}-${Math.random()}`,
+      type: MessageType.GOSSIP,
+      data: { type, payload },
+      sender: { id: this.localNodeId, address: '', port: 0 },
+      timestamp: Date.now()
+    };
+
+    for (const targetNodeId of targetNodeIds) {
+      try {
+        await this.transport.send(message, { id: targetNodeId, address: '', port: 0 });
+      } catch (error) {
+        // Emit error but continue sending to other nodes
+        this.emit('communication-error', {
+          error: error as Error,
+          operation: 'send-custom-message',
+          target: targetNodeId
+        });
+      }
+    }
+
+    // Also emit locally so local listeners can react
+    this.emit('custom-message', { message: { type, ...payload }, senderId: this.localNodeId });
+  }
+
   // Testing & Debugging API
   getFailureDetector(): FailureDetector { return this.failureDetector; }
   getKeyManager(): KeyManager { return this.keyManager; }

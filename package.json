@@ -15,7 +15,12 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build"
+    "example:basic": "node -r ts-node/register examples/basic-cluster/index.ts",
+    "example:counter:http": "node -r ts-node/register examples/http-counter-cluster/index.ts",
+    "example:chat:tcp": "node -r ts-node/register examples/tcp-chat-cluster/index.ts",
+    "example:chat:client0": "node -r ts-node/register examples/tcp-chat-cluster/client.ts 0",
+    "example:chat:client1": "node -r ts-node/register examples/tcp-chat-cluster/client.ts 1",
+    "example:chat:client2": "node -r ts-node/register examples/tcp-chat-cluster/client.ts 2"
   },
   "keywords": [
     "distributed",
@@ -33,24 +38,23 @@
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^5.57.0",
     "@typescript-eslint/parser": "^5.57.0",
-    "benchmark": "^2.1.4",
     "eslint": "^8.37.0",
     "jest": "^29.5.0",
     "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.0.0"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.13.4",
-    "@grpc/proto-loader": "^0.8.0",
     "eventemitter3": "^5.0.0",
     "js-yaml": "^4.1.0",
     "lz4": "^0.6.5",
-    "ws": "^8.18.3",
-    "zstd-codec": "^0.1.5"
+    "ws": "^8.18.3"
   },
   "files": [
     "dist/**/*",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "type": "commonjs"
 }

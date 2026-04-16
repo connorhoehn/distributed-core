@@ -1,4 +1,4 @@
-import { ClusterLifecycle } from '../../../../src/cluster/lifecycle/ClusterLifecycle';
+import { ClusterLifecycle } from '../../../../src/cluster/core/lifecycle/ClusterLifecycle';
 import { IClusterManagerContext } from '../../../../src/cluster/core/IClusterManagerContext';
 import { NodeInfo, MembershipEntry } from '../../../../src/cluster/types';
 

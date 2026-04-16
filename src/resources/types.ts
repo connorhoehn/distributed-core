@@ -75,9 +75,12 @@ export interface ResourceSubscription {
 }
 
 
-export interface ResourceEvent { type: ResourceEventType; resourceId: string; data: any; timestamp: number; 
-  eventType: ResourceEventType;}
-export enum ResourceEventType { CREATED = "created", UPDATED = "updated", DELETED = "deleted" 
+export interface ResourceEvent { type: ResourceEventType; resourceId: string; data: any; timestamp: number;
+  eventType: ResourceEventType;
+  resourceType?: string;
+  nodeId?: string;
+  metadata?: Record<string, any>;}
+export enum ResourceEventType { CREATED = "created", UPDATED = "updated", DELETED = "deleted",
   RESOURCE_CREATED = "resource_created",
   RESOURCE_UPDATED = "resource_updated",
   RESOURCE_DESTROYED = "resource_destroyed",

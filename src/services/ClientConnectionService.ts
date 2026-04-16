@@ -99,11 +99,14 @@ export class ClientConnectionService {
         console.error('[CLIENT] Failed to route client message:', error);
         
         // Send error response to client
-        await this.connectionManager.send(connectionId, {
-          type: 'error',
-          error: 'Failed to process message',
-          correlationId: message.correlationId
-        });
+        const errorConn = this.connectionManager.getConnection(connectionId);
+        if (errorConn) {
+          errorConn.send({
+            type: 'error',
+            error: 'Failed to process message',
+            correlationId: message.correlationId
+          });
+        }
       }
     });
   }
@@ -153,22 +156,28 @@ export class ClientConnectionService {
       await this.resourceAttachment!.attach(connectionId, resourceId, message.filters);
       
       // Send confirmation to client
-      await this.connectionManager.send(connectionId, {
-        type: 'subscribed',
-        resourceId,
-        correlationId: message.correlationId
-      });
+      const subConn = this.connectionManager.getConnection(connectionId);
+      if (subConn) {
+        subConn.send({
+          type: 'subscribed',
+          resourceId,
+          correlationId: message.correlationId
+        });
+      }
     }
     
     else if (message.type === 'unsubscribe' || message.type === 'leave') {
       await this.resourceAttachment!.detach(connectionId, resourceId);
       
       // Send confirmation to client
-      await this.connectionManager.send(connectionId, {
-        type: 'unsubscribed',
-        resourceId,
-        correlationId: message.correlationId
-      });
+      const unsubConn = this.connectionManager.getConnection(connectionId);
+      if (unsubConn) {
+        unsubConn.send({
+          type: 'unsubscribed',
+          resourceId,
+          correlationId: message.correlationId
+        });
+      }
     }
     
     // Handle publish operations through ResourceManager → ClusterFanoutRouter
@@ -200,7 +209,7 @@ export class ClientConnectionService {
     // Send to remote nodes via ClusterManager communication port
     for (const route of routes) {
       if (route.nodeId !== this.config.nodeId && route.nodeId !== '*') {
-        await this.clusterManager!.getCommunication().sendCustomMessage(
+        await this.clusterManager!.sendCustomMessage(
           'resource:operation',
           { operation, resourceId, correlationId: operation.correlationId },
           [route.nodeId]
@@ -215,11 +224,14 @@ export class ClientConnectionService {
     }
 
     // Send confirmation to client
-    await this.connectionManager.send(connectionId, {
-      type: 'published',
-      resourceId,
-      correlationId: message.correlationId
-    });
+    const pubConn = this.connectionManager.getConnection(connectionId);
+    if (pubConn) {
+      pubConn.send({
+        type: 'published',
+        resourceId,
+        correlationId: message.correlationId
+      });
+    }
   }
 
   /**
@@ -258,7 +270,7 @@ export class ClientConnectionService {
     isStarted: boolean;
   } {
     return {
-      activeConnections: this.connectionManager.getActiveConnectionCount(),
+      activeConnections: this.connectionManager.getActiveConnections().length,
       totalMessages: 0, // Would need to track this in ConnectionManager
       isStarted: this.isStarted
     };

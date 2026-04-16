@@ -2,9 +2,9 @@ import { EventEmitter } from 'events';
 import { ClusterManager } from '../ClusterManager';
 import { StateAggregator, AggregatedClusterState } from '../aggregation/StateAggregator';
 import { ClusterState, LogicalService, PerformanceMetrics } from '../introspection/ClusterIntrospection';
-import { ClusterHealth, ClusterTopology, ClusterMetadata, NodeInfo, DistributionPolicy } from '../types';
+import { ClusterHealth, ClusterTopology, ClusterMetadata, NodeInfo } from '../types';
 import { MetricsTracker, UnifiedMetrics } from '../../monitoring/metrics/MetricsTracker';
-import { ResourceRegistry } from '../resources/ResourceRegistry';
+import { ResourceRegistry } from '../../resources/core/ResourceRegistry';
 import { ResourceTypeRegistry } from '../../resources';
 import { DistributionStrategy } from '../types';
 import { ResourceHealth, ResourceMetadata, ResourceState } from '../../resources';
@@ -269,7 +269,7 @@ export class ResourceTopologyManager extends EventEmitter {
         unhealthy: unhealthyResources
       },
       distribution: {
-        strategy: DistributionPolicy., // Default strategy
+        strategy: { type: 'replicas' as const, count: 2 }, // Default strategy
         replicationFactor: 2, // Default replication
         shardingEnabled: true,
         loadBalancing: 'least-loaded'
@@ -352,8 +352,8 @@ export class ResourceTopologyManager extends EventEmitter {
     
     // Analyze current sharding
     const currentSharding = {
-      enabled: (resource.distribution.shardCount || 0) > 1,
-      shardCount: resource.distribution.shardCount || 1,
+      enabled: (resource.distribution?.shardCount || 0) > 1,
+      shardCount: resource.distribution?.shardCount || 1,
       shardNodes: this.getResourceShards(resourceId),
       strategy: 'consistent-hash' // Default strategy
     };
@@ -496,7 +496,7 @@ export class ResourceTopologyManager extends EventEmitter {
     const nodeResources = this.resourceRegistry.getLocalResources().filter(r => r.nodeId === nodeId);
     
     capacity.utilization.activeResources = nodeResources.length;
-    capacity.utilization.totalConnections = nodeResources.reduce((sum, r) => sum + (r.capacity.current || 0), 0);
+    capacity.utilization.totalConnections = nodeResources.reduce((sum, r) => sum + (r.capacity?.current || 0), 0);
     
     // Update health based on utilization
     const utilizationRate = capacity.utilization.activeResources / capacity.capacity.maxResources;

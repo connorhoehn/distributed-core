@@ -561,13 +561,11 @@ export class ResourceDistributionEngine extends EventEmitter {
    */
   async sendRemote(operation: ResourceOperation, routes: NodeRoute[]): Promise<void> {
     try {
-      const clusterComms = this.clusterManager.getCommunication();
-      
       for (const route of routes) {
         if (route.deliveryMethod === 'direct') { // Only send direct routes (skip gossip)
           try {
             // Send operation via cluster communication
-            await clusterComms.sendCustomMessage('resource:operation', { operation }, [route.nodeId]);
+            await this.clusterManager.sendCustomMessage('resource:operation', { operation }, [route.nodeId]);
             
             this.logWithContext(
               `Sent operation ${operation.opId} to remote node ${route.nodeId}`,

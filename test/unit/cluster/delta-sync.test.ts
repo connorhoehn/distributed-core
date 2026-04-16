@@ -163,6 +163,7 @@ describe('Delta Synchronization', () => {
           service: newService,
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -199,6 +200,7 @@ describe('Delta Synchronization', () => {
           previousVersion: originalServices[1].version,
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -230,6 +232,7 @@ describe('Delta Synchronization', () => {
           serviceId: originalServices[1].id,
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -266,6 +269,7 @@ describe('Delta Synchronization', () => {
           previousVersion: 999, // Wrong version
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -293,6 +297,7 @@ describe('Delta Synchronization', () => {
           service: createTestServices(1, 'node1')[0],
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -312,6 +317,7 @@ describe('Delta Synchronization', () => {
           service: { ...createTestServices(1, 'node1')[0], id: 'service-b' },
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 2,
@@ -339,6 +345,7 @@ describe('Delta Synchronization', () => {
           service: createTestServices(1)[0],
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -413,6 +420,7 @@ describe('Delta Synchronization', () => {
           service: largeService,
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -482,6 +490,7 @@ describe('Delta Synchronization', () => {
           service: newService,
           timestamp: Date.now()
         }],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,
@@ -537,6 +546,7 @@ describe('Delta Synchronization', () => {
           service,
           timestamp: Date.now()
         })),
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,

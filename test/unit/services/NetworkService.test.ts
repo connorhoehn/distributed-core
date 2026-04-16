@@ -7,16 +7,16 @@ import { Transport } from '../../../src/transport/Transport';
 import { Message } from '../../../src/types';
 
 // Mock transport implementation
-class MockTransport implements Transport {
+class MockTransport extends Transport {
   private messageHandler?: (message: Message) => void;
-  private started = false;
+  private _started = false;
 
   async start(): Promise<void> {
-    this.started = true;
+    this._started = true;
   }
 
   async stop(): Promise<void> {
-    this.started = false;
+    this._started = false;
   }
 
   onMessage(handler: (message: Message) => void): void {
@@ -33,8 +33,16 @@ class MockTransport implements Transport {
     // Mock implementation
   }
 
+  getConnectedNodes(): any[] {
+    return [];
+  }
+
+  getLocalNodeInfo(): any {
+    return { id: 'mock-node', address: 'localhost', port: 0 };
+  }
+
   isStarted(): boolean {
-    return this.started;
+    return this._started;
   }
 
   simulateMessage(message: Message): void {

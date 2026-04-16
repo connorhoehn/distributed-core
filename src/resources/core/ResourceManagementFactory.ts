@@ -545,12 +545,12 @@ export class ResourceManagementFactory {
     }
 
     // Ports - adapt existing ClusterManager to our interfaces
-    const clusterComms = args.clusterManager.getCommunication();
+    const clusterMgr = args.clusterManager;
     const sender: ClusterSender = {
       async sendTo(nodeId: string, bytes: Uint8Array): Promise<void> {
         // Keep bytes end-to-end - tunnel over existing JSON channel using base64
         const b64 = Buffer.from(bytes).toString('base64');
-        await clusterComms.sendCustomMessage('resource:bytes', { b64 }, [nodeId]);
+        await clusterMgr.sendCustomMessage('resource:bytes', { b64 }, [nodeId]);
       }
     };
     

@@ -1,25 +1,18 @@
 import { jest, describe, beforeEach, afterEach, test, expect } from '@jest/globals';
-import { ResourceTypeRegistry } from '../../../../src/cluster/resources/ResourceTypeRegistry';
-import { ResourceTypeDefinition, DistributionStrategy, ResourceHealth, ResourceMetadata } from '../../../../src/cluster/resources/types';
+import { ResourceTypeRegistry } from '../../../../src/resources/core/ResourceTypeRegistry';
+import { ResourceTypeDefinition, ResourceHealth, ResourceMetadata } from '../../../../src/resources/types';
 
 describe('ResourceTypeRegistry', () => {
   let registry: ResourceTypeRegistry;
 
   const sampleResourceType: ResourceTypeDefinition = {
+    name: 'Test Resource',
     typeName: 'test-resource',
     version: '1.0.0',
-    defaultCapacity: {
-      totalCapacity: 100,
-      maxThroughput: 50,
-      avgLatency: 10
-    },
-    capacityCalculator: (resource) => 50,
-    healthChecker: (resource) => ResourceHealth.HEALTHY,
-    performanceMetrics: ['latency', 'throughput', 'errorRate'],
-    defaultDistributionStrategy: DistributionStrategy.ROUND_ROBIN,
-    distributionConstraints: [],
-    serialize: (resource) => JSON.stringify(resource),
-    deserialize: (data) => JSON.parse(data as string)
+    schema: { type: 'object' },
+    onResourceCreated: async (resource: ResourceMetadata) => {},
+    onResourceDestroyed: async (resource: ResourceMetadata) => {},
+    onResourceMigrated: async (resource: ResourceMetadata, fromNode: string, toNode: string) => {},
   };
 
   beforeEach(async () => {
@@ -50,11 +43,11 @@ describe('ResourceTypeRegistry', () => {
     test('should throw error when registering before start', async () => {
       const newRegistry = new ResourceTypeRegistry();
       // Don't call start()
-      
+
       expect(() => {
         newRegistry.registerResourceType(sampleResourceType);
       }).toThrow('ResourceTypeRegistry is not started. Call start() first.');
-      
+
       await newRegistry.stop();
     });
 
@@ -119,7 +112,7 @@ describe('ResourceTypeRegistry', () => {
     test('should filter resource types', () => {
       const v1Type = { ...sampleResourceType, typeName: 'v1-type', version: '1.0.0' };
       const v2Type = { ...sampleResourceType, typeName: 'v2-type', version: '2.0.0' };
-      
+
       registry.registerResourceType(v1Type);
       registry.registerResourceType(v2Type);
 
@@ -136,9 +129,9 @@ describe('ResourceTypeRegistry', () => {
 
     test('should unregister existing resource type', () => {
       expect(registry.hasResourceType('test-resource')).toBe(true);
-      
+
       const result = registry.unregisterResourceType('test-resource');
-      
+
       expect(result).toBe(true);
       expect(registry.hasResourceType('test-resource')).toBe(false);
     });
@@ -163,81 +156,47 @@ describe('ResourceTypeRegistry', () => {
       registry.registerResourceType(sampleResourceType);
     });
 
-    test('should access capacity calculator from definition', () => {
+    test('should access lifecycle hooks from definition', () => {
       const resourceType = registry.getResourceType('test-resource');
       expect(resourceType).toBeDefined();
-      
-      const mockResource = { capacity: 75 };
-      const result = resourceType!.capacityCalculator(mockResource);
-      expect(result).toBe(50);
+      expect(resourceType!.onResourceCreated).toBeDefined();
+      expect(resourceType!.onResourceDestroyed).toBeDefined();
+      expect(resourceType!.onResourceMigrated).toBeDefined();
     });
 
-    test('should access health checker from definition', () => {
+    test('should access schema from definition', () => {
       const resourceType = registry.getResourceType('test-resource');
       expect(resourceType).toBeDefined();
-      
-      const mockResource = {
-        resourceId: 'test-1',
-        resourceType: 'test-resource',
-        nodeId: 'node-1',
-        timestamp: Date.now(),
-        capacity: { current: 50, maximum: 100, unit: 'items' },
-        performance: { latency: 10, throughput: 100, errorRate: 0.1 },
-        distribution: {},
-        applicationData: {},
-        state: 'ACTIVE' as any,
-        health: ResourceHealth.HEALTHY
-      } as ResourceMetadata;
-      
-      const health = resourceType!.healthChecker(mockResource);
-      expect(health).toBe(ResourceHealth.HEALTHY);
+      expect(resourceType!.schema).toEqual({ type: 'object' });
     });
 
-    test('should access serialization methods from definition', () => {
+    test('should access version from definition', () => {
       const resourceType = registry.getResourceType('test-resource');
       expect(resourceType).toBeDefined();
-      
-      const mockResource = {
-        resourceId: 'test-1',
-        resourceType: 'test-resource',
-        nodeId: 'node-1',
-        timestamp: Date.now(),
-        capacity: { current: 50, maximum: 100, unit: 'items' },
-        performance: { latency: 10, throughput: 100, errorRate: 0.1 },
-        distribution: {},
-        applicationData: { data: 'sample' },
-        state: 'ACTIVE' as any,
-        health: ResourceHealth.HEALTHY
-      } as ResourceMetadata;
-      
-      const serialized = resourceType!.serialize(mockResource);
-      expect(typeof serialized).toBe('string');
-      
-      const deserialized = resourceType!.deserialize(serialized);
-      expect(deserialized).toEqual(mockResource);
+      expect(resourceType!.version).toBe('1.0.0');
     });
   });
 
   describe('Registry Lifecycle', () => {
     test('should handle start and stop lifecycle', async () => {
       const newRegistry = new ResourceTypeRegistry();
-      
+
       // Should not be able to register before start
       expect(() => {
         newRegistry.registerResourceType(sampleResourceType);
       }).toThrow();
-      
+
       await newRegistry.start();
-      
+
       // Should be able to register after start
       expect(() => {
         newRegistry.registerResourceType(sampleResourceType);
       }).not.toThrow();
-      
+
       expect(newRegistry.hasResourceType('test-resource')).toBe(true);
-      
+
       await newRegistry.stop();
-      
+
       // After stop, registry should be cleared
       expect(newRegistry.hasResourceType('test-resource')).toBe(false);
     });
@@ -246,13 +205,13 @@ describe('ResourceTypeRegistry', () => {
       const newRegistry = new ResourceTypeRegistry();
       const startSpy = jest.fn();
       const stopSpy = jest.fn();
-      
+
       newRegistry.on('registry:started', startSpy);
       newRegistry.on('registry:stopped', stopSpy);
-      
+
       await newRegistry.start();
       expect(startSpy).toHaveBeenCalled();
-      
+
       await newRegistry.stop();
       expect(stopSpy).toHaveBeenCalled();
     });
@@ -267,7 +226,7 @@ describe('ResourceTypeRegistry', () => {
           // Optional lifecycle hook
         },
         onResourceDestroyed: async (resource) => {
-          // Optional lifecycle hook  
+          // Optional lifecycle hook
         },
         onResourceMigrated: async (resource, fromNode, toNode) => {
           // Optional lifecycle hook
@@ -277,85 +236,68 @@ describe('ResourceTypeRegistry', () => {
       expect(() => {
         registry.registerResourceType(typeWithHooks);
       }).not.toThrow();
-      
+
       const retrieved = registry.getResourceType('hooks-resource');
       expect(retrieved?.onResourceCreated).toBeDefined();
       expect(retrieved?.onResourceDestroyed).toBeDefined();
       expect(retrieved?.onResourceMigrated).toBeDefined();
     });
 
-    test('should support distribution constraints', () => {
-      const complexConstraints = [
-        {
-          name: 'memoryRequirement',
-          validator: (resource: any, targetNode: any, cluster: any) => true,
-          weight: 0.9,
-          description: 'Requires high-memory nodes'
-        },
-        {
-          name: 'networkLatency',
-          validator: (resource: any, targetNode: any, cluster: any) => true,
-          weight: 0.7,
-          description: 'Prefers low-latency connections'
-        }
-      ];
+    test('should support constraints in resource type definition', () => {
+      const complexConstraints = {
+        memoryRequirement: 'high',
+        networkLatency: 'low'
+      };
 
       const typeWithConstraints: ResourceTypeDefinition = {
         ...sampleResourceType,
         typeName: 'complex-resource',
-        distributionConstraints: complexConstraints
+        constraints: complexConstraints
       };
 
       expect(() => {
         registry.registerResourceType(typeWithConstraints);
       }).not.toThrow();
-      
+
       const retrieved = registry.getResourceType('complex-resource');
-      expect(retrieved?.distributionConstraints).toHaveLength(2);
-      expect(retrieved?.distributionConstraints[0].weight).toBe(0.9);
+      expect(retrieved?.constraints).toEqual(complexConstraints);
+      expect(retrieved?.constraints.memoryRequirement).toBe('high');
     });
 
-    test('should support different distribution strategies', () => {
-      const strategies = [
-        DistributionStrategy.ROUND_ROBIN,
-        DistributionStrategy.LEAST_LOADED,
-        DistributionStrategy.CONSISTENT_HASH,
-        DistributionStrategy.AFFINITY_BASED,
-        DistributionStrategy.COST_OPTIMIZED,
-        DistributionStrategy.LATENCY_OPTIMIZED
-      ];
+    test('should support different versions', () => {
+      const versions = ['1.0.0', '2.0.0', '3.0.0'];
 
-      strategies.forEach((strategy, index) => {
-        const typeWithStrategy: ResourceTypeDefinition = {
+      versions.forEach((version, index) => {
+        const typeWithVersion: ResourceTypeDefinition = {
           ...sampleResourceType,
-          typeName: `strategy-${index}`,
-          defaultDistributionStrategy: strategy
+          typeName: `version-${index}`,
+          version
         };
 
         expect(() => {
-          registry.registerResourceType(typeWithStrategy);
+          registry.registerResourceType(typeWithVersion);
         }).not.toThrow();
 
-        const retrieved = registry.getResourceType(`strategy-${index}`);
-        expect(retrieved?.defaultDistributionStrategy).toBe(strategy);
+        const retrieved = registry.getResourceType(`version-${index}`);
+        expect(retrieved?.version).toBe(version);
       });
     });
 
-    test('should support custom performance metrics', () => {
-      const customMetrics = ['customLatency', 'businessMetric', 'userSatisfaction'];
-      
-      const typeWithMetrics: ResourceTypeDefinition = {
+    test('should support custom schema definitions', () => {
+      const customSchema = { type: 'object', properties: { metric1: 'number', metric2: 'string' } };
+
+      const typeWithSchema: ResourceTypeDefinition = {
         ...sampleResourceType,
-        typeName: 'metrics-resource',
-        performanceMetrics: customMetrics
+        typeName: 'schema-resource',
+        schema: customSchema
       };
 
       expect(() => {
-        registry.registerResourceType(typeWithMetrics);
+        registry.registerResourceType(typeWithSchema);
       }).not.toThrow();
 
-      const retrieved = registry.getResourceType('metrics-resource');
-      expect(retrieved?.performanceMetrics).toEqual(customMetrics);
+      const retrieved = registry.getResourceType('schema-resource');
+      expect(retrieved?.schema).toEqual(customSchema);
     });
   });
 });

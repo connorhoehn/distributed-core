@@ -96,10 +96,12 @@ describe('Stub Compaction Strategies', () => {
       expect(result).toBe(false);
     });
 
-    test('should return null for planCompaction (stub implementation)', () => {
+    test('should return a plan when segments exceed dead tuple threshold', () => {
       const strategy = new VacuumBasedCompactionStrategy();
       const result = strategy.planCompaction(mockSegments, mockCheckpointMetrics);
-      expect(result).toBeNull();
+      // Mock segments have tombstoneCount/entryCount = 1250/5000 = 0.25, exceeding default 0.2 threshold
+      expect(result).not.toBeNull();
+      expect(result!.planId).toContain('vacuum-');
     });
 
     test('should return initial metrics', () => {
@@ -133,10 +135,12 @@ describe('Stub Compaction Strategies', () => {
       expect(result).toBe(false);
     });
 
-    test('should return null for planCompaction (stub implementation)', () => {
+    test('should return a basic plan for planCompaction', () => {
       const strategy = new LeveledCompactionStrategy();
       const result = strategy.planCompaction(mockSegments, mockCheckpointMetrics);
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result!.planId).toContain('leveled-');
+      expect(result!.inputSegments).toHaveLength(1);
     });
 
     test('should return initial metrics', () => {
@@ -160,10 +164,7 @@ describe('Stub Compaction Strategies', () => {
       strategies.forEach(strategy => {
         // All strategies should return false for shouldCompact (stubs)
         expect(strategy.shouldCompact(mockWALMetrics, mockCheckpointMetrics)).toBe(false);
-        
-        // All strategies should return null for planCompaction (stubs)
-        expect(strategy.planCompaction(mockSegments, mockCheckpointMetrics)).toBeNull();
-        
+
         // All strategies should have proper initial metrics
         const metrics = strategy.getMetrics();
         expect(metrics.totalRuns).toBe(0);
@@ -191,12 +192,12 @@ describe('Stub Compaction Strategies', () => {
 
       for (const strategy of strategies) {
         const result = await strategy.executeCompaction(mockPlan);
-        
-        // Stub implementations should return failed results with appropriate errors
-        expect(result.success).toBe(false);
+
+        // All strategies should return the correct planId
         expect(result.planId).toBe(mockPlan.planId);
-        expect(result.error).toBeDefined();
-        expect(result.error!.message).toContain('not yet implemented');
+        // Result shape should always include metrics
+        expect(result.metrics).toBeDefined();
+        expect(result.metrics.entriesProcessed).toBe(0);
       }
     });
   });

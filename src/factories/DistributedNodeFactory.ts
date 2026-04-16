@@ -204,7 +204,7 @@ export class DistributedNodeFactory {
 
     // 7. Build service adapters (NEW: Replace direct wiring with service layer)
     const networkService = new NetworkService(clusterTransport, clientTransport);
-    const communicationService = new CommunicationService(clusterManager);
+    const communicationService = new CommunicationService(clusterManager.getCommunication());
     const seedRegistry = new SeedRegistryAdapter(clusterManager.config);
     const stateSyncService = new StateSyncService(/* deltaSyncEngine, stateReconciler, walCoordinator */);
     const clientConnectionService = new ClientConnectionService(

@@ -61,6 +61,7 @@ export class CheckpointWriterImpl implements CheckpointWriter {
     await fs.mkdir(this.config.filePath, { recursive: true });
 
     const snapshot: CheckpointSnapshot = {
+      lsn,
       entities,
       timestamp: Date.now(),
       version: '1.0'

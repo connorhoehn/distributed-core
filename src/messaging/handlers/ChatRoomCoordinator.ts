@@ -9,8 +9,15 @@ import {
 import { EntityUpdate, WALEntry } from '../../persistence/types';
 import { WALCoordinatorImpl } from '../../persistence/wal/WALCoordinator';
 import { WALFileImpl } from '../../persistence/wal/WALFile';
-import { ApplicationRegistry } from '../../applications/ApplicationRegistry';
-import { ChatRoomResource } from '../../applications/ChatApplicationModule';
+// ApplicationRegistry and ChatRoomResource were removed (business logic belongs in /examples/)
+// Define minimal interfaces needed by this coordinator
+interface ApplicationRegistry {
+  findResourceByName(type: string, name: string): Promise<{ nodeId: string } | null>;
+}
+interface ChatRoomResource {
+  resourceId: string;
+  nodeId: string;
+}
 import { OperationEnvelopeManager } from '../../cluster/core/operations/OperationEnvelopeManager';
 import { ClusterFanoutRouter } from '../../resources/distribution/ClusterFanoutRouter';
 import { ResourceOperation } from '../../resources/core/ResourceOperation';
@@ -1002,9 +1009,10 @@ export class ChatRoomCoordinator extends EventEmitter implements RangeHandler {
       const update: ChatRoomEntityUpdate = {
         entityId: `room-${room.name}-${this.nodeId}`,
         ownerNodeId: this.nodeId,
-        version: 1, // Add version property as required by EntityUpdate
+        version: 1,
         timestamp: Date.now(),
         operation,
+        changes: undefined,
         metadata: {
           roomId: room.id,
           roomName: room.name,
@@ -1295,9 +1303,6 @@ export class ChatRoomCoordinator extends EventEmitter implements RangeHandler {
       };
 
       const walEntry: WALEntry = {
-        id: `wal-message-${operation.opId}`,
-        type: 'CHAT_MESSAGE',
-        ownerNodeId: this.nodeId,
         logSequenceNumber: Date.now(), // Will be assigned by WAL
         timestamp: Date.now(),
         data: entityUpdate,

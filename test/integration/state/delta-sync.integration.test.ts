@@ -269,6 +269,7 @@ describe('Delta Sync Integration', () => {
         sourceNodeId: '', // Invalid - empty source
         sourceFingerprint: 'test',
         services: [],
+        resources: [],
         timestamp: Date.now(),
         version: 1,
         sequenceNumber: 1,

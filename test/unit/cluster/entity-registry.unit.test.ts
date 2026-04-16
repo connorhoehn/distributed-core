@@ -1,5 +1,5 @@
-import { EntityRegistryFactory, EntityRegistryFactoryConfig } from '../../../src/cluster/entity/EntityRegistryFactory';
-import { EntityRecord, EntityUpdate } from '../../../src/cluster/entity/types';
+import { EntityRegistryFactory, EntityRegistryFactoryConfig } from '../../../src/cluster/core/entity/EntityRegistryFactory';
+import { EntityRecord, EntityUpdate } from '../../../src/cluster/core/entity/types';
 
 describe('EntityRegistry Unit Tests', () => {
   // Set timeout for all tests to prevent hanging

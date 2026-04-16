@@ -54,7 +54,7 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
 
     // Initialize WAL components
     await ((this.walWriter as unknown) as WALWriterImpl).initialize();
-    await (this.walReader as WALReaderImpl).initialize();
+    await ((this.walReader as unknown) as WALReaderImpl).initialize();
 
     // Try to restore from checkpoint first
     await this.restoreFromCheckpoint();
@@ -79,7 +79,7 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
     }
 
     await this.walWriter.close();
-    await (this.walReader as WALReaderImpl).close();
+    await ((this.walReader as unknown) as WALReaderImpl).close();
     
     this.isRunning = false;
     // console.log(`[EntityRegistry] Stopped for node ${this.nodeId}`);
@@ -390,7 +390,7 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
   }
 
   async getWALEntryCount(): Promise<number> {
-    return await (this.walReader as WALReaderImpl).getEntryCount();
+    return await ((this.walReader as unknown) as WALReaderImpl).getEntryCount();
   }
 
   async truncateWALBefore(lsn: number): Promise<void> {

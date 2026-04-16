@@ -77,8 +77,8 @@ describe('NodeLifecycle', () => {
     
     await lifecycle.start();
     
-    // After start, no current phase (all completed)
-    expect(lifecycle.getCurrentPhase()).toBeNull();
+    // After start, getCurrentPhase returns the last phase that was run
+    expect(lifecycle.getCurrentPhase()).toEqual(phases[phases.length - 1]);
   });
 
   it('should prevent double start', async () => {

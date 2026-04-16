@@ -1,16 +1,7 @@
-export type QuorumStrategyType = 'adaptive' | 'consensus' | 'multi-level' | 'role-based' | 'zone';
-
-
-export interface MembershipEntry {
-  nodeId: string;
-  metadata: Record<string, any>;
-  isAlive: boolean;
-  role?: string;
-  zone?: string;
-  region?: string;
-  lastSeen: number;
-}
 import { MembershipEntry } from '../types';
+export { MembershipEntry };
+
+export type QuorumStrategyType = 'adaptive' | 'consensus' | 'multi-level' | 'role-based' | 'zone-aware';
 
 /**
  * Base interface for all quorum strategies

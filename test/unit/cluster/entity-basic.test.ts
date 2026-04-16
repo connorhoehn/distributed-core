@@ -1,4 +1,4 @@
-import { EntityRegistryFactory } from '../../../src/cluster/entity/EntityRegistryFactory';
+import { EntityRegistryFactory } from '../../../src/cluster/core/entity/EntityRegistryFactory';
 
 describe('Entity Registry Basic Tests', () => {
   describe('InMemoryEntityRegistry', () => {

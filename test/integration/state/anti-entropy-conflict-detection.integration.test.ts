@@ -156,11 +156,14 @@ describe('Anti-Entropy Conflict Detection', () => {
           largestPartitionSize: 2,
           unreachableNodes: []
         },
+        resources: new Map(),
+        resourcesByType: new Map(),
+        resourcesByNode: new Map(),
         timestamp: Date.now()
       };
 
       const conflicts = await stateAggregator.detectConflicts(aggregatedState);
-      
+
       expect(conflicts.length).toBeGreaterThan(0);
       const versionConflict = conflicts.find(c => c.conflictType === 'version');
       expect(versionConflict).toBeDefined();
@@ -219,11 +222,14 @@ describe('Anti-Entropy Conflict Detection', () => {
           largestPartitionSize: 2,
           unreachableNodes: []
         },
+        resources: new Map(),
+        resourcesByType: new Map(),
+        resourcesByNode: new Map(),
         timestamp: Date.now()
       };
 
       const conflicts = await stateAggregator.detectConflicts(aggregatedState);
-      
+
       const statsConflict = conflicts.find(c => c.conflictType === 'stats' && c.serviceId.includes('userCount'));
       expect(statsConflict).toBeDefined();
       expect(statsConflict?.resolutionStrategy).toBe('max-value');
@@ -285,6 +291,9 @@ describe('Anti-Entropy Conflict Detection', () => {
           largestPartitionSize: 2,
           unreachableNodes: []
         },
+        resources: new Map(),
+        resourcesByType: new Map(),
+        resourcesByNode: new Map(),
         timestamp: Date.now()
       };
 

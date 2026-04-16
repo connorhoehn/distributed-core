@@ -108,11 +108,22 @@ export class ClusterCoordinator {
     payload: any,
     targetNodeIds: string[]
   ): Promise<void> {
-    await this.clusterManager.getCommunication().sendCustomMessage(
-      messageType,
-      payload,
-      targetNodeIds
-    );
+    const transport = this.clusterManager.getTransport();
+    for (const nodeId of targetNodeIds) {
+      const membership = this.clusterManager.getMembership();
+      const member = membership.get(nodeId) as any;
+      if (member) {
+        const target: import('../types').NodeId = {
+          id: nodeId,
+          address: member.address || 'unknown',
+          port: member.port || 0
+        };
+        await transport.send(
+          { type: messageType, payload, sender: target, timestamp: Date.now(), version: 0 } as any,
+          target
+        );
+      }
+    }
   }
 
   /**

@@ -29,8 +29,7 @@ export * from './config/BootstrapConfig';
 export * from './cluster/introspection/ClusterIntrospection';
 export * from './cluster/aggregation/StateAggregator';
 export * from './cluster/topology/ClusterTopologyManager';
-export * from './cluster/observability/ObservabilityManager';
-export type { 
+export type {
   PerformanceMetrics, 
   LogicalService, 
   ClusterState
@@ -47,18 +46,10 @@ export type {
   ScalingAction,
   RoomScalingCriteria
 } from './cluster/topology/ClusterTopologyManager';
-export type {
-  ClusterDashboard,
-  TopologyQuery,
-  ClusterScalingAnalysis,
-  RoomPlacementRecommendation
-} from './cluster/observability/ObservabilityManager';
 
 // Transport modules
 export * from './transport/Transport';
 export { GossipMessage } from './gossip/transport/GossipMessage';
-export * from './gossip/transport/GossipBackoff';
-export * from './transport/MessageCache';
 export * from './transport/Encryption';
 
 // Metrics modules
