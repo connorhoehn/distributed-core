@@ -1,6 +1,7 @@
 import { Message, MessageType } from '../types';
 import { Transport } from './Transport';
 import { NodeId } from '../types';
+import { Logger } from '../common/logger';
 
 // ---------------------------------------------------------------------------
 // Validation result
@@ -128,6 +129,7 @@ export class MessageValidator {
 
 class ValidatedTransport extends Transport {
   private readonly inner: Transport;
+  private readonly logger = Logger.create('MessageValidator');
   private readonly maxMessageSizeBytes: number;
   private readonly requireId: boolean;
   private readonly requireType: boolean;
@@ -166,7 +168,7 @@ class ValidatedTransport extends Transport {
   async send(message: Message, target: NodeId): Promise<void> {
     const result = this.validateMessage(message);
     if (!result.valid) {
-      console.warn(
+      this.logger.warn(
         `[MessageValidator] Dropping outgoing message: ${result.errors.join('; ')}`,
       );
       return;
@@ -180,7 +182,7 @@ class ValidatedTransport extends Transport {
     const wrappedCallback = (message: Message): void => {
       const result = this.validateMessage(message);
       if (!result.valid) {
-        console.warn(
+        this.logger.warn(
           `[MessageValidator] Dropping incoming message: ${result.errors.join('; ')}`,
         );
         return;
