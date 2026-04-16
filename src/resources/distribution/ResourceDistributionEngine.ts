@@ -10,6 +10,7 @@ import { OperationDeduplicator } from '../../communication/deduplication/Operati
 import { CausalOrderingEngine } from '../../communication/ordering/CausalOrderingEngine';
 import { ResourceAttachmentService } from '../attachment/ResourceAttachmentService';
 import { NodeRoute } from '../distribution/ClusterFanoutRouter';
+import { DeliveryTracker } from './DeliveryTracker';
 
 
 /**
@@ -29,6 +30,7 @@ export class ResourceDistributionEngine extends EventEmitter {
   private operationDeduplicator?: OperationDeduplicator;
   private causalOrderingEngine?: CausalOrderingEngine;
   private attachmentService?: ResourceAttachmentService;
+  private deliveryTracker?: DeliveryTracker;
   
   private isRunning = false;
   private resourceStore = new Map<string, ResourceMetadata>(); // Local resource cache
@@ -43,6 +45,7 @@ export class ResourceDistributionEngine extends EventEmitter {
       operationDeduplicator?: OperationDeduplicator;
       causalOrderingEngine?: CausalOrderingEngine;
       attachmentService?: ResourceAttachmentService;
+      deliveryTracker?: DeliveryTracker;
     }
   ) {
     super();
@@ -52,6 +55,7 @@ export class ResourceDistributionEngine extends EventEmitter {
     this.operationDeduplicator = options?.operationDeduplicator;
     this.causalOrderingEngine = options?.causalOrderingEngine;
     this.attachmentService = options?.attachmentService;
+    this.deliveryTracker = options?.deliveryTracker;
     this.stateReconciler = stateReconciler || new StateReconciler({
       defaultStrategies: {
         version: 'last-writer-wins',
@@ -114,6 +118,18 @@ export class ResourceDistributionEngine extends EventEmitter {
         await this.handleIncomingResourceDelta(message as StateDelta, senderId);
       }
     });
+
+    // Listen for incoming ACK/NACK messages and forward to DeliveryTracker
+    this.clusterManager.on('custom-message', async ({ message, senderId }: { message: any, senderId: string }) => {
+      if (message.type === 'resource-operation-ack' && this.deliveryTracker) {
+        const { opId, status, reason } = message.payload ?? message;
+        if (status === 'acked') {
+          this.deliveryTracker.receiveAck(opId, senderId);
+        } else {
+          this.deliveryTracker.receiveNack(opId, senderId, reason ?? 'unknown');
+        }
+      }
+    });
   }
 
   /**
@@ -128,6 +144,11 @@ export class ResourceDistributionEngine extends EventEmitter {
         this.resourceStore.set(resource.resourceId, resource);
       } else {
         this.resourceStore.delete(resource.resourceId);
+      }
+
+      // Increment local causal clock for outgoing distribution
+      if (this.causalOrderingEngine) {
+        this.causalOrderingEngine.incrementClock();
       }
 
       // Generate StateDelta for the resource
@@ -493,6 +514,23 @@ export class ResourceDistributionEngine extends EventEmitter {
         this.operationDeduplicator.markCompleted(operation, { success: true });
       }
 
+      // 6. Emit event for cross-node subscription notification
+      this.emit('remote-resource-operation', operation);
+
+      // 7. Send ACK back to the origin node (best-effort)
+      if (operation.originNodeId && operation.originNodeId !== this.clusterManager.localNodeId) {
+        try {
+          await this.clusterManager.sendCustomMessage(
+            'resource-operation-ack',
+            { opId: operation.opId, status: 'acked' },
+            [operation.originNodeId]
+          );
+        } catch (ackError) {
+          // ACK is best-effort; don't fail the operation if the ACK can't be sent
+          console.warn(`[ResourceDistributionEngine] Failed to send ACK for ${operation.opId}:`, ackError);
+        }
+      }
+
       console.log(`✅ Successfully processed operation ${operation.opId}`);
       return true;
 
@@ -500,6 +538,19 @@ export class ResourceDistributionEngine extends EventEmitter {
       // Mark as failed
       if (this.operationDeduplicator) {
         this.operationDeduplicator.markFailed(operation, error as Error);
+      }
+
+      // Send NACK back to the origin node (best-effort)
+      if (operation.originNodeId && operation.originNodeId !== this.clusterManager.localNodeId) {
+        try {
+          await this.clusterManager.sendCustomMessage(
+            'resource-operation-ack',
+            { opId: operation.opId, status: 'failed', reason: (error as Error).message },
+            [operation.originNodeId]
+          );
+        } catch (_) {
+          // Best-effort NACK
+        }
       }
 
       console.error(`Failed to process operation ${operation.opId}:`, error);
@@ -544,6 +595,11 @@ export class ResourceDistributionEngine extends EventEmitter {
    */
   async sendRemote(operation: ResourceOperation, routes: NodeRoute[]): Promise<void> {
     try {
+      // Increment local causal clock for outgoing operation
+      if (this.causalOrderingEngine) {
+        this.causalOrderingEngine.incrementClock();
+      }
+
       for (const route of routes) {
         if (route.deliveryMethod === 'direct') { // Only send direct routes (skip gossip)
           try {

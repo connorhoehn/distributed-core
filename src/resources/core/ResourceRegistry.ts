@@ -15,6 +15,21 @@ import { ResourceTopologyManager } from '../../cluster/topology/ResourceTopology
 import { StateDelta } from '../../cluster/delta-sync/StateDelta';
 import { ClusterManager } from '../../cluster/ClusterManager';
 import { DistributedSemanticsConfig, DistributedSemanticsFlags, globalSemanticsConfig } from '../../communication/semantics/DistributedSemanticsConfig';
+import { WALWriter, WALReader, WALEntry, EntityUpdate } from '../../persistence/types';
+
+/**
+ * Operation types for resource WAL entries
+ */
+export type ResourceWALOperation = 'CREATE' | 'UPDATE' | 'DELETE';
+
+/**
+ * Structure stored in WAL entry metadata for resource operations
+ */
+export interface ResourceWALData {
+  operation: ResourceWALOperation;
+  resourceId: string;
+  resourceMetadata: ResourceMetadata;
+}
 
 
 /**
@@ -38,6 +53,7 @@ export interface ResourceRegistryConfig {
   resourceTopologyManager?: ResourceTopologyManager;
   clusterManager?: ClusterManager;
   semanticsConfig?: DistributedSemanticsConfig;
+  walWriter?: WALWriter;
 }
 
 /**
@@ -71,6 +87,17 @@ export class ResourceRegistry extends EventEmitter {
   private resourceTopologyManager?: ResourceTopologyManager;
   private clusterManager?: ClusterManager;
   private semanticsConfig: DistributedSemanticsConfig;
+  private walWriter?: WALWriter;
+
+  /** Pending remote resource creation requests awaiting confirmation */
+  private pendingCreateRequests = new Map<string, {
+    resolve: (resource: ResourceMetadata) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+
+  /** Timeout for remote resource creation confirmation (ms) */
+  private static readonly REMOTE_CREATE_TIMEOUT_MS = 5000;
 
   constructor(config: ResourceRegistryConfig) {
     super();
@@ -79,6 +106,7 @@ export class ResourceRegistry extends EventEmitter {
     this.stateAggregator = config.stateAggregator;
     this.resourceTopologyManager = config.resourceTopologyManager;
     this.clusterManager = config.clusterManager;
+    this.walWriter = config.walWriter;
 
     // Create the underlying EntityRegistry using the factory
     this.entityRegistry = EntityRegistryFactory.create({
@@ -140,6 +168,9 @@ export class ResourceRegistry extends EventEmitter {
     // Extract resource metadata from entity record
     const resource = this.entityToResource(entityRecord);
 
+    // Persist to WAL
+    await this.writeToWAL('CREATE', resource.resourceId, resource);
+
     // Call lifecycle hook
     if (typeDefinition.onResourceCreated) {
       await typeDefinition.onResourceCreated(resource);
@@ -149,7 +180,9 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
-   * Create a resource on a specific remote node
+   * Create a resource on a specific remote node.
+   * Sends a 'resource:create-request' and waits for a confirmed
+   * 'resource:create-response' from the target node (with timeout).
    */
   private async createResourceOnNode(targetNodeId: string, resourceMetadata: ResourceMetadata): Promise<ResourceMetadata> {
     // Clone the resource metadata and set the correct nodeId
@@ -158,30 +191,69 @@ export class ResourceRegistry extends EventEmitter {
       nodeId: targetNodeId
     };
 
-    // Send create request to the target node via cluster communication
-    const createRequest = {
-      type: 'resource:create-request',
-      payload: {
-        resourceMetadata: remoteResourceMetadata,
-        requestId: `create-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        sourceNodeId: this.nodeId
-      }
+    const requestId = `create-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    const requestPayload = {
+      resourceMetadata: remoteResourceMetadata,
+      requestId,
+      sourceNodeId: this.nodeId
     };
 
     try {
-      // Send to target node and wait for response
-      await this.clusterManager?.sendCustomMessage('resource:create-request', createRequest.payload, [targetNodeId]);
+      // Create a promise that will be resolved when the response arrives
+      const confirmationPromise = new Promise<ResourceMetadata>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pendingCreateRequests.delete(requestId);
+          reject(new Error(
+            `Remote resource creation timed out after ${ResourceRegistry.REMOTE_CREATE_TIMEOUT_MS}ms ` +
+            `for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on node ${targetNodeId}`
+          ));
+        }, ResourceRegistry.REMOTE_CREATE_TIMEOUT_MS);
 
-      // For now, return the resource metadata (in a full implementation, we'd wait for confirmation)
-      // The actual resource creation will be handled by the target node's ResourceRegistry
-      console.log(`📨 [ResourceRegistry] Sent create request for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} to node ${targetNodeId}`);
+        this.pendingCreateRequests.set(requestId, { resolve, reject, timer });
+      });
 
-      return remoteResourceMetadata;
+      // Send to target node
+      await this.clusterManager?.sendCustomMessage('resource:create-request', requestPayload, [targetNodeId]);
+
+      console.log(`[ResourceRegistry] Sent create request ${requestId} for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} to node ${targetNodeId}`);
+
+      // Wait for confirmed response or timeout
+      const confirmedResource = await confirmationPromise;
+
+      console.log(`[ResourceRegistry] Remote creation confirmed for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on node ${targetNodeId}`);
+
+      return confirmedResource;
     } catch (error) {
-      console.error(`❌ [ResourceRegistry] Failed to create resource on node ${targetNodeId}:`, error);
-      // Fallback: create locally if remote creation fails
-      console.log(`🔄 [ResourceRegistry] Falling back to local creation for ${resourceMetadata.resourceId}`);
+      console.error(`[ResourceRegistry] Failed to create resource on node ${targetNodeId}:`, error);
+      // Fallback: create locally if remote creation fails or times out
+      console.log(`[ResourceRegistry] Falling back to local creation for ${resourceMetadata.resourceId}`);
       return await this.createResourceLocally(resourceMetadata);
+    }
+  }
+
+  /**
+   * Handle a 'resource:create-response' from a remote node, resolving the
+   * pending promise so the original createResourceOnNode call completes.
+   */
+  private handleRemoteResourceCreationResponse(payload: any): void {
+    const { requestId, success, resourceMetadata, error: remoteError } = payload;
+
+    const pending = this.pendingCreateRequests.get(requestId);
+    if (!pending) {
+      // Response for an unknown or already-timed-out request; ignore.
+      return;
+    }
+
+    clearTimeout(pending.timer);
+    this.pendingCreateRequests.delete(requestId);
+
+    if (success && resourceMetadata) {
+      pending.resolve(resourceMetadata as ResourceMetadata);
+    } else {
+      pending.reject(new Error(
+        `Remote node failed to create resource: ${remoteError || 'unknown error'}`
+      ));
     }
   }
 
@@ -265,7 +337,7 @@ export class ResourceRegistry extends EventEmitter {
 
       console.log(`✅ [ResourceRegistry] Successfully created ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on behalf of node ${sourceNodeId}`);
 
-      // Send confirmation back to the requesting node (optional)
+      // Send confirmation back to the requesting node
       if (this.clusterManager) {
         await this.clusterManager.sendCustomMessage('resource:create-response', {
           requestId,
@@ -277,7 +349,7 @@ export class ResourceRegistry extends EventEmitter {
     } catch (error) {
       console.error(`❌ [ResourceRegistry] Failed to handle remote creation request from ${senderId}:`, error);
 
-      // Send error response (optional)
+      // Send error response so the requesting node can fall back to local creation
       if (this.clusterManager && payload.requestId) {
         await this.clusterManager.sendCustomMessage('resource:create-response', {
           requestId: payload.requestId,
@@ -367,6 +439,9 @@ export class ResourceRegistry extends EventEmitter {
 
     const finalResource = this.entityToResource(updatedEntity);
 
+    // Persist to WAL
+    await this.writeToWAL('UPDATE', resourceId, finalResource);
+
     // Emit resource:updated event locally with previous state for external listeners
     this.emit('resource:updated', finalResource, existingResource);
 
@@ -396,6 +471,9 @@ export class ResourceRegistry extends EventEmitter {
     if (typeDefinition?.onResourceDestroyed) {
       await typeDefinition.onResourceDestroyed(resource);
     }
+
+    // Persist to WAL before releasing
+    await this.writeToWAL('DELETE', resourceId, resource);
 
     await this.entityRegistry.releaseEntity(resourceId);
   }
@@ -478,6 +556,14 @@ export class ResourceRegistry extends EventEmitter {
    */
   async stop(): Promise<void> {
     this.isRunning = false;
+
+    // Reject and clean up any pending remote creation requests
+    this.pendingCreateRequests.forEach((pending) => {
+      clearTimeout(pending.timer);
+      pending.reject(new Error('ResourceRegistry is stopping'));
+    });
+    this.pendingCreateRequests.clear();
+
     await this.entityRegistry.stop();
   }
 
@@ -596,6 +682,8 @@ export class ResourceRegistry extends EventEmitter {
       this.clusterManager.on('custom-message', async ({ message, senderId }: { message: any, senderId: string }) => {
         if (message.type === 'resource:create-request') {
           await this.handleRemoteResourceCreationRequest(message.payload, senderId);
+        } else if (message.type === 'resource:create-response') {
+          this.handleRemoteResourceCreationResponse(message);
         } else if (message.type === 'resource:cluster-event') {
           await this.handleClusterResourceEvent(message, senderId);
         }
@@ -791,5 +879,105 @@ export class ResourceRegistry extends EventEmitter {
     return this.entityRegistry.getAllKnownEntities()
       .filter((entity: EntityRecord) => this.isResourceEntity(entity))
       .map((entity: EntityRecord) => this.entityToResource(entity));
+  }
+
+  /**
+   * Write a resource operation to the WAL for persistence.
+   * No-op if no walWriter was provided (in-memory only mode).
+   */
+  private async writeToWAL(operation: ResourceWALOperation, resourceId: string, resourceMetadata: ResourceMetadata): Promise<void> {
+    if (!this.walWriter) {
+      return;
+    }
+
+    const walData: ResourceWALData = {
+      operation,
+      resourceId,
+      resourceMetadata,
+    };
+
+    const entityUpdate: EntityUpdate = {
+      entityId: resourceId,
+      timestamp: Date.now(),
+      version: resourceMetadata.version ?? 1,
+      operation,
+      ownerNodeId: resourceMetadata.nodeId,
+      metadata: { resourceWAL: walData },
+    };
+
+    await this.walWriter.append(entityUpdate);
+  }
+
+  /**
+   * Recover resource state from a WAL reader.
+   * Replays all WAL entries that contain resource operations (CREATE/UPDATE/DELETE)
+   * to reconstruct the in-memory registry state.
+   *
+   * Should be called during startup BEFORE the registry starts accepting new operations
+   * (i.e., before calling start()).
+   */
+  async recoverFromWAL(walReader: WALReader): Promise<{ entriesReplayed: number }> {
+    let entriesReplayed = 0;
+
+    await walReader.replay(async (entry: WALEntry) => {
+      const walData = entry.data?.metadata?.resourceWAL as ResourceWALData | undefined;
+      if (!walData) {
+        // Not a resource WAL entry, skip
+        return;
+      }
+
+      const { operation, resourceId, resourceMetadata } = walData;
+
+      switch (operation) {
+        case 'CREATE': {
+          // Add directly to entity registry, bypassing placement/validation logic
+          await this.entityRegistry.proposeEntity(
+            resourceId,
+            {
+              resourceType: resourceMetadata.resourceType,
+              resourceMetadata: resourceMetadata,
+              registryType: 'resource',
+            }
+          );
+          entriesReplayed++;
+          break;
+        }
+        case 'UPDATE': {
+          // Check if entity exists before updating (CREATE should have come first)
+          const existing = this.entityRegistry.getEntity(resourceId);
+          if (existing) {
+            await this.entityRegistry.updateEntity(resourceId, {
+              resourceType: resourceMetadata.resourceType,
+              resourceMetadata: resourceMetadata,
+              registryType: 'resource',
+            });
+          } else {
+            // If entity doesn't exist yet (e.g., out-of-order), treat as create
+            await this.entityRegistry.proposeEntity(
+              resourceId,
+              {
+                resourceType: resourceMetadata.resourceType,
+                resourceMetadata: resourceMetadata,
+                registryType: 'resource',
+              }
+            );
+          }
+          entriesReplayed++;
+          break;
+        }
+        case 'DELETE': {
+          const entity = this.entityRegistry.getEntity(resourceId);
+          if (entity) {
+            await this.entityRegistry.releaseEntity(resourceId);
+          }
+          entriesReplayed++;
+          break;
+        }
+        default:
+          console.warn(`[ResourceRegistry] Unknown WAL operation: ${operation}`);
+      }
+    });
+
+    return { entriesReplayed };
   }
 }

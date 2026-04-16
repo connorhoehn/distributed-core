@@ -1,6 +1,6 @@
 import { ResourceOperation } from '../core/ResourceOperation';
-import { ClusterRouting } from '../../routing/ClusterRouting';
-import { ClusterManager } from '../../cluster/ClusterManager';
+import { IClusterNode } from '../../cluster/ClusterEventBus';
+import { DeliveryTracker, DeliveryReceipt } from './DeliveryTracker';
 
 
 export interface NodeRoute {
@@ -23,31 +23,39 @@ export interface RoutingStrategy {
  * Returns NodeRoute[] with local:boolean flag, no side effects
  */
 export class ClusterFanoutRouter {
-  private clusterManager: ClusterManager;
+  private clusterNode: IClusterNode;
   private defaultStrategy: RoutingStrategy;
-
-  /**
-   * Sends a ResourceOperation to a specific node.
-   * Implement actual network delivery logic here.
-   */
-  public async sendToNode(nodeId: string, operation: ResourceOperation): Promise<void> {
-    // TODO: Replace with actual network delivery logic
-    console.log(`Sending operation to node ${nodeId}:`, operation);
-    // Simulate async delivery
-    return Promise.resolve();
-  }
+  public readonly deliveryTracker: DeliveryTracker;
 
   constructor(
-    clusterManager: ClusterManager,
-    strategy: Partial<RoutingStrategy> = {}
+    clusterNode: IClusterNode,
+    strategy: Partial<RoutingStrategy> = {},
+    deliveryTracker?: DeliveryTracker
   ) {
-    this.clusterManager = clusterManager;
+    this.clusterNode = clusterNode;
     this.defaultStrategy = {
       preferPrimary: true,
       replicationFactor: 3,
       useGossipFallback: true,
       ...strategy
     };
+    this.deliveryTracker = deliveryTracker ?? new DeliveryTracker();
+  }
+
+  /**
+   * Sends a ResourceOperation to a specific remote node via cluster messaging.
+   */
+  public async sendToNode(nodeId: string, operation: ResourceOperation): Promise<void> {
+    await this.clusterNode.sendCustomMessage('resource-operation', {
+      opId: operation.opId,
+      resourceId: operation.resourceId,
+      type: operation.type,
+      payload: operation.payload,
+      version: operation.version,
+      timestamp: operation.timestamp,
+      originNodeId: operation.originNodeId,
+      correlationId: operation.correlationId
+    }, [nodeId]);
   }
 
   /**
@@ -56,12 +64,11 @@ export class ClusterFanoutRouter {
    */
   async route(resourceId: string, semantics: RoutingStrategy): Promise<NodeRoute[]> {
     const routes: NodeRoute[] = [];
-    const routing = this.clusterManager.getRouting();
-    const localNodeId = this.clusterManager.localNodeId;
+    const localNodeId = this.clusterNode.localNodeId;
 
     try {
       // Get primary node for resource
-      const primaryNode = routing.getNodeForKey(resourceId);
+      const primaryNode = this.clusterNode.getNodeForKey(resourceId);
       if (primaryNode) {
         routes.push({
           nodeId: primaryNode,
@@ -73,7 +80,7 @@ export class ClusterFanoutRouter {
 
       // Get replica nodes if replication is enabled
       if (semantics.replicationFactor > 1) {
-        const replicaNodes = routing.getReplicaNodes(
+        const replicaNodes = this.clusterNode.getReplicaNodes(
           resourceId, 
           semantics.replicationFactor
         );
@@ -121,24 +128,53 @@ export class ClusterFanoutRouter {
     };
   }
 
-  async fanoutRemote(routes: NodeRoute[], operation: ResourceOperation): Promise<void> {
-    // Iterate routes and send operation to remote nodes using sendToNode
-    for (const route of routes) {
-      if (!route.local) {
-        await this.sendToNode(route.nodeId, operation);
-      }
+  async fanoutRemote(routes: NodeRoute[], operation: ResourceOperation): Promise<DeliveryReceipt[] | null> {
+    const remoteRoutes = routes.filter(r => !r.local);
+
+    // Send the operation to each remote node
+    for (const route of remoteRoutes) {
+      await this.sendToNode(route.nodeId, operation);
     }
-    // Optionally, return a result or throw on failure
+
+    // Track delivery if there are remote targets
+    if (remoteRoutes.length > 0) {
+      const targetNodeIds = remoteRoutes.map(r => r.nodeId);
+      // Fire-and-forget tracking -- callers can await the returned promise
+      // but the fanout itself does not block on ACKs
+      return this.deliveryTracker.trackDelivery(operation.opId, targetNodeIds);
+    }
+
+    return null;
   }
 
 
   /**
    * Fanout operation to all nodes determined by routing strategy.
-   * This method combines routing and remote fanout.
+   * Local routes are returned so the caller can apply them directly;
+   * remote routes are sent via sendToNode().
+   * Returns the local NodeRoute entries (if any) for the caller to handle.
    */
-  async fanout(resourceId: string, operation: ResourceOperation, semantics?: Partial<RoutingStrategy>): Promise<void> {
+  async fanout(resourceId: string, operation: ResourceOperation, semantics?: Partial<RoutingStrategy>): Promise<NodeRoute[]> {
     const strategy = { ...this.defaultStrategy, ...semantics };
     const routes = await this.route(resourceId, strategy);
-    await this.fanoutRemote(routes, operation);
+
+    const localRoutes: NodeRoute[] = [];
+
+    for (const route of routes) {
+      if (route.local) {
+        localRoutes.push(route);
+      } else {
+        await this.sendToNode(route.nodeId, operation);
+      }
+    }
+
+    // Track remote delivery
+    const remoteRoutes = routes.filter(r => !r.local);
+    if (remoteRoutes.length > 0) {
+      const targetNodeIds = remoteRoutes.map(r => r.nodeId);
+      this.deliveryTracker.trackDelivery(operation.opId, targetNodeIds);
+    }
+
+    return localRoutes;
   }
 }

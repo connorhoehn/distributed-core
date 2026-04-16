@@ -7,6 +7,7 @@ export * from './management/ResourceManager';
 export * from './management/ResourceLifecycleEventSystem';
 export * from './distribution/ResourceDistributionEngine';
 export * from './distribution/ClusterFanoutRouter';
+export * from './distribution/DeliveryTracker';
 export * from './attachment/ResourceAttachmentService';
 export * from './security/ResourceAuthorizationService';
 export * from './security/ResourceQuotaManager';

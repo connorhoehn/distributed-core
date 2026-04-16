@@ -4,6 +4,8 @@ import { ResourceRegistry } from '../core/ResourceRegistry';
 import { IClusterNode } from '../../cluster/ClusterEventBus';
 import { ResourceAttachmentService } from '../attachment/ResourceAttachmentService';
 import { DeliveryGuard } from '../../communication/delivery/DeliveryGuard';
+import { ResourceDistributionEngine } from '../distribution/ResourceDistributionEngine';
+import { ResourceOperation } from '../core/ResourceOperation';
 
 
 export interface SubscriptionFilter {
@@ -48,7 +50,8 @@ export class ResourceSubscriptionManager extends EventEmitter {
   private maxInactiveTime: number;
   private attachmentService?: ResourceAttachmentService;
   private deliveryGuard?: DeliveryGuard;
-  
+  private distributionEngine?: ResourceDistributionEngine;
+
   constructor(
     private resourceRegistry: ResourceRegistry,
     private clusterManager: IClusterNode,
@@ -57,14 +60,17 @@ export class ResourceSubscriptionManager extends EventEmitter {
       cleanupInterval?: number;
       attachmentService?: ResourceAttachmentService;
       deliveryGuard?: DeliveryGuard;
+      distributionEngine?: ResourceDistributionEngine;
     } = {}
   ) {
     super();
     this.maxInactiveTime = config.maxInactiveTime || 300000; // 5 minutes
     this.attachmentService = config.attachmentService;
     this.deliveryGuard = config.deliveryGuard;
-    
+    this.distributionEngine = config.distributionEngine;
+
     this.setupEventHandlers();
+    this.setupDistributionEngineListener();
     this.startCleanupTask(config.cleanupInterval || 60000); // 1 minute
   }
 
@@ -263,6 +269,87 @@ export class ResourceSubscriptionManager extends EventEmitter {
         await this.handleSubscriptionSync(message, senderId);
       }
     });
+  }
+
+  /**
+   * Listen for remote resource operations from the distribution engine
+   * and notify any local subscriptions that match the incoming resource.
+   */
+  private setupDistributionEngineListener(): void {
+    if (!this.distributionEngine) return;
+
+    this.distributionEngine.on('remote-resource-operation', (operation: ResourceOperation) => {
+      this.handleRemoteResourceOperation(operation);
+    });
+  }
+
+  /**
+   * Connect a distribution engine after construction (for cases where
+   * the engine is created after the subscription manager).
+   */
+  connectDistributionEngine(engine: ResourceDistributionEngine): void {
+    // Remove old listener if replacing
+    if (this.distributionEngine) {
+      this.distributionEngine.removeAllListeners('remote-resource-operation');
+    }
+    this.distributionEngine = engine;
+    this.setupDistributionEngineListener();
+  }
+
+  /**
+   * Handle a remote resource operation by checking local subscriptions
+   * and notifying any that match the resource type/id in the operation payload.
+   */
+  private handleRemoteResourceOperation(operation: ResourceOperation): void {
+    const payload = operation.payload as ResourceMetadata | undefined;
+    if (!payload) return;
+
+    // Map operation type to subscription event type
+    const eventTypeMap: Record<string, SubscriptionEvent['eventType']> = {
+      'CREATE': 'resource:created',
+      'UPDATE': 'resource:updated',
+      'DELETE': 'resource:destroyed',
+    };
+
+    const eventType = eventTypeMap[operation.type];
+    if (!eventType) return;
+
+    // Use the existing filter matching to find subscriptions that care about this resource
+    const matchingSubscriptions = this.findMatchingSubscriptions(payload);
+
+    for (const subscription of matchingSubscriptions) {
+      const event: SubscriptionEvent = {
+        eventType,
+        resource: payload,
+        timestamp: Date.now(),
+        subscriptionId: subscription.subscriptionId,
+      };
+
+      // Update activity
+      subscription.lastActivity = Date.now();
+
+      // Deliver via attachment service if available, otherwise emit
+      if (this.attachmentService) {
+        try {
+          this.attachmentService.deliverLocal(
+            subscription.subscriptionId,
+            operation,
+            operation.correlationId
+          );
+        } catch (error) {
+          console.error(`Failed to deliver remote operation via attachment service:`, error);
+          this.emit('subscription:event', event);
+          this.emit(`subscription:${subscription.subscriptionId}`, event);
+        }
+      } else {
+        this.emit('subscription:event', event);
+        this.emit(`subscription:${subscription.subscriptionId}`, event);
+      }
+
+      console.log(
+        `📨 [Remote] Notified subscription ${subscription.subscriptionId} of ${eventType} for resource ${payload.resourceId} from node ${operation.originNodeId}`
+      );
+    }
   }
 
   private async notifySubscribers(
