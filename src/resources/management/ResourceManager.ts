@@ -405,4 +405,8 @@ export class ResourceManager extends EventEmitter {
   async transferResource(resourceId: string, targetNodeId: string): Promise<ResourceMetadata> {
     return await this.resourceRegistry.transferResource(resourceId, targetNodeId);
   }
+
+  getResourceRegistry(): ResourceRegistry {
+    return this.resourceRegistry;
+  }
 }

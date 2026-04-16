@@ -121,13 +121,12 @@ describe('WebSocketAdapter', () => {
         serialize: () => Buffer.from(JSON.stringify(message))
       };
 
-      try {
-        await adapter.send(mockGossipMessage as any);
-        expect(true).toBe(true); // Test passes if no error thrown
-      } catch (error) {
-        // May throw if no connections exist - that's valid behavior
-        expect(error).toBeDefined();
-      }
+      // Should either send successfully or throw a defined error (no connections)
+      const result = await adapter.send(mockGossipMessage as any).then(
+        (res) => ({ sent: true, value: res }),
+        (err) => { expect(err).toBeDefined(); return { sent: false }; }
+      );
+      expect(result).toBeDefined();
     });
   });
 
@@ -137,13 +136,12 @@ describe('WebSocketAdapter', () => {
     });
 
     test('should connect to target node', async () => {
-      try {
-        await adapter.connect(nodeB);
-        expect(true).toBe(true);
-      } catch (error) {
-        // May throw if connection fails - that's also valid
-        expect(error).toBeDefined();
-      }
+      // Should either connect successfully or throw a defined error
+      const result = await adapter.connect(nodeB).then(
+        () => ({ connected: true }),
+        (err) => { expect(err).toBeDefined(); return { connected: false }; }
+      );
+      expect(result).toBeDefined();
     });
 
     test('should get connection statistics', () => {
@@ -227,35 +225,32 @@ describe('WebSocketAdapter', () => {
 
     test('should handle connection errors gracefully', async () => {
       await adapter.start();
-      
-      try {
-        await adapter.connect(nodeB);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+
+      // Should either connect or throw a defined error without crashing
+      const result = await adapter.connect(nodeB).then(
+        () => ({ connected: true }),
+        (err) => { expect(err).toBeDefined(); return { connected: false }; }
+      );
+      expect(result).toBeDefined();
     });
   });
 
   describe('Integration Tests', () => {
     test('should integrate with circuit breaker', async () => {
-      try {
-        await adapter.start();
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      await adapter.start();
+      const stats = adapter.getStats();
+      expect(stats.isStarted).toBe(true);
     });
 
     test('should integrate with retry manager', async () => {
       await adapter.start();
-      
-      try {
-        await adapter.connect(nodeB);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+
+      // Should either connect or throw a defined error, exercising the retry manager
+      const result = await adapter.connect(nodeB).then(
+        () => ({ connected: true }),
+        (err) => { expect(err).toBeDefined(); return { connected: false }; }
+      );
+      expect(result).toBeDefined();
     });
   });
 });

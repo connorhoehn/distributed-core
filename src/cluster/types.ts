@@ -126,8 +126,6 @@ export interface PartitionInfo {
   timestamp: number;
   partitionType?: 'zone-based' | 'network-split' | 'unknown';
 }
-export const QuorumStrategy = undefined; // TODO: Implement QuorumStrategy
-export const QuorumStrategyType = undefined; // TODO: Implement QuorumStrategyType
 
 // ============================================================================
 // Resource interfaces for breaking the Cluster -> Resources circular dependency.

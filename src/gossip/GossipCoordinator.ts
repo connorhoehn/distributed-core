@@ -13,12 +13,14 @@ import { BootstrapConfig } from '../config/BootstrapConfig';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
 import { NodeInfo } from '../cluster/types';
 import { NodeId } from '../types';
+import { Logger } from '../common/logger';
 
 /**
  * Gossip-based coordinator that uses the existing cluster infrastructure
  * for eventually consistent range coordination across nodes.
  */
 export class GossipCoordinator extends EventEmitter implements IClusterCoordinator {
+  private logger = Logger.create('GossipCoordinator');
   private nodeId!: string;
   private ringId!: RingId;
   private clusterManager!: ClusterManager;
@@ -48,11 +50,11 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
     // Create transport layer (using in-memory for now, can be configured)
     this.transport = new InMemoryAdapter({ id: nodeId } as NodeId);
 
-    console.log(`🔧 GossipCoordinator initialized for node ${nodeId} in ring ${ringId}`);
+    this.logger.info(`Initialized for node ${nodeId} in ring ${ringId}`);
   }
 
   async joinCluster(seedNodes: string[]): Promise<void> {
-    console.log(`🚀 Node ${this.nodeId} joining cluster via gossip with seeds: ${seedNodes.join(', ')}`);
+    this.logger.info(`Node ${this.nodeId} joining cluster via gossip with seeds: ${seedNodes.join(', ')}`);
     
     // Create bootstrap config with seed nodes
     const bootstrapConfig = BootstrapConfig.create({
@@ -90,7 +92,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
   }
 
   async leaveCluster(): Promise<void> {
-    console.log(`👋 Node ${this.nodeId} leaving cluster`);
+    this.logger.info(`Node ${this.nodeId} leaving cluster`);
     
     // Release all owned ranges
     const ranges = Array.from(this.ownedRanges);
@@ -105,7 +107,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
   }
 
   async acquireLease(rangeId: RangeId): Promise<boolean> {
-    console.log(`🎯 Attempting to acquire lease for range ${rangeId} via gossip`);
+    this.logger.info(`Attempting to acquire lease for range ${rangeId} via gossip`);
     
     // Get current cluster view to check for conflicts
     const clusterView = await this.getClusterView();
@@ -115,24 +117,24 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
     // Check if lease exists and is still valid
     if (existingLease && existingLease.expiresAt > now) {
       if (existingLease.nodeId === this.nodeId) {
-        console.log(`✅ Already own lease for range ${rangeId}`);
+        this.logger.debug(`Already own lease for range ${rangeId}`);
         return true;
       } else {
         // Check if the owning node is still alive
         const ownerNode = clusterView.nodes.get(existingLease.nodeId);
         if (ownerNode && ownerNode.isAlive) {
-          console.log(`❌ Range ${rangeId} is owned by alive node ${existingLease.nodeId}`);
+          this.logger.warn(`Range ${rangeId} is owned by alive node ${existingLease.nodeId}`);
           this.emit('lease-conflict', rangeId, existingLease.nodeId);
           return false;
         } else {
-          console.log(`🔄 Previous owner ${existingLease.nodeId} is dead, acquiring range ${rangeId}`);
+          this.logger.info(`Previous owner ${existingLease.nodeId} is dead, acquiring range ${rangeId}`);
         }
       }
     }
 
     // Check if we're at the max range limit
     if (this.ownedRanges.size >= this.config.maxRangesPerNode) {
-      console.log(`⚠️ Cannot acquire range ${rangeId}: at max capacity (${this.config.maxRangesPerNode})`);
+      this.logger.warn(`Cannot acquire range ${rangeId}: at max capacity (${this.config.maxRangesPerNode})`);
       return false;
     }
 
@@ -152,13 +154,13 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
     // Broadcast lease acquisition via gossip
     await this.broadcastLeaseUpdate(lease);
     
-    console.log(`🎉 Successfully acquired lease for range ${rangeId}`);
+    this.logger.info(`Successfully acquired lease for range ${rangeId}`);
     this.emit('range-acquired', rangeId);
     return true;
   }
 
   async releaseLease(rangeId: RangeId): Promise<void> {
-    console.log(`🔓 Releasing lease for range ${rangeId}`);
+    this.logger.info(`Releasing lease for range ${rangeId}`);
     
     const lease = this.leases.get(rangeId);
     if (lease && lease.nodeId === this.nodeId) {
@@ -173,9 +175,9 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
       this.ownedRanges.delete(rangeId);
       
       this.emit('range-released', rangeId);
-      console.log(`✅ Released lease for range ${rangeId}`);
+      this.logger.info(`Released lease for range ${rangeId}`);
     } else {
-      console.log(`⚠️ Cannot release range ${rangeId}: not owned by this node`);
+      this.logger.warn(`Cannot release range ${rangeId}: not owned by this node`);
     }
   }
 
@@ -219,7 +221,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
       return;
     }
 
-    console.log(`🚀 Starting GossipCoordinator for node ${this.nodeId}`);
+    this.logger.info(`Starting GossipCoordinator for node ${this.nodeId}`);
     this.started = true;
 
     // Start lease renewal
@@ -234,7 +236,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
       return;
     }
 
-    console.log(`🛑 Stopping GossipCoordinator for node ${this.nodeId}`);
+    this.logger.info(`Stopping GossipCoordinator for node ${this.nodeId}`);
     this.started = false;
 
     if (this.leaseRenewalInterval) {
@@ -247,12 +249,12 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
 
   private setupEventListeners(): void {
     this.clusterManager.on('member-joined', (nodeInfo: NodeInfo) => {
-      console.log(`📥 Node joined cluster: ${nodeInfo.id}`);
+      this.logger.info(`Node joined cluster: ${nodeInfo.id}`);
       this.emit('node-joined', nodeInfo.id);
     });
 
     this.clusterManager.on('member-left', (nodeId: string) => {
-      console.log(`📤 Node left cluster: ${nodeId}`);
+      this.logger.info(`Node left cluster: ${nodeId}`);
       this.emit('node-left', nodeId);
       
       // Check if we need to take over any ranges from the departed node
@@ -275,7 +277,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
   private async broadcastLeaseUpdate(lease: RangeLease): Promise<void> {
     // In a real implementation, this would send lease information via gossip
     // For now, we'll simulate by logging
-    console.log(`📡 Broadcasting lease update for range ${lease.rangeId}`);
+    this.logger.debug(`Broadcasting lease update for range ${lease.rangeId}`);
     
     // The actual gossip broadcasting would happen through the cluster manager
     // by extending the gossip message format to include lease information
@@ -289,7 +291,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
       if (lease && lease.nodeId === this.nodeId) {
         // Renew the lease
         lease.expiresAt = now + this.config.leaseTimeoutMs;
-        console.log(`🔄 Renewed lease for range ${rangeId}`);
+        this.logger.debug(`Renewed lease for range ${rangeId}`);
         
         // Broadcast renewal
         this.broadcastLeaseUpdate(lease);
@@ -301,7 +303,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
     // Check if the departed node owned any ranges that we should take over
     // This is a simplified approach - in practice, you'd want more sophisticated
     // rebalancing logic
-    console.log(`🔍 Checking for orphaned ranges from departed node ${departedNodeId}`);
+    this.logger.info(`Checking for orphaned ranges from departed node ${departedNodeId}`);
     
     // This would typically involve consulting the ring topology and
     // determining which node should take over responsibility

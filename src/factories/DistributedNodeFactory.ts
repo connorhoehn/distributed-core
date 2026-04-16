@@ -164,7 +164,7 @@ export class DistributedNodeFactory {
       resourceManager = new ResourceManager(
         resourceRegistry,
         clusterManager,
-        node.metrics
+        node.metrics!
       );
 
       // Create ResourceAttachmentService if enabled

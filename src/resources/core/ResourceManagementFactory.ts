@@ -27,6 +27,7 @@ import { SemanticsConfig, SemanticsConfigValidator, DEFAULT_SEMANTICS_CONFIG } f
 import { ResourceOperation, OpType } from './ResourceOperation';
 import { MessageCodec, defaultCodec } from '../../communication/core/MessageCodec';
 import { ObservabilityManager } from '../../observability/ObservabilityManager';
+import { Logger } from '../../common/logger';
 
 
 /**
@@ -74,12 +75,14 @@ function validateSemanticsConfig(config: SemanticsConfig): void {
   }
 }
 
+const factoryLogger = Logger.create('ResourceManagementFactory');
+
 /**
  * Phase F: Operation trace for debugging
  */
 function traceOperation(opId: string, resourceId: string, phase: string, nodeId?: string): void {
   const timestamp = Date.now();
-  console.log(`🔍 [TRACE] ${timestamp} | ${opId} | ${resourceId} | ${phase} | ${nodeId || 'local'}`);
+  factoryLogger.debug(`[TRACE] ${timestamp} | ${opId} | ${resourceId} | ${phase} | ${nodeId || 'local'}`);
 }
 
 /**
@@ -197,11 +200,11 @@ class FlowControlManagerImpl implements FlowControlManager {
 
   recordWrite(connectionId: string, bytes: number): void {
     // Legacy method for compatibility - not used with queue-based flow control
-    console.log(`Legacy recordWrite called for ${connectionId}: ${bytes} bytes`);
+    factoryLogger.debug(`Legacy recordWrite called for ${connectionId}: ${bytes} bytes`);
   }
 
   recordDrop(connectionId: string, reason: string): void {
-    console.log(`Flow control drop for ${connectionId}: ${reason}`);
+    factoryLogger.warn(`Flow control drop for ${connectionId}: ${reason}`);
   }
 
   enqueue(connectionId: string, data: any, meta: { opId?: string; priority?: number } = {}): 'enqueued' | 'dropped' | 'error' {
@@ -446,7 +449,7 @@ class SimpleWriteAheadLog extends WriteAheadLog {
     
     this.entries.push(walRecord);
     (this as any).log.push(walRecord);
-    console.log(`WAL append: ${walRecord.kind} ${walRecord.op.opId || 'unknown'}`);
+    factoryLogger.debug(`WAL append: ${walRecord.kind} ${walRecord.op.opId || 'unknown'}`);
   }
 
   async read(from: number, to: number): Promise<WALRecord[]> {
@@ -524,12 +527,12 @@ export class ResourceManagementFactory {
     const semantics = args.semantics || DEFAULT_SEMANTICS_CONFIG;
     
     // Phase E: Config validation with hard-fail for invalid semantics
-    console.log('🔍 Validating semantics configuration...');
+    factoryLogger.info('Validating semantics configuration...');
     try {
       validateSemanticsConfig(semantics);
-      console.log('✅ Semantics configuration valid');
+      factoryLogger.info('Semantics configuration valid');
     } catch (error: any) {
-      console.error('❌ Invalid semantics configuration:', error);
+      factoryLogger.error('Invalid semantics configuration:', error);
       throw new Error(`Configuration validation failed: ${error.message}`);
     }
     const time = args.time || new DefaultTimeProvider();
@@ -623,7 +626,7 @@ export class ResourceManagementFactory {
 
     const start = async (): Promise<void> => {
       if (isStarted) {
-        console.warn('📋 IntegratedCommunicationLayer already started');
+        factoryLogger.warn('IntegratedCommunicationLayer already started');
         return;
       }
       if (isStopping) {
@@ -634,45 +637,45 @@ export class ResourceManagementFactory {
       const validation = SemanticsConfigValidator.validate(semantics);
       if (validation.errors.length > 0) {
         const errorMsg = `Invalid semantics config: ${validation.errors.join(', ')}`;
-        console.error('🚫', errorMsg);
+        factoryLogger.error(errorMsg);
         throw new Error(errorMsg);
       }
       if (validation.warnings.length > 0) {
-        console.warn('⚠️  Semantics config warnings:', validation.warnings.join(', '));
+        factoryLogger.warn('Semantics config warnings: ' + validation.warnings.join(', '));
       }
 
-      console.log('🚀 Starting IntegratedCommunicationLayer...');
+      factoryLogger.info('Starting IntegratedCommunicationLayer...');
       
       try {
         // Step 1: Register receiver BEFORE starting cluster (fix #6)
-        console.log('📡 Registering cluster message receiver...');
+        factoryLogger.info('Registering cluster message receiver...');
         receiver.onMessage((from: string, bytes: Uint8Array) => {
           try {
             const operation = codec.decode(bytes);
             distribution.receiveRemote(operation);
           } catch (error) {
-            console.error('Failed to process cluster message:', error);
+            factoryLogger.error('Failed to process cluster message:', error);
           }
         });
         
         // Step 2: Start cluster transport
-        console.log('🌐 Starting cluster manager...');
+        factoryLogger.info('Starting cluster manager...');
         await args.clusterManager.start();
         
         // Step 3: Start client transport  
-        console.log('👥 Starting client adapter...');
+        factoryLogger.info('Starting client adapter...');
         await args.clientAdapter.start();
-        
+
         isStarted = true;
-        console.log('✅ IntegratedCommunicationLayer started successfully');
+        factoryLogger.info('IntegratedCommunicationLayer started successfully');
         
       } catch (error) {
-        console.error('❌ Failed to start IntegratedCommunicationLayer:', error);
+        factoryLogger.error('Failed to start IntegratedCommunicationLayer:', error);
         // Attempt cleanup on partial start failure
         try {
           await stop();
         } catch (stopError) {
-          console.error('Failed to cleanup after start failure:', stopError);
+          factoryLogger.error('Failed to cleanup after start failure:', stopError);
         }
         throw error;
       }
@@ -680,30 +683,30 @@ export class ResourceManagementFactory {
 
     const stop = async (): Promise<void> => {
       if (!isStarted) {
-        console.warn('📋 IntegratedCommunicationLayer not started');
+        factoryLogger.warn('IntegratedCommunicationLayer not started');
         return;
       }
       if (isStopping) {
-        console.warn('📋 IntegratedCommunicationLayer already stopping');
+        factoryLogger.warn('IntegratedCommunicationLayer already stopping');
         return;
       }
 
-      console.log('🛑 Stopping IntegratedCommunicationLayer...');
+      factoryLogger.info('Stopping IntegratedCommunicationLayer...');
       isStopping = true;
       
       try {
         // Reverse order of start: client first, then cluster
-        console.log('👥 Stopping client adapter...');
+        factoryLogger.info('Stopping client adapter...');
         await args.clientAdapter.stop();
         
-        console.log('🌐 Stopping cluster manager...');
+        factoryLogger.info('Stopping cluster manager...');
         await args.clusterManager.stop();
-        
+
         isStarted = false;
-        console.log('✅ IntegratedCommunicationLayer stopped successfully');
+        factoryLogger.info('IntegratedCommunicationLayer stopped successfully');
         
       } catch (error) {
-        console.error('❌ Failed to stop IntegratedCommunicationLayer:', error);
+        factoryLogger.error('Failed to stop IntegratedCommunicationLayer:', error);
         throw error;
       } finally {
         isStopping = false;

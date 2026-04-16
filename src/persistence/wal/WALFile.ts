@@ -2,6 +2,10 @@ import fs from 'fs/promises';
 import path from 'path'
 import { WALEntry, WALFile } from '../types';
 
+function isNodeError(err: unknown): err is NodeJS.ErrnoException {
+  return err instanceof Error && 'code' in err;
+}
+
 export class WALFileImpl implements WALFile {
   private filePath: string;
   private fileHandle: fs.FileHandle | null = null;
@@ -58,7 +62,7 @@ export class WALFileImpl implements WALFile {
       
       return entries.sort((a, b) => a.logSequenceNumber - b.logSequenceNumber);
     } catch (error) {
-      if ((error as any).code === 'ENOENT') {
+      if (isNodeError(error) && error.code === 'ENOENT') {
         return []; // File doesn't exist yet
       }
       throw error;
@@ -85,7 +89,7 @@ export class WALFileImpl implements WALFile {
       const stats = await fs.stat(this.filePath);
       return stats.size;
     } catch (error) {
-      if ((error as any).code === 'ENOENT') {
+      if (isNodeError(error) && error.code === 'ENOENT') {
         return 0;
       }
       throw error;

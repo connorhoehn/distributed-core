@@ -3,6 +3,7 @@ import { Transport } from '../transport/Transport';
 import { MembershipTable } from '../cluster/membership/MembershipTable';
 import { NodeStatus, NodeInfo } from '../cluster/types';
 import { Message, MessageType, NodeId } from '../types';
+import { Logger } from '../common/logger';
 
 export interface FailureDetectorConfig {
   heartbeatInterval: number;    // How often to send heartbeats (ms)
@@ -35,6 +36,7 @@ export interface NodeHealthStatus {
 }
 
 export class FailureDetector extends EventEmitter {
+  private logger = Logger.create('FailureDetector');
   private heartbeatTimers = new Map<string, NodeJS.Timeout>();
   private pingTimers = new Map<string, NodeJS.Timeout>();
   private lastSeenTimestamps = new Map<string, number>();
@@ -132,7 +134,7 @@ export class FailureDetector extends EventEmitter {
    */
   private handleHeartbeat(sourceNodeId: string, timestamp: number, sequenceNumber: number): void {
     if (this.config.enableLogging) {
-      console.log(`[FailureDetector] Received heartbeat from ${sourceNodeId} (seq: ${sequenceNumber})`);
+      this.logger.debug(` Received heartbeat from ${sourceNodeId} (seq: ${sequenceNumber})`);
     }
 
     this.recordNodeActivity(sourceNodeId);
@@ -146,7 +148,7 @@ export class FailureDetector extends EventEmitter {
     // If ping is for us, respond with pong
     if (targetNodeId === this.localNodeId) {
       if (this.config.enableLogging) {
-        console.log(`[FailureDetector] Received ping from ${sourceNodeId}, sending pong`);
+        this.logger.debug(` Received ping from ${sourceNodeId}, sending pong`);
       }
 
       const pongMessage: Message = {
@@ -199,7 +201,7 @@ export class FailureDetector extends EventEmitter {
       this.pendingPings.delete(sourceNodeId);
 
       if (this.config.enableLogging) {
-        console.log(`[FailureDetector] Received pong from ${sourceNodeId} (RTT: ${roundTripTime}ms)`);
+        this.logger.debug(` Received pong from ${sourceNodeId} (RTT: ${roundTripTime}ms)`);
       }
     }
 
@@ -216,7 +218,7 @@ export class FailureDetector extends EventEmitter {
     this.isRunning = true;
     
     if (this.config.enableLogging) {
-      console.log(`[FailureDetector] Starting failure detection for node ${this.localNodeId}`);
+      this.logger.debug(` Starting failure detection for node ${this.localNodeId}`);
     }
 
     // Start monitoring existing members
@@ -248,7 +250,7 @@ export class FailureDetector extends EventEmitter {
     this.isRunning = false;
     
     if (this.config.enableLogging) {
-      console.log(`[FailureDetector] Stopping failure detection for node ${this.localNodeId}`);
+      this.logger.debug(` Stopping failure detection for node ${this.localNodeId}`);
     }
 
     // Clear all timers
@@ -326,7 +328,7 @@ export class FailureDetector extends EventEmitter {
     }
 
     if (this.config.enableLogging) {
-      console.log(`[FailureDetector] Broadcasted heartbeat (seq: ${this.localSequenceNumber}) to ${members.length - 1} nodes`);
+      this.logger.debug(` Broadcasted heartbeat (seq: ${this.localSequenceNumber}) to ${members.length - 1} nodes`);
     }
   }
 
@@ -375,7 +377,7 @@ export class FailureDetector extends EventEmitter {
     this.lastPingTimestamps.set(nodeId, Date.now());
 
     if (this.config.enableLogging) {
-      console.log(`[FailureDetector] Sent ping to ${nodeId} (seq: ${sequenceNumber})`);
+      this.logger.debug(` Sent ping to ${nodeId} (seq: ${sequenceNumber})`);
     }
   }
 
@@ -392,7 +394,7 @@ export class FailureDetector extends EventEmitter {
       this.missedPings.set(nodeId, missedPings);
 
       if (this.config.enableLogging) {
-        console.log(`[FailureDetector] Ping timeout for ${nodeId} (missed: ${missedPings}/${this.config.maxMissedPings})`);
+        this.logger.debug(` Ping timeout for ${nodeId} (missed: ${missedPings}/${this.config.maxMissedPings})`);
       }
 
       // If too many missed pings, mark as dead
@@ -430,7 +432,7 @@ export class FailureDetector extends EventEmitter {
         });
         
         if (this.config.enableLogging) {
-          console.log(`[FailureDetector] Node ${nodeId} recovered and marked as ALIVE`);
+          this.logger.debug(` Node ${nodeId} recovered and marked as ALIVE`);
         }
         
         this.emit('node-recovered', nodeId);
@@ -466,7 +468,7 @@ export class FailureDetector extends EventEmitter {
     
     if (marked) {
       if (this.config.enableLogging) {
-        console.log(`[FailureDetector] Node ${nodeId} marked as DEAD: ${reason}`);
+        this.logger.debug(` Node ${nodeId} marked as DEAD: ${reason}`);
       }
       
       this.emit('node-failed', nodeId, reason);
@@ -487,7 +489,7 @@ export class FailureDetector extends EventEmitter {
     this.missedPings.set(nodeId, 0);
     
     if (this.config.enableLogging) {
-      console.log(`[FailureDetector] Started monitoring node ${nodeId}`);
+      this.logger.debug(` Started monitoring node ${nodeId}`);
     }
   }
 
@@ -519,7 +521,7 @@ export class FailureDetector extends EventEmitter {
     this.roundTripTimes.delete(nodeId);
     
     if (this.config.enableLogging) {
-      console.log(`[FailureDetector] Stopped monitoring node ${nodeId}`);
+      this.logger.debug(` Stopped monitoring node ${nodeId}`);
     }
   }
 
@@ -557,7 +559,7 @@ export class FailureDetector extends EventEmitter {
         this.missedHeartbeats.set(nodeId, missedHeartbeats + 1);
         
         if (this.config.enableLogging) {
-          console.log(`[FailureDetector] Node ${nodeId} marked as SUSPECT (not seen for ${timeSinceLastSeen}ms, missed: ${missedHeartbeats + 1})`);
+          this.logger.debug(` Node ${nodeId} marked as SUSPECT (not seen for ${timeSinceLastSeen}ms, missed: ${missedHeartbeats + 1})`);
         }
         
         this.emit('node-suspected', nodeId);

@@ -6,6 +6,7 @@ import { ResourceAttachmentService } from '../attachment/ResourceAttachmentServi
 import { DeliveryGuard } from '../../communication/delivery/DeliveryGuard';
 import { ResourceDistributionEngine } from '../distribution/ResourceDistributionEngine';
 import { ResourceOperation } from '../core/ResourceOperation';
+import { Logger } from '../../common/logger';
 
 
 export interface SubscriptionFilter {
@@ -41,6 +42,7 @@ export interface SubscriptionEvent {
  * Handles subscription lifecycle, event filtering, and cross-node coordination
  */
 export class ResourceSubscriptionManager extends EventEmitter {
+  private logger = Logger.create('ResourceSubscriptionManager');
   private subscriptions = new Map<string, ResourceSubscription>(); // subscriptionId -> subscription
   private clientSubscriptions = new Map<string, Set<string>>(); // clientId -> subscriptionIds
   private resourceSubscriptions = new Map<string, Set<string>>(); // resourceId -> subscriptionIds
@@ -109,7 +111,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
     // Propagate subscription to other cluster members if needed
     await this.propagateSubscriptionToCluster(subscription, 'create');
     
-    console.log(`📋 Created subscription ${subId} for client ${clientId} with filter:`, filter);
+    this.logger.info(`Created subscription ${subId} for client ${clientId} with filter:`, filter);
     this.emit('subscription:created', subscription);
     
     return subId;
@@ -120,7 +122,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
    */
   async attachConnection(connId: string, subscription: ResourceSubscription): Promise<void> {
     if (!this.attachmentService) {
-      console.warn('No attachment service configured - connection attachment skipped');
+      this.logger.warn('No attachment service configured - connection attachment skipped');
       return;
     }
 
@@ -133,9 +135,9 @@ export class ResourceSubscriptionManager extends EventEmitter {
       };
 
       await this.attachmentService.attach(connId, subscription.subscriptionId, attachmentFilter);
-      console.log(`🔗 Attached connection ${connId} to subscription ${subscription.subscriptionId}`);
+      this.logger.info(`Attached connection ${connId} to subscription ${subscription.subscriptionId}`);
     } catch (error) {
-      console.error(`Failed to attach connection ${connId} to subscription:`, error);
+      this.logger.error(`Failed to attach connection ${connId} to subscription:`, error);
     }
   }
 
@@ -169,7 +171,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
     // Propagate to cluster
     await this.propagateSubscriptionToCluster(subscription, 'delete');
     
-    console.log(`🗑️ Cancelled subscription ${subscriptionId} for client ${subscription.clientId}`);
+    this.logger.info(`Cancelled subscription ${subscriptionId} for client ${subscription.clientId}`);
     this.emit('subscription:cancelled', subscription);
     
     return true;
@@ -337,7 +339,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
             operation.correlationId
           );
         } catch (error) {
-          console.error(`Failed to deliver remote operation via attachment service:`, error);
+          this.logger.error('Failed to deliver remote operation via attachment service:', error);
           this.emit('subscription:event', event);
           this.emit(`subscription:${subscription.subscriptionId}`, event);
         }
@@ -346,8 +348,8 @@ export class ResourceSubscriptionManager extends EventEmitter {
         this.emit(`subscription:${subscription.subscriptionId}`, event);
       }
 
-      console.log(
-        `📨 [Remote] Notified subscription ${subscription.subscriptionId} of ${eventType} for resource ${payload.resourceId} from node ${operation.originNodeId}`
+      this.logger.info(
+        `[Remote] Notified subscription ${subscription.subscriptionId} of ${eventType} for resource ${payload.resourceId} from node ${operation.originNodeId}`
       );
     }
   }
@@ -400,7 +402,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
             `corr-${operation.opId}`
           );
         } catch (error) {
-          console.error(`Failed to deliver via attachment service:`, error);
+          this.logger.error('Failed to deliver via attachment service:', error);
           // Fallback to event emission
           this.emit('subscription:event', event);
           this.emit(`subscription:${subscription.subscriptionId}`, event);
@@ -411,7 +413,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
         this.emit(`subscription:${subscription.subscriptionId}`, event);
       }
       
-      console.log(`📨 Notified subscription ${subscription.subscriptionId} of ${eventType} for resource ${resource.resourceId}`);
+      this.logger.info(`Notified subscription ${subscription.subscriptionId} of ${eventType} for resource ${resource.resourceId}`);
     }
   }
 
@@ -549,7 +551,7 @@ export class ResourceSubscriptionManager extends EventEmitter {
         members.map(m => m.id)
       );
     } catch (error) {
-      console.error('Failed to propagate subscription to cluster:', error);
+      this.logger.error('Failed to propagate subscription to cluster:', error);
     }
   }
 
@@ -595,12 +597,12 @@ export class ResourceSubscriptionManager extends EventEmitter {
     }
     
     for (const subscriptionId of expiredSubscriptions) {
-      console.log(`🧹 Cleaning up inactive subscription: ${subscriptionId}`);
+      this.logger.info(`Cleaning up inactive subscription: ${subscriptionId}`);
       this.unsubscribe(subscriptionId);
     }
     
     if (expiredSubscriptions.length > 0) {
-      console.log(`🧹 Cleaned up ${expiredSubscriptions.length} inactive subscriptions`);
+      this.logger.info(`Cleaned up ${expiredSubscriptions.length} inactive subscriptions`);
     }
   }
 

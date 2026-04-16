@@ -11,6 +11,7 @@ import { CausalOrderingEngine } from '../../communication/ordering/CausalOrderin
 import { ResourceAttachmentService } from '../attachment/ResourceAttachmentService';
 import { NodeRoute } from '../distribution/ClusterFanoutRouter';
 import { DeliveryTracker } from './DeliveryTracker';
+import { Logger } from '../../common/logger';
 
 
 /**
@@ -20,6 +21,7 @@ import { DeliveryTracker } from './DeliveryTracker';
  * using your existing cluster infrastructure including gossip protocols.
  */
 export class ResourceDistributionEngine extends EventEmitter {
+  private logger = Logger.create('ResourceDistributionEngine');
   private resourceRegistry: ResourceRegistry;
   private clusterManager: IClusterNode;
   private deltaSyncManager: StateDeltaManager;
@@ -87,14 +89,14 @@ export class ResourceDistributionEngine extends EventEmitter {
     if (this.isRunning) return;
     
     this.isRunning = true;
-    console.log(`✅ [ResourceDistributionEngine] Started for node ${this.clusterManager.localNodeId}`);
+    this.logger.info(`Started for node ${this.clusterManager.localNodeId}`);
   }
 
   async stop(): Promise<void> {
     if (!this.isRunning) return;
     
     this.isRunning = false;
-    console.log(`🛑 [ResourceDistributionEngine] Stopped`);
+    this.logger.info('Stopped');
   }
 
   private setupEventHandlers(): void {
@@ -165,7 +167,7 @@ export class ResourceDistributionEngine extends EventEmitter {
       const members = this.clusterManager.getAliveMembers()
         .filter(member => member.id !== this.clusterManager.localNodeId);
 
-      console.log(`📡 [ResourceDistributionEngine] Distributing ${resource.resourceType} ${resource.resourceId} (${operation}) to ${members.length} nodes via StateDelta + Gossip`);
+      this.logger.info(`Distributing ${resource.resourceType} ${resource.resourceId} (${operation}) to ${members.length} nodes via StateDelta + Gossip`);
 
       // Send StateDelta to all cluster members via custom messages
       await this.clusterManager.sendCustomMessage(
@@ -176,7 +178,7 @@ export class ResourceDistributionEngine extends EventEmitter {
 
       this.emit('resource:distributed', resource, members.map(m => m.id));
     } catch (error) {
-      console.error(`❌ [ResourceDistributionEngine] Failed to distribute resource ${resource.resourceId}:`, error);
+      this.logger.error(`Failed to distribute resource ${resource.resourceId}:`, error);
     }
   }
 
@@ -190,7 +192,7 @@ export class ResourceDistributionEngine extends EventEmitter {
         return;
       }
 
-      console.log(`📥 [ResourceDistributionEngine] Received StateDelta from ${sourceNodeId} with ${delta.resources.length} resource operations`);
+      this.logger.info(`Received StateDelta from ${sourceNodeId} with ${delta.resources.length} resource operations`);
 
       // Process each resource operation in the delta
       for (const resourceOp of delta.resources) {
@@ -199,7 +201,7 @@ export class ResourceDistributionEngine extends EventEmitter {
 
         // Check for conflicts
         if (existingResource && resourceOp.resource && this.detectResourceConflict(existingResource, resourceOp.resource)) {
-          console.log(`⚠️ [ResourceDistributionEngine] Detected resource conflict for ${resourceId}`);
+          this.logger.warn(`Detected resource conflict for ${resourceId}`);
           await this.handleResourceConflict(resourceId, existingResource, resourceOp.resource, sourceNodeId);
         } else {
           // No conflict, use processIncomingOperation for dedup/causal ordering
@@ -233,7 +235,7 @@ export class ResourceDistributionEngine extends EventEmitter {
         }
       }
     } catch (error) {
-      console.error(`❌ [ResourceDistributionEngine] Failed to handle incoming StateDelta:`, error);
+      this.logger.error('Failed to handle incoming StateDelta:', error);
     }
   }
 
@@ -280,7 +282,7 @@ export class ResourceDistributionEngine extends EventEmitter {
       // Resolve the conflict using StateReconciler
       const resolvedResource = await this.stateReconciler.resolveResourceConflict(conflict, 'last-writer-wins');
 
-      console.log(`✅ [ResourceDistributionEngine] Resolved conflict for ${resourceId} using last-writer-wins strategy`);
+      this.logger.info(`Resolved conflict for ${resourceId} using last-writer-wins strategy`);
 
       // Apply the resolved resource
       this.resourceStore.set(resourceId, resolvedResource);
@@ -293,7 +295,7 @@ export class ResourceDistributionEngine extends EventEmitter {
 
       this.emit('resource:conflict-resolved', resolvedResource, conflict);
     } catch (error) {
-      console.error(`❌ [ResourceDistributionEngine] Failed to resolve conflict for ${resourceId}:`, error);
+      this.logger.error(`Failed to resolve conflict for ${resourceId}:`, error);
     } finally {
       this.isApplyingRemoteOperation = false;
     }
@@ -310,7 +312,7 @@ export class ResourceDistributionEngine extends EventEmitter {
         case 'modify':
           if (resourceOp.resource) {
             this.resourceStore.set(resourceOp.resourceId, resourceOp.resource);
-            console.log(`📥 [ResourceDistributionEngine] Applied ${resourceOp.operation} for ${resourceOp.resource.resourceType} ${resourceOp.resourceId} from ${sourceNodeId}`);
+            this.logger.info(`Applied ${resourceOp.operation} for ${resourceOp.resource.resourceType} ${resourceOp.resourceId} from ${sourceNodeId}`);
 
             // CRITICAL FIX: Add remote resource to local EntityRegistry
             await this.addRemoteResourceToEntityRegistry(resourceOp.resource, resourceOp.operation);
@@ -323,7 +325,7 @@ export class ResourceDistributionEngine extends EventEmitter {
           break;
         case 'delete':
           this.resourceStore.delete(resourceOp.resourceId);
-          console.log(`📥 [ResourceDistributionEngine] Applied delete for ${resourceOp.resourceId} from ${sourceNodeId}`);
+          this.logger.info(`Applied delete for ${resourceOp.resourceId} from ${sourceNodeId}`);
 
           // CRITICAL FIX: Remove remote resource from EntityRegistry
           await this.removeRemoteResourceFromEntityRegistry(resourceOp.resourceId);
@@ -333,7 +335,7 @@ export class ResourceDistributionEngine extends EventEmitter {
           break;
       }
     } catch (error) {
-      console.error(`❌ [ResourceDistributionEngine] Failed to apply resource operation:`, error);
+      this.logger.error('Failed to apply resource operation:', error);
     } finally {
       this.isApplyingRemoteOperation = false;
     }
@@ -360,7 +362,7 @@ export class ResourceDistributionEngine extends EventEmitter {
     try {
       if (this.resourceStore.size === 0) return;
 
-      console.log(`🔄 [ResourceDistributionEngine] Syncing ${this.resourceStore.size} resources with new node ${nodeId} via StateDelta`);
+      this.logger.info(`Syncing ${this.resourceStore.size} resources with new node ${nodeId} via StateDelta`);
 
       // Send each resource as a StateDelta to the new node
       for (const resource of this.resourceStore.values()) {
@@ -377,7 +379,7 @@ export class ResourceDistributionEngine extends EventEmitter {
         );
       }
     } catch (error) {
-      console.error(`❌ [ResourceDistributionEngine] Failed to sync resources with ${nodeId}:`, error);
+      this.logger.error(`Failed to sync resources with ${nodeId}:`, error);
     }
   }
 
@@ -422,14 +424,14 @@ export class ResourceDistributionEngine extends EventEmitter {
       if (operation === 'add' || !existingEntity) {
         // Create a new entity record for the remote resource
         await this.resourceRegistry.createRemoteResource(resource);
-        console.log(`📥 [ResourceDistributionEngine] Added remote resource ${resource.resourceId} to EntityRegistry`);
+        this.logger.info(`Added remote resource ${resource.resourceId} to EntityRegistry`);
       } else if (operation === 'modify' && existingEntity) {
         // Update existing entity with new resource data
         await this.resourceRegistry.updateResource(resource.resourceId, resource);
-        console.log(`📥 [ResourceDistributionEngine] Updated remote resource ${resource.resourceId} in EntityRegistry`);
+        this.logger.info(`Updated remote resource ${resource.resourceId} in EntityRegistry`);
       }
     } catch (error) {
-      console.error(`❌ [ResourceDistributionEngine] Failed to add remote resource ${resource.resourceId} to EntityRegistry:`, error);
+      this.logger.error(`Failed to add remote resource ${resource.resourceId} to EntityRegistry:`, error);
       // Continue execution - resource still exists in resourceStore cache
     }
   }
@@ -442,10 +444,10 @@ export class ResourceDistributionEngine extends EventEmitter {
       const existingResource = await this.resourceRegistry.getResource(resourceId);
       if (existingResource) {
         await this.resourceRegistry.removeResource(resourceId);
-        console.log(`📥 [ResourceDistributionEngine] Removed remote resource ${resourceId} from EntityRegistry`);
+        this.logger.info(`Removed remote resource ${resourceId} from EntityRegistry`);
       }
     } catch (error) {
-      console.error(`❌ [ResourceDistributionEngine] Failed to remove remote resource ${resourceId} from EntityRegistry:`, error);
+      this.logger.error(`Failed to remove remote resource ${resourceId} from EntityRegistry:`, error);
       // Continue execution - resource removed from resourceStore cache anyway
     }
   }
@@ -487,7 +489,7 @@ export class ResourceDistributionEngine extends EventEmitter {
       if (this.operationDeduplicator) {
         const isDuplicate = this.operationDeduplicator.isDuplicate(operation);
         if (isDuplicate) {
-          console.log(`🔄 Duplicate operation ${operation.opId} suppressed`);
+          this.logger.debug(`Duplicate operation ${operation.opId} suppressed`);
           return false;
         }
         
@@ -514,7 +516,7 @@ export class ResourceDistributionEngine extends EventEmitter {
             operation.correlationId
           );
         } catch (error) {
-          console.error(`Failed to deliver operation ${operation.opId} locally:`, error);
+          this.logger.error(`Failed to deliver operation ${operation.opId} locally:`, error);
         }
       }
 
@@ -536,11 +538,11 @@ export class ResourceDistributionEngine extends EventEmitter {
           );
         } catch (ackError) {
           // ACK is best-effort; don't fail the operation if the ACK can't be sent
-          console.warn(`[ResourceDistributionEngine] Failed to send ACK for ${operation.opId}:`, ackError);
+          this.logger.warn(`Failed to send ACK for ${operation.opId}:`, ackError);
         }
       }
 
-      console.log(`✅ Successfully processed operation ${operation.opId}`);
+      this.logger.info(`Successfully processed operation ${operation.opId}`);
       return true;
 
     } catch (error) {
@@ -562,7 +564,7 @@ export class ResourceDistributionEngine extends EventEmitter {
         }
       }
 
-      console.error(`Failed to process operation ${operation.opId}:`, error);
+      this.logger.error(`Failed to process operation ${operation.opId}:`, error);
       return false;
     }
   }
@@ -576,7 +578,7 @@ export class ResourceDistributionEngine extends EventEmitter {
     switch (type) {
       case 'CREATE':
         this.resourceStore.set(resourceId, payload);
-        console.log(`📝 Applied CREATE operation for resource ${resourceId}`);
+        this.logger.debug(`Applied CREATE operation for resource ${resourceId}`);
         break;
 
       case 'UPDATE':
@@ -584,17 +586,17 @@ export class ResourceDistributionEngine extends EventEmitter {
           const existing = this.resourceStore.get(resourceId)!;
           const updated = { ...existing, ...payload };
           this.resourceStore.set(resourceId, updated);
-          console.log(`📝 Applied UPDATE operation for resource ${resourceId}`);
+          this.logger.debug(`Applied UPDATE operation for resource ${resourceId}`);
         }
         break;
 
       case 'DELETE':
         this.resourceStore.delete(resourceId);
-        console.log(`📝 Applied DELETE operation for resource ${resourceId}`);
+        this.logger.debug(`Applied DELETE operation for resource ${resourceId}`);
         break;
 
       default:
-        console.warn(`Unknown operation type: ${type}`);
+        this.logger.warn(`Unknown operation type: ${type}`);
     }
   }
 
@@ -621,12 +623,12 @@ export class ResourceDistributionEngine extends EventEmitter {
               { placement: route.resourcePlacement, nodeId: route.nodeId }
             );
           } catch (error) {
-            console.error(`Failed to send operation to node ${route.nodeId}:`, error);
+            this.logger.error(`Failed to send operation to node ${route.nodeId}:`, error);
           }
         }
       }
     } catch (error) {
-      console.error('Failed to send remote operations:', error);
+      this.logger.error('Failed to send remote operations:', error);
       throw error;
     }
   }
@@ -658,9 +660,9 @@ export class ResourceDistributionEngine extends EventEmitter {
         correlationId,
         ...metadata
       };
-      console.log('[ResourceDistributionEngine]', JSON.stringify(logData));
+      this.logger.info(JSON.stringify(logData));
     } else {
-      console.log('[ResourceDistributionEngine]', message);
+      this.logger.info(message);
     }
   }
 }

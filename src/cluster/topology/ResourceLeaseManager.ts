@@ -1,4 +1,5 @@
 import type { ResourceOperation } from '../../resources/core/ResourceOperation';
+import { Logger } from '../../common/logger';
 
 
 /**
@@ -36,6 +37,7 @@ export interface LeaseConfig {
  * Uses Compare-And-Swap operations for atomic lease management
  */
 export class EtcdResourceLeaseManager implements ResourceLeaseManager {
+  private logger = Logger.create('ResourceLeaseManager');
   private config: LeaseConfig;
   private etcdClient: any; // EtcdClient
   private nodeId: string;
@@ -81,16 +83,16 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
         this.activeLeases.set(resourceId, leaseRecord);
         this.scheduleRenewal(resourceId, newTerm);
         
-        console.log(`🔒 Acquired lease for resource ${resourceId}, term ${newTerm}`);
+        this.logger.info(`Acquired lease for resource ${resourceId}, term ${newTerm}`);
         return { term: newTerm, fenced: false };
       } else {
         // Another node acquired the lease
         const activeLease = await this.getCurrentLease(resourceId);
-        console.log(`🚫 Failed to acquire lease for resource ${resourceId}, active term ${activeLease?.term}`);
+        this.logger.warn(`Failed to acquire lease for resource ${resourceId}, active term ${activeLease?.term}`);
         return { term: activeLease?.term || 0, fenced: true };
       }
     } catch (error) {
-      console.error(`❌ Error acquiring lease for resource ${resourceId}:`, error);
+      this.logger.error(`Error acquiring lease for resource ${resourceId}:`, error);
       throw error;
     }
   }
@@ -98,7 +100,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
   async renew(resourceId: string, term: number): Promise<boolean> {
     const lease = this.activeLeases.get(resourceId);
     if (!lease || lease.term !== term) {
-      console.warn(`⚠️ Cannot renew lease for resource ${resourceId}, term mismatch`);
+      this.logger.warn(`Cannot renew lease for resource ${resourceId}, term mismatch`);
       return false;
     }
 
@@ -117,16 +119,16 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
       
       if (success) {
         this.activeLeases.set(resourceId, renewedLease);
-        console.log(`🔄 Renewed lease for resource ${resourceId}, term ${term}, renew count ${renewedLease.renewCount}`);
+        this.logger.debug(`Renewed lease for resource ${resourceId}, term ${term}, renew count ${renewedLease.renewCount}`);
         return true;
       } else {
-        console.warn(`🚫 Failed to renew lease for resource ${resourceId}, term ${term} - lease lost`);
+        this.logger.warn(`Failed to renew lease for resource ${resourceId}, term ${term} - lease lost`);
         this.activeLeases.delete(resourceId);
         this.clearRenewalTimer(resourceId);
         return false;
       }
     } catch (error) {
-      console.error(`❌ Error renewing lease for resource ${resourceId}:`, error);
+      this.logger.error(`Error renewing lease for resource ${resourceId}:`, error);
       return false;
     }
   }
@@ -134,7 +136,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
   async release(resourceId: string, term: number): Promise<void> {
     const lease = this.activeLeases.get(resourceId);
     if (!lease || lease.term !== term) {
-      console.warn(`⚠️ Cannot release lease for resource ${resourceId}, term mismatch`);
+      this.logger.warn(`Cannot release lease for resource ${resourceId}, term mismatch`);
       return;
     }
 
@@ -145,9 +147,9 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
       this.activeLeases.delete(resourceId);
       this.clearRenewalTimer(resourceId);
       
-      console.log(`🔓 Released lease for resource ${resourceId}, term ${term}`);
+      this.logger.info(`Released lease for resource ${resourceId}, term ${term}`);
     } catch (error) {
-      console.error(`❌ Error releasing lease for resource ${resourceId}:`, error);
+      this.logger.error(`Error releasing lease for resource ${resourceId}:`, error);
       throw error;
     }
   }
@@ -157,7 +159,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
       const lease = await this.getCurrentLease(resourceId);
       return lease?.term || 0;
     } catch (error) {
-      console.error(`❌ Error getting current lease for resource ${resourceId}:`, error);
+      this.logger.error(`Error getting current lease for resource ${resourceId}:`, error);
       return 0;
     }
   }
@@ -172,7 +174,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
         
         // Check if lease is expired
         if (lease.expiresAt <= Date.now()) {
-          console.log(`⏰ Lease for resource ${resourceId} expired, term ${lease.term}`);
+          this.logger.debug(`Lease for resource ${resourceId} expired, term ${lease.term}`);
           return null;
         }
         
@@ -180,7 +182,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
       }
       return null;
     } catch (error) {
-      console.error(`❌ Error getting current lease for ${resourceId}:`, error);
+      this.logger.error(`Error getting current lease for ${resourceId}:`, error);
       return null;
     }
   }
@@ -198,7 +200,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
       
       return success;
     } catch (error) {
-      console.error(`❌ Atomic acquire failed for key ${key}:`, error);
+      this.logger.error(`Atomic acquire failed for key ${key}:`, error);
       return false;
     }
   }
@@ -214,7 +216,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
       const success = await this.etcdClient.put(key, JSON.stringify(renewedLease));
       return success;
     } catch (error) {
-      console.error(`❌ Atomic renew failed for key ${key}:`, error);
+      this.logger.error(`Atomic renew failed for key ${key}:`, error);
       return false;
     }
   }
@@ -227,7 +229,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
         await this.etcdClient.delete(key);
       }
     } catch (error) {
-      console.error(`❌ Atomic release failed for key ${key}:`, error);
+      this.logger.error(`Atomic release failed for key ${key}:`, error);
       throw error;
     }
   }
@@ -269,7 +271,7 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
 
   // Cleanup method for graceful shutdown
   async shutdown(): Promise<void> {
-    console.log('🛑 Shutting down ResourceLeaseManager...');
+    this.logger.info('Shutting down ResourceLeaseManager...');
     
     // Clear all renewal timers
     for (const timer of this.renewalTimers.values()) {
@@ -280,11 +282,11 @@ export class EtcdResourceLeaseManager implements ResourceLeaseManager {
     // Release all active leases
     const releasePromises = Array.from(this.activeLeases.entries()).map(([resourceId, lease]) =>
       this.release(resourceId, lease.term).catch(error => 
-        console.error(`Error releasing lease for ${resourceId}:`, error)
+        this.logger.error(`Error releasing lease for ${resourceId}:`, error)
       )
     );
     
     await Promise.all(releasePromises);
-    console.log('✅ ResourceLeaseManager shutdown complete');
+    this.logger.info('ResourceLeaseManager shutdown complete');
   }
 }

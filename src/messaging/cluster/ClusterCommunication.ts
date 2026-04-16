@@ -163,7 +163,7 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
     }
 
     try {
-      const clusterMessage = message.data as any;
+      const clusterMessage = message.data;
       
       // Verify message signature if present
       if (this.hasSignature(clusterMessage)) {

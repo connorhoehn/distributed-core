@@ -3,6 +3,23 @@
  * Provides configurable logging for different components
  */
 
+export enum LogLevel { DEBUG, INFO, WARN, ERROR, NONE }
+
+/**
+ * Structured logger with configurable level and component context.
+ * Intended to replace raw console.log/warn/error throughout the codebase.
+ */
+export class Logger {
+  constructor(private context: string, private level: LogLevel = LogLevel.INFO) {}
+
+  debug(msg: string, ...args: any[]) { if (this.level <= LogLevel.DEBUG) console.log(`[DEBUG][${this.context}] ${msg}`, ...args); }
+  info(msg: string, ...args: any[]) { if (this.level <= LogLevel.INFO) console.log(`[INFO][${this.context}] ${msg}`, ...args); }
+  warn(msg: string, ...args: any[]) { if (this.level <= LogLevel.WARN) console.warn(`[WARN][${this.context}] ${msg}`, ...args); }
+  error(msg: string, ...args: any[]) { if (this.level <= LogLevel.ERROR) console.error(`[ERROR][${this.context}] ${msg}`, ...args); }
+
+  static create(context: string, level?: LogLevel): Logger { return new Logger(context, level); }
+}
+
 export interface LoggingConfig {
   enableFrameworkLogs?: boolean;
   enableCoordinatorLogs?: boolean;

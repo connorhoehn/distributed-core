@@ -55,13 +55,12 @@ describe('Cross-Adapter Integration Tests', () => {
 
       const targetNode: NodeId = { id: 'non-existent', address: '127.0.0.1', port: 9999 };
       
-      // Should handle failed sends gracefully
-      try {
-        await httpAdapter.send(testMessage, targetNode);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      // Should handle failed sends gracefully (either succeeds or throws a defined error)
+      const result = await httpAdapter.send(testMessage, targetNode).then(
+        (res) => ({ success: true, value: res }),
+        (err) => { expect(err).toBeDefined(); return { success: false }; }
+      );
+      expect(result).toBeDefined();
       
       // Stats should be tracked regardless of success/failure
       const stats = httpAdapter.getStats();
@@ -103,12 +102,11 @@ describe('Cross-Adapter Integration Tests', () => {
       };
 
       // WebSocket send without connections should handle gracefully
-      try {
-        await wsAdapter.send(testMessage as any);
-        expect(true).toBe(true);
-      } catch (error) {
-        expect(error).toBeDefined();
-      }
+      const result = await wsAdapter.send(testMessage as any).then(
+        (res) => ({ success: true, value: res }),
+        (err) => { expect(err).toBeDefined(); return { success: false }; }
+      );
+      expect(result).toBeDefined();
       
       // Check connected nodes
       const connectedNodes = wsAdapter.getConnectedNodes();

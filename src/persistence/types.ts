@@ -112,4 +112,4 @@ export interface CompactionResult {
   segmentsProcessed: number;
 }
 
-export type CompactionStrategyType = 'leveled' | 'size-tiered' | 'time-based' | 'vacuum';
+export type CompactionStrategyType = 'leveled' | 'size-tiered' | 'time-based' | 'vacuum-based';

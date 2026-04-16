@@ -11,5 +11,3 @@ export const defaultOperationsConfig: DistributedOperationsConfig = {
   retryAttempts: 3,
   batchSize: 10
 };
-export const DistributedOperationsConfigFactory = undefined; // TODO: Implement DistributedOperationsConfigFactory
-export const DEFAULT_DISTRIBUTED_OPS_CONFIG = undefined; // TODO: Implement DEFAULT_DISTRIBUTED_OPS_CONFIG

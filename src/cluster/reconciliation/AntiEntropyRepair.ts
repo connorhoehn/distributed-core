@@ -1,5 +1,6 @@
 import type { ResourceOperation } from '../../resources/core/ResourceOperation';
 import type { IResourceDistributionEngine } from '../types';
+import { Logger } from '../../common/logger';
 
 
 // Simple interface for state fingerprinting
@@ -42,6 +43,7 @@ export interface RepairSession {
  * Integrates with existing ResourceDistributionEngine for safe operation replay
  */
 export class AntiEntropyRepairManager implements AntiEntropyRepair {
+  private logger = Logger.create('AntiEntropyRepairManager');
   private config: RepairConfig;
   private distributionEngine: IResourceDistributionEngine;
   private fingerprinter: StateFingerprint;
@@ -75,7 +77,7 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
 
   async diff(resourceId: string): Promise<{ missingOps: string[] }> {
     try {
-      console.log(`🔍 Starting divergence detection for resource ${resourceId}`);
+      this.logger.info(`Starting divergence detection for resource ${resourceId}`);
 
       // Get our local fingerprint
       const localFingerprint = await this.fingerprinter.compute(resourceId);
@@ -90,17 +92,17 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
         peerFingerprints
       );
 
-      console.log(`📊 Divergence analysis for ${resourceId}: ${missingOps.length} missing operations`);
+      this.logger.info(`Divergence analysis for ${resourceId}: ${missingOps.length} missing operations`);
       return { missingOps };
     } catch (error) {
-      console.error(`❌ Error during divergence detection for ${resourceId}:`, error);
+      this.logger.error(`Error during divergence detection for ${resourceId}:`, error);
       throw error;
     }
   }
 
   async fetch(resourceId: string, opIds: string[]): Promise<ResourceOperation[]> {
     try {
-      console.log(`📥 Fetching ${opIds.length} operations for resource ${resourceId}`);
+      this.logger.info(`Fetching ${opIds.length} operations for resource ${resourceId}`);
 
       const operations: ResourceOperation[] = [];
       const batches = this.batchOpIds(opIds, this.config.maxMissingOpsPerBatch);
@@ -110,10 +112,10 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
         operations.push(...batchOps);
       }
 
-      console.log(`✅ Fetched ${operations.length} operations for resource ${resourceId}`);
+      this.logger.info(`Fetched ${operations.length} operations for resource ${resourceId}`);
       return operations;
     } catch (error) {
-      console.error(`❌ Error fetching operations for ${resourceId}:`, error);
+      this.logger.error(`Error fetching operations for ${resourceId}:`, error);
       throw error;
     }
   }
@@ -141,14 +143,14 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
     this.activeSessions.set(resourceId, session);
 
     try {
-      console.log(`🔧 Starting repair for resource ${resourceId}`);
+      this.logger.info(`Starting repair for resource ${resourceId}`);
 
       // Step 1: Identify missing operations
       const diffResult = await this.diff(resourceId);
       session.missingOps = diffResult.missingOps;
 
       if (session.missingOps.length === 0) {
-        console.log(`✅ No missing operations for resource ${resourceId} - repair complete`);
+        this.logger.info(`No missing operations for resource ${resourceId} - repair complete`);
         session.status = 'completed';
         return { applied: 0 };
       }
@@ -162,12 +164,12 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
       // Step 4: Verify repair completeness
       await this.verifyRepairCompleteness(resourceId, session);
 
-      console.log(`✅ Repair complete for resource ${resourceId}: applied ${session.appliedCount} operations`);
+      this.logger.info(`Repair complete for resource ${resourceId}: applied ${session.appliedCount} operations`);
       session.status = 'completed';
       
       return { applied: session.appliedCount };
     } catch (error) {
-      console.error(`❌ Repair failed for resource ${resourceId}:`, error);
+      this.logger.error(`Repair failed for resource ${resourceId}:`, error);
       session.status = 'failed';
       throw error;
     } finally {
@@ -193,14 +195,14 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
           });
           fingerprints.set(nodeId, fingerprint);
         } catch (error) {
-          console.warn(`⚠️ Failed to fetch fingerprint from node ${nodeId}:`, error);
+          this.logger.warn(`Failed to fetch fingerprint from node ${nodeId}:`, error);
         }
       });
 
       await Promise.all(fetchPromises);
       return fingerprints;
     } catch (error) {
-      console.error(`❌ Error fetching peer fingerprints for ${resourceId}:`, error);
+      this.logger.error(`Error fetching peer fingerprints for ${resourceId}:`, error);
       return fingerprints;
     }
   }
@@ -239,7 +241,7 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
           return response.operations as ResourceOperation[];
         }
       } catch (error) {
-        console.warn(`⚠️ Failed to fetch operations from node ${nodeId}:`, error);
+        this.logger.warn(`Failed to fetch operations from node ${nodeId}:`, error);
         // Continue to next node
       }
     }
@@ -261,7 +263,7 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
           appliedCount++;
         }
       } catch (error) {
-        console.error(`❌ Error applying operation ${op.opId} during repair:`, error);
+        this.logger.error(`Error applying operation ${op.opId} during repair:`, error);
         // Continue with other operations rather than failing entire repair
       }
     }
@@ -304,9 +306,9 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
     const postRepairDiff = await this.diff(resourceId);
     
     if (postRepairDiff.missingOps.length > 0) {
-      console.warn(`⚠️ Repair incomplete for ${resourceId}: ${postRepairDiff.missingOps.length} operations still missing`);
+      this.logger.warn(`Repair incomplete for ${resourceId}: ${postRepairDiff.missingOps.length} operations still missing`);
     } else {
-      console.log(`✅ Repair verification passed for ${resourceId}`);
+      this.logger.info(`Repair verification passed for ${resourceId}`);
     }
   }
 
@@ -316,7 +318,7 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
     try {
       return await (this.clusterCommunication as any).getResourceNodes(resourceId);
     } catch (error) {
-      console.error(`❌ Error getting resource nodes for ${resourceId}:`, error);
+      this.logger.error(`Error getting resource nodes for ${resourceId}:`, error);
       return [];
     }
   }
@@ -333,10 +335,10 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
     const sync = async () => {
       try {
         // Periodic fingerprint synchronization to detect divergence early
-        console.log('🔄 Running periodic fingerprint sync...');
+        this.logger.debug('Running periodic fingerprint sync...');
         // Implementation would sync fingerprints across cluster
       } catch (error) {
-        console.error('❌ Error during fingerprint sync:', error);
+        this.logger.error('Error during fingerprint sync:', error);
       }
     };
 
@@ -346,18 +348,18 @@ export class AntiEntropyRepairManager implements AntiEntropyRepair {
 
   // Graceful shutdown
   async shutdown(): Promise<void> {
-    console.log('🛑 Shutting down AntiEntropyRepairManager...');
+    this.logger.info('Shutting down AntiEntropyRepairManager...');
     
     // Wait for active repairs to complete or timeout
     const shutdownPromises = Array.from(this.activeSessions.keys()).map(async (resourceId) => {
       const session = this.activeSessions.get(resourceId);
       if (session && session.status === 'running') {
-        console.log(`⏳ Waiting for repair to complete: ${resourceId}`);
+        this.logger.info(`Waiting for repair to complete: ${resourceId}`);
         // In production, you might want to implement graceful cancellation
       }
     });
 
     await Promise.all(shutdownPromises);
-    console.log('✅ AntiEntropyRepairManager shutdown complete');
+    this.logger.info('AntiEntropyRepairManager shutdown complete');
   }
 }

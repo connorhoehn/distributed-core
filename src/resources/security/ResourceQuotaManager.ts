@@ -12,6 +12,7 @@
  */
 
 import { ResourceOperation } from '../core/ResourceOperation';
+import { Logger } from '../../common/logger';
 
 
 export interface ResourceQuotas {
@@ -64,6 +65,7 @@ interface RateTracker {
 }
 
 export class ResourceQuotaManager {
+  private logger = Logger.create('ResourceQuotaManager');
   private config: ResourceQuotas;
   private metrics: QuotaMetrics;
   
@@ -253,7 +255,7 @@ export class ResourceQuotaManager {
     this.allConnections.delete(connectionId);
 
     this.updateMetrics();
-    console.log(`🧹 Cleaned up quotas for disconnected connection ${connectionId}`);
+    this.logger.info(`Cleaned up quotas for disconnected connection ${connectionId}`);
   }
 
   /**
@@ -263,7 +265,7 @@ export class ResourceQuotaManager {
     switch (this.config.subscriberEnforcement) {
       case 'reject':
         violation.action = 'rejected';
-        console.warn(`🚫 Subscriber limit exceeded for resource ${resourceId}: rejecting new subscription`);
+        this.logger.warn(`Subscriber limit exceeded for resource ${resourceId}: rejecting new subscription`);
         return false;
 
       case 'shed-oldest':
@@ -273,14 +275,14 @@ export class ResourceQuotaManager {
           const oldestSubscriber = subscribers.values().next().value;
           this.recordUnsubscription(oldestSubscriber!, resourceId);
           violation.action = 'shed';
-          console.warn(`📤 Subscriber limit exceeded for resource ${resourceId}: shed oldest subscriber ${oldestSubscriber}`);
+          this.logger.warn(`Subscriber limit exceeded for resource ${resourceId}: shed oldest subscriber ${oldestSubscriber}`);
         }
         return true;
 
       case 'throttle':
         // Accept but mark for throttling (implementation depends on downstream systems)
         violation.action = 'throttled';
-        console.warn(`⏸️ Subscriber limit exceeded for resource ${resourceId}: accepting with throttling`);
+        this.logger.warn(`Subscriber limit exceeded for resource ${resourceId}: accepting with throttling`);
         return true;
 
       default:
@@ -295,17 +297,17 @@ export class ResourceQuotaManager {
     switch (this.config.rateEnforcement) {
       case 'reject':
         violation.action = 'rejected';
-        console.warn(`🚫 Rate limit exceeded for resource ${resourceId} (${type}): rejecting operation`);
+        this.logger.warn(`Rate limit exceeded for resource ${resourceId} (${type}): rejecting operation`);
         return false;
 
       case 'throttle':
         violation.action = 'throttled';
-        console.warn(`⏸️ Rate limit exceeded for resource ${resourceId} (${type}): throttling enabled`);
+        this.logger.warn(`Rate limit exceeded for resource ${resourceId} (${type}): throttling enabled`);
         return true;
 
       case 'queue':
         violation.action = 'throttled';
-        console.warn(`📋 Rate limit exceeded for resource ${resourceId} (${type}): queuing operation`);
+        this.logger.warn(`Rate limit exceeded for resource ${resourceId} (${type}): queuing operation`);
         return true;
 
       default:
@@ -320,7 +322,7 @@ export class ResourceQuotaManager {
     switch (this.config.connectionEnforcement) {
       case 'reject':
         violation.action = 'rejected';
-        console.warn(`🚫 Connection limit exceeded: rejecting new connection ${connectionId}`);
+        this.logger.warn(`Connection limit exceeded: rejecting new connection ${connectionId}`);
         return false;
 
       case 'close-oldest':
@@ -329,7 +331,7 @@ export class ResourceQuotaManager {
           const oldestConnection = this.allConnections.values().next().value;
           this.handleConnectionDisconnect(oldestConnection!);
           violation.action = 'closed';
-          console.warn(`🔌 Connection limit exceeded: closed oldest connection ${oldestConnection}`);
+          this.logger.warn(`Connection limit exceeded: closed oldest connection ${oldestConnection}`);
         }
         return true;
 
@@ -343,7 +345,7 @@ export class ResourceQuotaManager {
    */
   private enforceConnectionResourceLimit(connectionId: string, violation: QuotaViolation): boolean {
     violation.action = 'rejected';
-    console.warn(`🚫 Per-connection resource limit exceeded for ${connectionId}: rejecting subscription`);
+    this.logger.warn(`Per-connection resource limit exceeded for ${connectionId}: rejecting subscription`);
     return false;
   }
 
@@ -499,7 +501,7 @@ export class ResourceQuotaManager {
    */
   updateConfig(newConfig: Partial<ResourceQuotas>): void {
     this.config = { ...this.config, ...newConfig };
-    console.log('🔧 Updated ResourceQuotaManager configuration');
+    this.logger.info('Updated ResourceQuotaManager configuration');
   }
 
   /**
@@ -514,6 +516,6 @@ export class ResourceQuotaManager {
     this.resourceRates.clear();
     this.connectionResources.clear();
     this.allConnections.clear();
-    console.log('🧹 ResourceQuotaManager destroyed');
+    this.logger.info('ResourceQuotaManager destroyed');
   }
 }

@@ -16,6 +16,7 @@ import { StateDelta } from '../../cluster/delta-sync/StateDelta';
 import { ClusterManager } from '../../cluster/ClusterManager';
 import { DistributedSemanticsConfig, DistributedSemanticsFlags, globalSemanticsConfig } from '../../communication/semantics/DistributedSemanticsConfig';
 import { WALWriter, WALReader, WALEntry, EntityUpdate } from '../../persistence/types';
+import { Logger } from '../../common/logger';
 
 /**
  * Operation types for resource WAL entries
@@ -90,6 +91,7 @@ export interface ResourceRegistryConfig {
  * registry internals.
  */
 export class ResourceRegistry extends EventEmitter {
+  private logger = Logger.create('ResourceRegistry');
   private entityRegistry: EntityRegistry;
   private resourceTypes = new Map<string, ResourceTypeDefinition>();
   private nodeId: string;
@@ -162,12 +164,12 @@ export class ResourceRegistry extends EventEmitter {
 
     // If placement suggests a different node, create resource there instead
     if (suggestedNodeId !== this.nodeId) {
-      console.log(`🎯 [ResourceRegistry] Topology suggests creating ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on node ${suggestedNodeId} instead of ${this.nodeId}`);
+      this.logger.info(`Topology suggests creating ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on node ${suggestedNodeId} instead of ${this.nodeId}`);
       return await this.createResourceOnNode(suggestedNodeId, resourceMetadata);
     }
 
     // Create resource locally as topology suggests this node is optimal
-    console.log(`🎯 [ResourceRegistry] Creating ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} locally on optimal node ${this.nodeId}`);
+    this.logger.info(`Creating ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} locally on optimal node ${this.nodeId}`);
 
     // Create entity record with resource metadata
     const entityRecord = await this.entityRegistry.proposeEntity(
@@ -230,18 +232,18 @@ export class ResourceRegistry extends EventEmitter {
       // Send to target node
       await this.clusterManager?.sendCustomMessage('resource:create-request', requestPayload, [targetNodeId]);
 
-      console.log(`[ResourceRegistry] Sent create request ${requestId} for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} to node ${targetNodeId}`);
+      this.logger.info(`Sent create request ${requestId} for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} to node ${targetNodeId}`);
 
       // Wait for confirmed response or timeout
       const confirmedResource = await confirmationPromise;
 
-      console.log(`[ResourceRegistry] Remote creation confirmed for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on node ${targetNodeId}`);
+      this.logger.info(`Remote creation confirmed for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on node ${targetNodeId}`);
 
       return confirmedResource;
     } catch (error) {
-      console.error(`[ResourceRegistry] Failed to create resource on node ${targetNodeId}:`, error);
+      this.logger.error(`Failed to create resource on node ${targetNodeId}:`, error);
       // Fallback: create locally if remote creation fails or times out
-      console.log(`[ResourceRegistry] Falling back to local creation for ${resourceMetadata.resourceId}`);
+      this.logger.info(`Falling back to local creation for ${resourceMetadata.resourceId}`);
       return await this.createResourceLocally(resourceMetadata);
     }
   }
@@ -312,7 +314,7 @@ export class ResourceRegistry extends EventEmitter {
       // Check if resource already exists
       const existingEntity = this.entityRegistry.getEntity(resourceMetadata.resourceId);
       if (existingEntity && this.isResourceEntity(existingEntity)) {
-        console.log(`📥 [ResourceRegistry] Remote resource ${resourceMetadata.resourceId} already exists, skipping creation`);
+        this.logger.debug(`Remote resource ${resourceMetadata.resourceId} already exists, skipping creation`);
         return this.entityToResource(existingEntity);
       }
 
@@ -328,11 +330,11 @@ export class ResourceRegistry extends EventEmitter {
       );
 
       const resource = this.entityToResource(entityRecord);
-      console.log(`📥 [ResourceRegistry] Successfully added remote resource ${resource.resourceId} to EntityRegistry`);
+      this.logger.info(`Successfully added remote resource ${resource.resourceId} to EntityRegistry`);
 
       return resource;
     } catch (error) {
-      console.error(`❌ [ResourceRegistry] Failed to create remote resource ${resourceMetadata.resourceId}:`, error);
+      this.logger.error(`Failed to create remote resource ${resourceMetadata.resourceId}:`, error);
       throw error;
     }
   }
@@ -344,12 +346,12 @@ export class ResourceRegistry extends EventEmitter {
     try {
       const { resourceMetadata, requestId, sourceNodeId } = payload;
 
-      console.log(`📨 [ResourceRegistry] Received create request for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} from node ${sourceNodeId}`);
+      this.logger.info(`Received create request for ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} from node ${sourceNodeId}`);
 
       // Create the resource locally
       const createdResource = await this.createResourceLocally(resourceMetadata);
 
-      console.log(`✅ [ResourceRegistry] Successfully created ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on behalf of node ${sourceNodeId}`);
+      this.logger.info(`Successfully created ${resourceMetadata.resourceType} ${resourceMetadata.resourceId} on behalf of node ${sourceNodeId}`);
 
       // Send confirmation back to the requesting node
       if (this.clusterManager) {
@@ -361,7 +363,7 @@ export class ResourceRegistry extends EventEmitter {
         }, [sourceNodeId]);
       }
     } catch (error) {
-      console.error(`❌ [ResourceRegistry] Failed to handle remote creation request from ${senderId}:`, error);
+      this.logger.error(`Failed to handle remote creation request from ${senderId}:`, error);
 
       // Send error response so the requesting node can fall back to local creation
       if (this.clusterManager && payload.requestId) {
@@ -383,7 +385,7 @@ export class ResourceRegistry extends EventEmitter {
     try {
       const { eventType, resource, previousResource, sourceNodeId, timestamp } = clusterEvent;
 
-      console.log(`📨 [ResourceRegistry] Received cluster event ${eventType} for ${resource.resourceId} from node ${sourceNodeId}`);
+      this.logger.info(`Received cluster event ${eventType} for ${resource.resourceId} from node ${sourceNodeId}`);
 
       // Emit the event locally so that external listeners can react
       // External components (e.g. ResourceLifecycleEventSystem, ResourceSubscriptionManager)
@@ -399,11 +401,11 @@ export class ResourceRegistry extends EventEmitter {
           this.emit('resource:destroyed', resource);
           break;
         default:
-          console.warn(`Unknown cluster resource event type: ${eventType}`);
+          this.logger.warn(`Unknown cluster resource event type: ${eventType}`);
       }
 
     } catch (error) {
-      console.error(`❌ [ResourceRegistry] Failed to handle cluster resource event from ${senderId}:`, error);
+      this.logger.error(`Failed to handle cluster resource event from ${senderId}:`, error);
     }
   }
 
@@ -756,10 +758,10 @@ export class ResourceRegistry extends EventEmitter {
             this.stateAggregator.removeResource(resource.resourceId);
             break;
           default:
-            console.warn(`Unknown resource operation: ${operation}`);
+            this.logger.warn(`Unknown resource operation: ${operation}`);
         }
       } catch (error) {
-        console.error(`Failed to propagate resource ${operation} to StateAggregator:`, error);
+        this.logger.error(`Failed to propagate resource ${operation} to StateAggregator:`, error);
         this.emit('resource:cluster-update', {
           resourceId: resource.resourceId,
           resourceType: resource.resourceType,
@@ -808,9 +810,9 @@ export class ResourceRegistry extends EventEmitter {
         members.map(m => m.id)
       );
 
-      console.log(`📡 Propagated ${eventType} for ${resource.resourceId} to ${members.length} cluster members`);
+      this.logger.info(`Propagated ${eventType} for ${resource.resourceId} to ${members.length} cluster members`);
     } catch (error) {
-      console.error(`❌ Failed to propagate ${eventType} to cluster:`, error);
+      this.logger.error(`Failed to propagate ${eventType} to cluster:`, error);
     }
   }
 
@@ -839,7 +841,7 @@ export class ResourceRegistry extends EventEmitter {
 
         return distribution.recommendedDistribution?.primaryNode || distribution.currentDistribution.primaryNode;
       } catch (error) {
-        console.warn(`Failed to get placement recommendation for ${resourceMetadata.resourceId}:`, error);
+        this.logger.warn(`Failed to get placement recommendation for ${resourceMetadata.resourceId}:`, error);
       }
     }
 
@@ -879,9 +881,9 @@ export class ResourceRegistry extends EventEmitter {
         correlationId,
         ...metadata
       };
-      console.log('[ResourceRegistry]', JSON.stringify(logData));
+      this.logger.info(JSON.stringify(logData));
     } else {
-      console.log('[ResourceRegistry]', message);
+      this.logger.info(message);
     }
   }
 
@@ -995,7 +997,7 @@ export class ResourceRegistry extends EventEmitter {
           break;
         }
         default:
-          console.warn(`[ResourceRegistry] Unknown WAL operation: ${operation}`);
+          this.logger.warn(`Unknown WAL operation: ${operation}`);
       }
     });
 

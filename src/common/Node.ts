@@ -119,8 +119,8 @@ export class Node {
   readonly cluster: ClusterManager;
   readonly router: Router;
   readonly connections: ConnectionManager;
-  readonly metrics: MetricsTracker;
-  readonly chaos: ChaosInjector;
+  readonly metrics: MetricsTracker | null;
+  readonly chaos: ChaosInjector | null;
 
   private transport: Transport;
   private isStarted = false;
@@ -157,8 +157,8 @@ export class Node {
     this.cluster = new ClusterManager(config.id, this.transport, bootstrapConfig, 100, nodeMetadata, config.lifecycle);
 
     // Initialize proper NodeMetadata with all required fields
-    const clusterManager = this.cluster as any; // Access cluster manager to get public key
-    const pubKey = clusterManager.keyManager ? clusterManager.keyManager.getPublicKey() : 'temp-key';
+    const keyManager = this.cluster.getKeyManager();
+    const pubKey = keyManager ? keyManager.getPublicKey() : 'temp-key';
     
     this.metadata = new NodeMetadata(
       config.id,
@@ -172,8 +172,8 @@ export class Node {
     // Initialize other subsystems
     this.router = new Router();
     this.connections = new ConnectionManager();
-    this.metrics = config.enableMetrics !== false ? new MetricsTracker() : null as any;
-    this.chaos = config.enableChaos !== false ? new ChaosInjector() : null as any;
+    this.metrics = config.enableMetrics !== false ? new MetricsTracker() : null;
+    this.chaos = config.enableChaos !== false ? new ChaosInjector() : null;
 
     // Register core message handlers
     this.registerCoreHandlers();

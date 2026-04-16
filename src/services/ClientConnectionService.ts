@@ -218,8 +218,8 @@ export class ClientConnectionService {
     }
 
     // Update local resource through ResourceManager port
-    const resourceRegistry = (this.resourceManager as any).resourceRegistry;
-    if (resourceRegistry) {
+    if (this.resourceManager) {
+      const resourceRegistry = this.resourceManager.getResourceRegistry();
       await resourceRegistry.updateResource(resourceId, operation.payload);
     }
 
