@@ -62,6 +62,14 @@ import { Transport } from '../transport/Transport';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
 import { NodeInfo, ClusterHealth, ClusterTopology, ClusterMetadata } from '../cluster/types';
 
+/**
+ * Configuration options for creating a {@link Node} instance.
+ *
+ * @param id - Unique identifier for the node within the cluster.
+ * @param transport - Optional custom transport; defaults to an in-memory adapter.
+ * @param seedNodes - Addresses of existing cluster members used for bootstrapping.
+ * @param lifecycle - Tuning knobs for graceful shutdown, draining, and rebalancing.
+ */
 export interface NodeConfig {
   id: string;
   clusterId?: string;        // For NodeMetadata
@@ -87,6 +95,22 @@ export interface NodeConfig {
   };
 }
 
+/**
+ * The top-level runtime container for a distributed system participant.
+ *
+ * Node acts as the composition root, wiring together cluster management,
+ * message routing, connection tracking, metrics, and chaos injection into
+ * a single lifecycle-managed unit. External code interacts with Node rather
+ * than its internal subsystems directly.
+ *
+ * Typical usage:
+ * ```ts
+ * const node = new Node({ id: 'node-1', seedNodes: ['host:3000'] });
+ * await node.start();
+ * node.registerHandler('chat', (msg, session) => { ... });
+ * await node.stop();
+ * ```
+ */
 export class Node {
   readonly id: string;
   readonly metadata: NodeMetadata;
@@ -102,6 +126,10 @@ export class Node {
   private isStarted = false;
   private enableLogging: boolean;
 
+  /**
+   * Create a new Node with the given configuration.
+   * @param config - Node identity, networking, and feature-flag options.
+   */
   constructor(config: NodeConfig) {
     this.id = config.id;
     this.enableLogging = config.enableLogging ?? false;
@@ -166,7 +194,8 @@ export class Node {
   }
 
   /**
-   * Start the node and all its subsystems
+   * Start the node and all its subsystems (transport, cluster, metrics).
+   * @throws If the node is already started or a subsystem fails to initialise.
    */
   async start(): Promise<void> {
     if (this.isStarted) {
@@ -202,7 +231,7 @@ export class Node {
   }
 
   /**
-   * Stop the node and all its subsystems
+   * Gracefully stop the node, leaving the cluster and shutting down subsystems in reverse order.
    */
   async stop(): Promise<void> {
     if (!this.isStarted) {
@@ -250,7 +279,9 @@ export class Node {
   }
 
   /**
-   * Route an incoming message through the node's router
+   * Route an incoming message through the node's registered handlers.
+   * @param message - The message to route.
+   * @param session - Optional session context; a default session is used if omitted.
    */
   routeMessage(message: RoutedMessage, session?: Session): void {
     try {
@@ -308,7 +339,7 @@ export class Node {
   }
 
   /**
-   * Get current cluster membership
+   * Return the current cluster membership as a map of node ID to {@link MembershipEntry}.
    */
   getMembership() {
     return this.cluster.getMembership();
@@ -351,7 +382,9 @@ export class Node {
   }
 
   /**
-   * Register a custom message handler with proper MessageHandler interface
+   * Register a handler that will be invoked for messages of the given type.
+   * @param messageType - The message type string to match against.
+   * @param handlerFn - Callback invoked with the matched message and its session.
    */
   registerHandler(messageType: string, handlerFn: (message: RoutedMessage, session: Session) => void): void {
     const handler: MessageHandler = {

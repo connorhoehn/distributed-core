@@ -5,10 +5,10 @@ import {
   ClusterInfo, 
   RangeId,
   ITransport
-} from '../../coordinators/types';
-import { EntityUpdate, WALEntry } from '../../persistence/types';
-import { WALCoordinatorImpl } from '../../persistence/wal/WALCoordinator';
-import { WALFileImpl } from '../../persistence/wal/WALFile';
+} from '../../src/coordinators/types';
+import { EntityUpdate, WALEntry } from '../../src/persistence/types';
+import { WALCoordinatorImpl } from '../../src/persistence/wal/WALCoordinator';
+import { WALFileImpl } from '../../src/persistence/wal/WALFile';
 // ApplicationRegistry and ChatRoomResource were removed (business logic belongs in /examples/)
 // Define minimal interfaces needed by this coordinator
 interface ApplicationRegistry {
@@ -18,9 +18,9 @@ interface ChatRoomResource {
   resourceId: string;
   nodeId: string;
 }
-import { OperationEnvelopeManager } from '../../cluster/core/operations/OperationEnvelopeManager';
-import { ClusterFanoutRouter } from '../../resources/distribution/ClusterFanoutRouter';
-import { ResourceOperation } from '../../resources/core/ResourceOperation';
+import { OperationEnvelopeManager } from '../../src/cluster/core/operations/OperationEnvelopeManager';
+import { ClusterFanoutRouter } from '../../src/resources/distribution/ClusterFanoutRouter';
+import { ResourceOperation } from '../../src/resources/core/ResourceOperation';
 
 
 /**

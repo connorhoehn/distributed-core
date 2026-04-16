@@ -78,6 +78,17 @@ export interface ResourceRegistryConfig {
  * - CLUSTER EVENTS: propagateResourceEventToCluster() sends events to all cluster members
  * - This dual approach ensures both local components and remote nodes receive resource updates
  */
+/**
+ * A facade over {@link EntityRegistry} that provides resource-oriented CRUD,
+ * type registration, cluster-aware placement, and WAL-based persistence.
+ *
+ * ResourceRegistry bridges the entity/record model used internally with the
+ * higher-level {@link ResourceMetadata} API consumed by application code.
+ * It emits lifecycle events (`resource:created`, `resource:updated`,
+ * `resource:destroyed`, `resource:migrated`) both locally and across
+ * the cluster so that external systems can react without coupling to
+ * registry internals.
+ */
 export class ResourceRegistry extends EventEmitter {
   private entityRegistry: EntityRegistry;
   private resourceTypes = new Map<string, ResourceTypeDefinition>();
@@ -130,7 +141,10 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
-   * Create a new resource using the entity system
+   * Create a new resource, automatically placing it on the optimal node via the topology manager.
+   * @param resourceMetadata - Metadata describing the resource to create; its `resourceType` must be registered.
+   * @returns The finalised resource metadata including assigned node and timestamp.
+   * @throws If the registry is not running or the resource type is unregistered.
    */
   async createResource(resourceMetadata: ResourceMetadata): Promise<ResourceMetadata> {
     if (!this.isRunning) {
@@ -394,7 +408,7 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
-   * Get a resource by ID
+   * Retrieve a resource by its unique identifier, or `null` if it does not exist.
    */
   getResource(resourceId: string): ResourceMetadata | null {
     const entity = this.entityRegistry.getEntity(resourceId);
@@ -415,7 +429,11 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
-   * Update a resource
+   * Apply a partial update to an existing resource and propagate the change to the cluster.
+   * @param resourceId - ID of the resource to update.
+   * @param updates - Fields to merge into the existing resource metadata.
+   * @returns The updated resource metadata.
+   * @throws If the registry is not running or the resource is not found.
    */
   async updateResource(resourceId: string, updates: Partial<ResourceMetadata>): Promise<ResourceMetadata> {
     if (!this.isRunning) {
@@ -452,7 +470,8 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
-   * Remove a resource
+   * Remove a resource by ID, invoking its type's `onResourceDestroyed` lifecycle hook and persisting the deletion to the WAL.
+   * @throws If the registry is not running or the resource is not found.
    */
   async removeResource(resourceId: string): Promise<void> {
     if (!this.isRunning) {
@@ -909,12 +928,14 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
-   * Recover resource state from a WAL reader.
-   * Replays all WAL entries that contain resource operations (CREATE/UPDATE/DELETE)
-   * to reconstruct the in-memory registry state.
+   * Replay WAL entries to reconstruct in-memory resource state after a restart.
    *
-   * Should be called during startup BEFORE the registry starts accepting new operations
-   * (i.e., before calling start()).
+   * Call this **before** {@link start} so that the registry is fully hydrated
+   * before accepting new operations. Only entries tagged with resource WAL
+   * metadata are replayed; all others are skipped.
+   *
+   * @param walReader - Reader providing ordered WAL entries to replay.
+   * @returns The number of entries that were successfully replayed.
    */
   async recoverFromWAL(walReader: WALReader): Promise<{ entriesReplayed: number }> {
     let entriesReplayed = 0;

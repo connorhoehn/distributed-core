@@ -15,12 +15,10 @@
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
-    "example:basic": "node -r ts-node/register examples/basic-cluster/index.ts",
-    "example:counter:http": "node -r ts-node/register examples/http-counter-cluster/index.ts",
-    "example:chat:tcp": "node -r ts-node/register examples/tcp-chat-cluster/index.ts",
-    "example:chat:client0": "node -r ts-node/register examples/tcp-chat-cluster/client.ts 0",
-    "example:chat:client1": "node -r ts-node/register examples/tcp-chat-cluster/client.ts 1",
-    "example:chat:client2": "node -r ts-node/register examples/tcp-chat-cluster/client.ts 2"
+    "prepublishOnly": "npm run build",
+    "example:basic": "ts-node examples/basic-cluster/index.ts",
+    "example:counter": "ts-node examples/distributed-counter/index.ts",
+    "example:chat": "ts-node examples/chat-room/index.ts"
   },
   "keywords": [
     "distributed",

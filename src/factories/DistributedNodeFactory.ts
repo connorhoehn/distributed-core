@@ -33,6 +33,10 @@ import { SeedRegistryAdapter } from '../services/adapters/SeedRegistryAdapter';
 import { ResourceWiring } from '../services/wiring/ResourceWiring';
 
 
+/**
+ * Extended node configuration for fully-featured distributed nodes, including
+ * transport selection, resource management, network binding, and cluster tuning.
+ */
 export interface DistributedNodeConfig extends Omit<NodeConfig, 'transport'> {
   // Network transport configuration
   transport?: {
@@ -67,6 +71,7 @@ export interface DistributedNodeConfig extends Omit<NodeConfig, 'transport'> {
   semantics?: SemanticsConfig;
 }
 
+/** The set of fully-wired components returned after creating a distributed node. */
 export interface DistributedNodeComponents {
   node: Node;
   clusterManager: ClusterManager;
@@ -80,11 +85,31 @@ export interface DistributedNodeComponents {
 }
 
 /**
- * Factory Builder for creating distributed nodes with integrated resource management
- * 
- * Supports the two primary workflows:
- * 1. Client Request → ConnectionManager → ResourceAttachmentService → ResourceManager → ClusterFanoutRouter → NetworkTransport → Remote Nodes
- * 2. Local Resource Change → ResourceDistributionEngine → ClusterManager → NetworkTransport → All Cluster Members → ResourceAttachmentService → Local Connections
+ * Singleton factory that assembles a complete distributed node stack from a
+ * {@link DistributedNodeConfig}: transport layer, cluster manager, resource
+ * management, communication layer, and a phase-based lifecycle.
+ *
+ * Use the fluent {@link DistributedNodeBuilder} (via {@link DistributedNodeFactory.builder})
+ * for ergonomic configuration:
+ *
+ * ```ts
+ * const components = await DistributedNodeFactory.builder()
+ *   .id('node-1')
+ *   .network('127.0.0.1', 4000)
+ *   .transport('websocket')
+ *   .seedNodes(['127.0.0.1:4001'])
+ *   .enableResources()
+ *   .build();
+ *
+ * // components.node, components.clusterManager, components.resourceManager, etc.
+ * ```
+ *
+ * Supports two primary data-flow paths:
+ * 1. **Inbound** -- Client request flows through ConnectionManager, ResourceAttachmentService,
+ *    ResourceManager, ClusterFanoutRouter, and out via the network transport to remote nodes.
+ * 2. **Outbound** -- Local resource changes propagate via ResourceDistributionEngine and
+ *    ClusterManager to all cluster members, which feed them back through
+ *    ResourceAttachmentService to local client connections.
  */
 export class DistributedNodeFactory {
   private static instance: DistributedNodeFactory;
@@ -99,7 +124,9 @@ export class DistributedNodeFactory {
   private constructor() {}
 
   /**
-   * Create a fully configured distributed node with resource management
+   * Create a fully configured distributed node, wire all subsystems, and run the phase-based lifecycle.
+   * @param config - Full distributed node configuration.
+   * @returns All wired components, ready for use.
    */
   async createNode(config: DistributedNodeConfig): Promise<DistributedNodeComponents> {
     // 1. Create cluster transport (node↔node) and client transport (client↔node)
@@ -356,7 +383,7 @@ export class DistributedNodeFactory {
   }
 
   /**
-   * Create a builder for fluent configuration
+   * Return a new {@link DistributedNodeBuilder} for fluent, step-by-step configuration.
    */
   static builder(): DistributedNodeBuilder {
     return new DistributedNodeBuilder();
@@ -364,7 +391,11 @@ export class DistributedNodeFactory {
 }
 
 /**
- * Fluent builder for distributed node configuration
+ * Fluent builder for incrementally constructing a {@link DistributedNodeConfig}
+ * and producing a fully-wired {@link DistributedNodeComponents} via {@link build}.
+ *
+ * All setter methods return `this` for chaining. Call {@link build} to validate
+ * the configuration and delegate to {@link DistributedNodeFactory.createNode}.
  */
 export class DistributedNodeBuilder {
   private config: DistributedNodeConfig = {
@@ -442,6 +473,10 @@ export class DistributedNodeBuilder {
     return this;
   }
 
+  /**
+   * Validate the accumulated configuration and create the distributed node.
+   * @throws If `id` or `network` configuration is missing.
+   */
   async build(): Promise<DistributedNodeComponents> {
     if (!this.config.id) {
       throw new Error('Node ID is required');

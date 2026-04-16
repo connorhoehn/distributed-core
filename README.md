@@ -1,45 +1,95 @@
 
-# Distributed Core Sandbox
+# Distributed Core
 
 ![CI](https://github.com/connorhoehn/distributed-core/actions/workflows/ci.yml/badge.svg)
 
-## Overview
-Distributed Core is a research kernel for distributed systems, providing modular primitives and subsystems for building clusters, agents, and distributed applications. It is not a business-logic framework; all real-world scenarios are implemented as examples outside the core.
+A research kernel for distributed systems -- modular primitives for clustering, gossip, persistence, and transport with zero business-logic assumptions.
 
-### Features
-- **Cluster Management**: Node membership, join/leave, topology, and resource registry.
-- **Messaging & Transport**: Reliable message delivery, batching, encryption, circuit breaking, and retry logic.
-- **Persistence**: Write-ahead log, state store, checkpointing, compaction, and memory backends.
-- **Pluggable Coordinators**: Gossip, Etcd, Zookeeper, InMemory for cluster coordination and consensus.
-- **Observability**: Metrics, logging, diagnostics, and chaos injection for testing resilience.
-- **Front Door APIs**: Node, Cluster, Agent, and CLI entrypoints for bootstrapping and management.
-- **Examples-Driven**: All downstream use cases (API server, queue, database, management agent) live in `/examples/`.
+## Quick Start
 
-### Subsystems
-- **Cluster**: Membership, topology, aggregation, lifecycle, reconciliation, seeding, and quorum.
-- **Applications**: Registry, chat, and custom modules.
-- **Messaging**: Router, handlers, cluster messaging, and transport adapters.
-- **Persistence**: WAL, state store, broadcast buffer, checkpointing, compaction, and memory backends.
-- **Identity**: Key management, node metadata, and authentication.
-- **Monitoring**: Failure detection, metrics, and observability tools.
-- **Diagnostics**: Chaos injection and diagnostic utilities.
+```typescript
+import { Node } from 'distributed-core';
+import { InMemoryAdapter } from 'distributed-core';
+
+const node = new Node({
+  id: 'node-1',
+  region: 'us-east-1',
+  zone: 'us-east-1a',
+  network: { address: '127.0.0.1', port: 8001 },
+  seedNodes: ['127.0.0.1:8000']
+});
+await node.start();
+```
+
+## Features
+
+- **Gossip-based membership** -- nodes discover each other and propagate state via configurable gossip strategies
+- **Pluggable transport** -- InMemory, TCP, UDP, WebSocket, and HTTP adapters; swap at configuration time
+- **Encrypted transport** -- optional message-level encryption and authentication
+- **Write-ahead log & checkpointing** -- durable persistence with WAL, auto-checkpointing, compaction, and recovery
+- **Failure detection** -- phi-accrual style failure detector for marking nodes suspect/dead
+- **Quorum** -- quorum primitives for distributed decisions
+- **Resource management** -- registry, distribution, and subscription system for cluster resources
+- **Circuit breaking & retry** -- transport-level resilience with circuit breakers and retry managers
+- **Message batching** -- configurable batching for throughput-sensitive workloads
+- **Chaos injection** -- built-in diagnostics and chaos tools for testing resilience
+- **Metrics & observability** -- metrics tracking, export, and cluster introspection
+
+## Architecture
+
+The system is organized into four layers:
+
+**Transport** -- Pluggable network adapters (`InMemory`, `TCP`, `UDP`, `WebSocket`, `HTTP`) with optional encryption, circuit breaking, retry, and batching.
+
+**Persistence** -- Write-ahead log, state store, broadcast buffer, auto-checkpointing, compaction, and crash recovery. Memory and file-backed backends.
+
+**Cluster** -- Gossip protocol, membership table, failure detection, quorum, topology management, delta-sync, reconciliation, and state aggregation. Coordinators: `Gossip`, `InMemory`, `Etcd`, `Zookeeper`.
+
+**Resources** -- Resource registry, distribution engine, attachment, security, and subscription management for assigning work across the cluster.
+
+## Examples
+
+Examples live in `/examples/` and run with `ts-node`:
+
+| Example | Description | Run |
+|---|---|---|
+| **basic-cluster** | 3-node cluster formation, gossip, messaging, graceful shutdown | `npm run example:basic` |
+| **chat-room** | Chat room coordination across a cluster | `npm run example:chat:tcp` |
+| **distributed-counter** | HTTP-based distributed counter (WIP) | `npm run example:counter:http` |
 
 ## Project Goals
-- **Research Kernel for Distributed Systems**: Modular primitives for cluster join, gossip, replication, quorum, persistence, compaction, and more.
-- **No Business Logic**: Zero assumptions about downstream use cases (chat, queue, database, etc.).
-- **Examples-Driven**: All real-world scenarios live in `/examples/` as playgrounds, not in core.
-- **Front Door API**: Export Node, Cluster, Agent, and CLI entrypoints for easy bootstrapping and management.
-- **Observability & Modularity**: Metrics, logs, and test coverage for every primitive.
+
+- **Research kernel** -- primitives for cluster join, gossip, replication, quorum, persistence, and compaction
+- **No business logic** -- zero assumptions about downstream use cases; the core is protocol, not product
+- **Examples-driven** -- all real-world scenarios live in `/examples/` as playgrounds, not in core
+- **Front door API** -- `Node`, `ClusterManager`, and factory entrypoints for easy bootstrapping
+
+## Running Tests
+
+```bash
+npm test                    # unit tests
+npm run test:integration    # integration tests
+npm run build               # compile TypeScript
+npm run lint                # lint
+```
 
 ## Current State
-- Core modules for cluster management, resource registry, messaging, transport, and persistence.
-- Pluggable coordinators (Gossip, Etcd, Zookeeper, InMemory).
-- CLI and agent scaffolding in progress.
-- Examples for API server, queue worker, database, and management agent planned.
-- Integration tests for primitives; downstream tests coming via `/examples/`.
 
-## How to Run Tests
-```bash
-npm test
-npm run test:integration
-```
+**Working:**
+- Gossip protocol and cluster membership (join, leave, failure detection)
+- Transport layer with InMemory, TCP, UDP, and WebSocket adapters
+- Write-ahead log, checkpointing, compaction, and recovery
+- Resource registry and distribution
+- Message batching, encryption, circuit breaking
+- Metrics, introspection, chaos injection
+- Basic cluster and chat room examples
+
+**In progress:**
+- Node factory refactor (simplifying cluster bootstrap)
+- Distributed counter example
+- Etcd and Zookeeper coordinator integrations (interfaces exist, runtime testing ongoing)
+- CLI and agent entrypoints
+
+## License
+
+MIT

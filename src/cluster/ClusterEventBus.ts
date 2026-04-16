@@ -6,7 +6,10 @@ import { MembershipEntry } from './types';
  * instead of the full ClusterManager.
  */
 export interface IClusterEventBus {
+  /** Subscribe to a named cluster event (e.g. `member-joined`, `member-left`). */
   on(event: string, listener: (...args: any[]) => void): this;
+
+  /** Unsubscribe a previously registered listener for a cluster event. */
   off(event: string, listener: (...args: any[]) => void): this;
 }
 

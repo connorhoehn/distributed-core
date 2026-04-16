@@ -33,6 +33,7 @@ export class ResourceDistributionEngine extends EventEmitter {
   private deliveryTracker?: DeliveryTracker;
   
   private isRunning = false;
+  private isApplyingRemoteOperation = false;
   private resourceStore = new Map<string, ResourceMetadata>(); // Local resource cache
   private pendingConflicts = new Map<string, ResourceConflict>(); // Track conflicts awaiting resolution
   
@@ -99,11 +100,13 @@ export class ResourceDistributionEngine extends EventEmitter {
   private setupEventHandlers(): void {
     // Listen for local resource creation
     this.resourceRegistry.on('resource:created', async (resource: ResourceMetadata) => {
+      if (this.isApplyingRemoteOperation) return;
       await this.distributeResourceToCluster(resource, 'add');
     });
 
     // Listen for local resource updates
     this.resourceRegistry.on('resource:updated', async (resource: ResourceMetadata) => {
+      if (this.isApplyingRemoteOperation) return;
       await this.distributeResourceToCluster(resource, 'modify');
     });
 
@@ -252,11 +255,12 @@ export class ResourceDistributionEngine extends EventEmitter {
    * Handle resource conflict using StateReconciler
    */
   private async handleResourceConflict(
-    resourceId: string, 
-    existing: ResourceMetadata, 
-    incoming: ResourceMetadata, 
+    resourceId: string,
+    existing: ResourceMetadata,
+    incoming: ResourceMetadata,
     sourceNodeId: string
   ): Promise<void> {
+    this.isApplyingRemoteOperation = true;
     try {
       // Create conflict data structure
       const conflictingVersions = new Map<string, ResourceMetadata>();
@@ -280,16 +284,18 @@ export class ResourceDistributionEngine extends EventEmitter {
 
       // Apply the resolved resource
       this.resourceStore.set(resourceId, resolvedResource);
-      
+
       // Emit the resolved resource locally
       this.resourceRegistry.emit('resource:created', resolvedResource);
-      
+
       // Remove from pending conflicts
       this.pendingConflicts.delete(resourceId);
 
       this.emit('resource:conflict-resolved', resolvedResource, conflict);
     } catch (error) {
       console.error(`❌ [ResourceDistributionEngine] Failed to resolve conflict for ${resourceId}:`, error);
+    } finally {
+      this.isApplyingRemoteOperation = false;
     }
   }
 
@@ -297,6 +303,7 @@ export class ResourceDistributionEngine extends EventEmitter {
    * Apply a resource operation without conflicts
    */
   private async applyResourceOperation(resourceOp: ResourceDelta, sourceNodeId: string): Promise<void> {
+    this.isApplyingRemoteOperation = true;
     try {
       switch (resourceOp.operation) {
         case 'add':
@@ -304,10 +311,10 @@ export class ResourceDistributionEngine extends EventEmitter {
           if (resourceOp.resource) {
             this.resourceStore.set(resourceOp.resourceId, resourceOp.resource);
             console.log(`📥 [ResourceDistributionEngine] Applied ${resourceOp.operation} for ${resourceOp.resource.resourceType} ${resourceOp.resourceId} from ${sourceNodeId}`);
-            
+
             // CRITICAL FIX: Add remote resource to local EntityRegistry
             await this.addRemoteResourceToEntityRegistry(resourceOp.resource, resourceOp.operation);
-            
+
             // Emit the resource event locally to trigger application handlers
             const eventType = resourceOp.operation === 'add' ? 'resource:created' : 'resource:updated';
             this.resourceRegistry.emit(eventType, resourceOp.resource);
@@ -317,16 +324,18 @@ export class ResourceDistributionEngine extends EventEmitter {
         case 'delete':
           this.resourceStore.delete(resourceOp.resourceId);
           console.log(`📥 [ResourceDistributionEngine] Applied delete for ${resourceOp.resourceId} from ${sourceNodeId}`);
-          
+
           // CRITICAL FIX: Remove remote resource from EntityRegistry
           await this.removeRemoteResourceFromEntityRegistry(resourceOp.resourceId);
-          
+
           this.resourceRegistry.emit('resource:destroyed', { resourceId: resourceOp.resourceId });
           this.emit('resource:deleted', resourceOp.resourceId, sourceNodeId);
           break;
       }
     } catch (error) {
       console.error(`❌ [ResourceDistributionEngine] Failed to apply resource operation:`, error);
+    } finally {
+      this.isApplyingRemoteOperation = false;
     }
   }
 

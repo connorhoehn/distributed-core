@@ -28,6 +28,16 @@ import { ClusterQuorum } from './quorum/ClusterQuorum';
 import { ClusterRouting } from '../routing/ClusterRouting';
 import { IClusterInfo, IClusterEventBus } from './ClusterEventBus';
 
+/**
+ * Central coordinator for cluster membership, failure detection, consistent-hash
+ * routing, and inter-node communication.
+ *
+ * ClusterManager owns the full cluster lifecycle: bootstrapping via seed nodes,
+ * maintaining a membership table through gossip, detecting failures, and exposing
+ * a consistent-hash ring for key-based routing. It delegates to modular components
+ * (lifecycle, communication, introspection, security, quorum, routing) and emits
+ * events such as `member-joined`, `member-left`, and `membership-updated`.
+ */
 export class ClusterManager extends EventEmitter implements IClusterManagerContext, IClusterInfo, IClusterEventBus {
   // Core components (exposed via IClusterManagerContext)
   readonly membership: MembershipTable;
@@ -147,6 +157,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     });
   }
 
+  /** Start the cluster: set up message handling, join the cluster via seed nodes, and begin gossiping. */
   async start(): Promise<void> {
     if (this.isStarted) return;
 
@@ -171,6 +182,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     this.emit('started');
   }
 
+  /** Stop gossip, failure detection, and introspection, then shut down the lifecycle. */
   async stop(): Promise<void> {
     if (!this.isStarted) return;
 
@@ -254,11 +266,14 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     this.hashRing.rebuild(aliveMembers);
   }
 
-  // Public API methods
+  /** Return the full membership table as a map of node ID to {@link MembershipEntry}. */
   getMembership(): Map<string, MembershipEntry> {
     return new Map(this.membership.getAllMembers().map((member: MembershipEntry) => [member.id, member]));
   }
+  /** Return the number of known cluster members (all statuses). */
   getMemberCount(): number { return this.membership.getAllMembers().length; }
+
+  /** Return the {@link NodeInfo} for the local node. */
   getNodeInfo(): NodeInfo {
     const members = this.membership.getAllMembers();
     const localMember = members.find((member: MembershipEntry) => member.id === this.localNodeId);
@@ -273,12 +288,17 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     }
     return localMember;
   }
+  /** Return only members whose status is ALIVE. */
   getAliveMembers(): MembershipEntry[] { return this.membership.getAliveMembers(); }
 
-  // Consistent Hashing API
+  /** Return the primary node responsible for a key via consistent hashing, or null if the ring is empty. */
   getNodeForKey(key: string): string | null { return this.routing.getNodeForKey(key); }
+
+  /** Return up to {@link replicaCount} distinct nodes responsible for replicating a key. */
   getReplicaNodes(key: string, replicaCount: number = 3): string[] { return this.routing.getReplicaNodes(key, replicaCount); }
-  getNodesForKey(key: string, options: any = { 
+
+  /** Return nodes for a key using the specified distribution strategy and replication factor. */
+  getNodesForKey(key: string, options: any = {
     strategy: 'CONSISTENT_HASH', 
     replicationFactor: 3, 
     preferLocalZone: false 
@@ -300,6 +320,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
   markNodeSuspect(nodeId: string): boolean { return this.membership.markSuspect(nodeId); }
   markNodeDead(nodeId: string): boolean { return this.membership.markDead(nodeId); }
   pruneDeadNodes(maxAge: number = 30000): number { return this.membership.pruneDeadNodes(maxAge); }
+  /** Gracefully leave the cluster, notifying other members before departure. */
   async leave(timeout?: number): Promise<void> { return this.lifecycle.leave(); }
 
   // Cluster Health & Analytics
@@ -334,7 +355,10 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
   getRouting(): ClusterRouting { return this.routing; }
 
   /**
-   * Send a custom message to specific cluster nodes via transport
+   * Send an application-defined message to one or more cluster nodes via the transport layer.
+   * @param type - Application-level message type identifier.
+   * @param payload - Arbitrary payload data.
+   * @param targetNodeIds - Node IDs to receive the message.
    */
   async sendCustomMessage(type: string, payload: any, targetNodeIds: string[]): Promise<void> {
     const message: Message = {

@@ -195,8 +195,9 @@ describe('Barrel file exports resolve to real files', () => {
 // ---------------------------------------------------------------------------
 
 describe('No chat-specific business logic in core modules', () => {
-  // The only allowed location for chat-specific code
-  const ALLOWED_PATH = path.join('messaging', 'handlers', 'ChatRoomCoordinator');
+  // ChatRoomCoordinator has been moved to examples/chat-room/ — no chat-specific
+  // business logic should remain inside src/.
+  const ALLOWED_PATH = '__none__'; // sentinel that will never match a real path
 
   const chatPatterns = [
     /\bchat\s*room\b/i,
