@@ -134,9 +134,26 @@ export interface ClusterFrameworkEvents {
 }
 
 /**
+ * Describes the consistency and capability guarantees of a coordinator implementation.
+ */
+export interface CoordinatorSemantics {
+  consistency: 'strong' | 'eventual';
+  persistence: 'ephemeral' | 'durable';
+  failureTolerance: number; // how many nodes can fail
+  leaseSupport: boolean;
+  watchSupport: boolean;
+  maxLeaseTtlMs: number;
+}
+
+/**
  * Core coordinator interface that all implementations must follow
  */
 export interface IClusterCoordinator {
+  /**
+   * Return the consistency and capability semantics of this coordinator
+   */
+  getSemantics(): CoordinatorSemantics;
+
   /**
    * Initialize the coordinator
    */

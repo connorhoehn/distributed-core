@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { IClusterCoordinator, ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents, CoordinatorNodeStatus } from './types';
+import { IClusterCoordinator, CoordinatorSemantics, ClusterView, RangeId, RingId, RangeLease, ClusterFrameworkEvents, CoordinatorNodeStatus } from './types';
 import { createLogger, FrameworkLogger } from '../common/logger';
 
 /**
@@ -30,6 +30,17 @@ export class InMemoryCoordinator extends EventEmitter implements IClusterCoordin
     // Test-friendly shorter intervals that can be overridden
     testMode: false
   };
+
+  getSemantics(): CoordinatorSemantics {
+    return {
+      consistency: 'strong',
+      persistence: 'ephemeral',
+      failureTolerance: 0,
+      leaseSupport: true,
+      watchSupport: false,
+      maxLeaseTtlMs: Infinity,
+    };
+  }
 
   async initialize(nodeId: string, ringId: RingId, config?: Record<string, any>): Promise<void> {
     this.nodeId = nodeId;

@@ -62,6 +62,7 @@ import { Transport } from '../transport/Transport';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
 import { NodeInfo, ClusterHealth, ClusterTopology, ClusterMetadata } from '../cluster/types';
 import { Logger } from './logger';
+import { HealthServer } from './HealthServer';
 
 /**
  * Configuration options for creating a {@link Node} instance.
@@ -84,6 +85,7 @@ export interface NodeConfig {
   enableMetrics?: boolean;
   enableChaos?: boolean;
   enableLogging?: boolean;
+  healthPort?: number;
   
   // Lifecycle configuration for shutdown behavior
   lifecycle?: {
@@ -125,8 +127,10 @@ export class Node {
 
   private transport: Transport;
   private isStarted = false;
+  private startedAt: number = 0;
   private enableLogging: boolean;
   private logger: Logger;
+  private healthServer: HealthServer | null = null;
 
   /**
    * Create a new Node with the given configuration.
@@ -178,6 +182,32 @@ export class Node {
     this.metrics = config.enableMetrics !== false ? new MetricsTracker() : null;
     this.chaos = config.enableChaos !== false ? new ChaosInjector() : null;
 
+    // Set up optional HTTP health server
+    if (config.healthPort) {
+      this.healthServer = new HealthServer(
+        config.healthPort,
+        () => ({
+          status: 'ok',
+          nodeId: this.id,
+          uptime: this.startedAt ? Date.now() - this.startedAt : 0,
+          memberCount: this.getMemberCount(),
+        }),
+        () => {
+          const membership = this.getMembership();
+          const members = Array.from(membership.entries()).map(([id, entry]) => ({
+            id,
+            status: String(entry.status),
+          }));
+          return {
+            nodeId: this.id,
+            members,
+            clusterHealth: this.getClusterHealth(),
+          };
+        },
+        () => this.getMetrics(),
+      );
+    }
+
     // Register core message handlers
     this.registerCoreHandlers();
   }
@@ -221,6 +251,12 @@ export class Node {
       // });
 
       this.isStarted = true;
+      this.startedAt = Date.now();
+
+      if (this.healthServer) {
+        await this.healthServer.start();
+      }
+
       if (this.enableLogging) {
         this.logger.info('Started successfully');
       }
@@ -266,6 +302,10 @@ export class Node {
       await this.cluster.stop();
       await this.transport.stop();
       
+      if (this.healthServer) {
+        await this.healthServer.stop();
+      }
+
       // Close all connections to clean up timers
       this.connections.closeAll();
 

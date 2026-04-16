@@ -4,6 +4,9 @@
   "description": "Core library for distributed score system with gossip protocol, transport, and state management",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "bin": {
+    "distributed-core": "dist/cli/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch",
@@ -16,6 +19,8 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build",
+    "release": "npm run build && npm run test && npm version patch",
+    "start": "ts-node src/cli/index.ts",
     "example:basic": "ts-node examples/basic-cluster/index.ts",
     "example:counter": "ts-node examples/distributed-counter/index.ts",
     "example:chat": "ts-node examples/chat-room/index.ts"

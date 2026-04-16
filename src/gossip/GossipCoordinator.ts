@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import {
   IClusterCoordinator,
+  CoordinatorSemantics,
   ClusterView,
   RangeId,
   RingId,
@@ -38,6 +39,20 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
     gossipInterval: 5000,
     enableLogging: true
   };
+
+  getSemantics(): CoordinatorSemantics {
+    const nodeCount = this.clusterManager
+      ? this.clusterManager.getMembership().size
+      : 1;
+    return {
+      consistency: 'eventual',
+      persistence: 'ephemeral',
+      failureTolerance: Math.floor(nodeCount / 3),
+      leaseSupport: true,
+      watchSupport: false,
+      maxLeaseTtlMs: 30000,
+    };
+  }
 
   async initialize(nodeId: string, ringId: RingId, config?: Record<string, any>): Promise<void> {
     this.nodeId = nodeId;

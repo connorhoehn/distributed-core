@@ -172,10 +172,10 @@ export class RangeCoordinator extends EventEmitter {
         return new GossipCoordinator();
       
       case 'etcd':
-        return new EtcdCoordinator();
-      
+        throw new Error('EtcdCoordinator requires an IEtcdClient instance. Use new EtcdCoordinator(client) directly.');
+
       case 'zookeeper':
-        return new ZookeeperCoordinator();
+        throw new Error('ZookeeperCoordinator requires an IZookeeperClient instance. Use new ZookeeperCoordinator(client) directly.');
       
       default:
         throw new Error(`Unknown coordinator type: ${this.config.coordinator}`);

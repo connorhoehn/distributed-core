@@ -15,7 +15,8 @@ export {
   type RangeId,
   type RingId,
   type CoordinatorType,
-  type TransportType
+  type TransportType,
+  type CoordinatorSemantics
 } from './coordinators';
 
 // Cluster modules
@@ -93,3 +94,6 @@ export * from './factories';
 
 // Service modules
 export * from './services';
+
+// Agent modules
+export * from './agent';
