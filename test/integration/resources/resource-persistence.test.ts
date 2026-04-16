@@ -88,9 +88,9 @@ describe('Resource persistence via WAL', () => {
     }));
 
     // Verify all 3 exist
-    expect(registry1.getResource('res-alpha')).not.toBeNull();
-    expect(registry1.getResource('res-beta')).not.toBeNull();
-    expect(registry1.getResource('res-gamma')).not.toBeNull();
+    expect(await registry1.getResource('res-alpha')).not.toBeNull();
+    expect(await registry1.getResource('res-beta')).not.toBeNull();
+    expect(await registry1.getResource('res-gamma')).not.toBeNull();
 
     // Update resource B with new application data
     const updatedB = await registry1.updateResource('res-beta', {
@@ -102,7 +102,7 @@ describe('Resource persistence via WAL', () => {
 
     // Delete resource C
     await registry1.removeResource('res-gamma');
-    expect(registry1.getResource('res-gamma')).toBeNull();
+    expect(await registry1.getResource('res-gamma')).toBeNull();
 
     // Final state in registry1: res-alpha (unchanged), res-beta (updated), res-gamma (deleted)
     const remaining = registry1.getAllResources();
@@ -140,20 +140,20 @@ describe('Resource persistence via WAL', () => {
     expect(recoveredIds).toEqual(['res-alpha', 'res-beta']);
 
     // res-alpha should be unchanged
-    const recoveredA = registry2.getResource('res-alpha');
+    const recoveredA = await registry2.getResource('res-alpha');
     expect(recoveredA).not.toBeNull();
     expect(recoveredA!.resourceType).toBe('test-worker');
     expect(recoveredA!.applicationData).toEqual({ role: 'primary' });
     expect(recoveredA!.state).toBe(ResourceState.ACTIVE);
 
     // res-beta should reflect the update
-    const recoveredB = registry2.getResource('res-beta');
+    const recoveredB = await registry2.getResource('res-beta');
     expect(recoveredB).not.toBeNull();
     expect(recoveredB!.applicationData).toEqual({ role: 'secondary', priority: 'high' });
     expect(recoveredB!.state).toBe(ResourceState.SCALING);
 
     // res-gamma should NOT exist
-    const recoveredC = registry2.getResource('res-gamma');
+    const recoveredC = await registry2.getResource('res-gamma');
     expect(recoveredC).toBeNull();
 
     await registry2.stop();
@@ -200,7 +200,7 @@ describe('Resource persistence via WAL', () => {
 
     await (registry2 as any).recoverFromWAL(walReader);
 
-    const recovered = registry2.getResource('res-rich');
+    const recovered = await registry2.getResource('res-rich');
     expect(recovered).not.toBeNull();
     expect(recovered!.tags).toEqual({ env: 'production', tier: 'critical' });
     expect(recovered!.applicationData).toEqual({ config: { retries: 3, timeout: 5000 } });
@@ -257,7 +257,7 @@ describe('Resource persistence via WAL', () => {
 
     await (registry2 as any).recoverFromWAL(walReader);
 
-    const recovered = registry2.getResource('res-evolving');
+    const recovered = await registry2.getResource('res-evolving');
     expect(recovered).not.toBeNull();
     expect(recovered!.applicationData).toEqual({ version: 3 });
     expect(recovered!.state).toBe(ResourceState.ACTIVE);
@@ -308,8 +308,8 @@ describe('Resource persistence via WAL', () => {
     await (registry2 as any).recoverFromWAL(walReader);
 
     expect(registry2.getAllResources()).toHaveLength(0);
-    expect(registry2.getResource('res-temp-1')).toBeNull();
-    expect(registry2.getResource('res-temp-2')).toBeNull();
+    expect(await registry2.getResource('res-temp-1')).toBeNull();
+    expect(await registry2.getResource('res-temp-2')).toBeNull();
 
     await registry2.stop();
     await walReader.close();

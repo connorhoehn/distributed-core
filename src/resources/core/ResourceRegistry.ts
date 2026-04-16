@@ -17,6 +17,8 @@ import { ClusterManager } from '../../cluster/ClusterManager';
 import { DistributedSemanticsConfig, DistributedSemanticsFlags, globalSemanticsConfig } from '../../communication/semantics/DistributedSemanticsConfig';
 import { WALWriter, WALReader, WALEntry, EntityUpdate } from '../../persistence/types';
 import { Logger } from '../../common/logger';
+import { ResourceAuthorizationService, Principal } from '../security/ResourceAuthorizationService';
+import { ResourceOperation } from './ResourceOperation';
 
 /**
  * Operation types for resource WAL entries
@@ -46,6 +48,15 @@ interface ResourceEntityRecord extends EntityRecord {
 /**
  * Configuration for the ResourceRegistry
  */
+/**
+ * Caller identity for authorization checks.
+ * Passed to CRUD methods when an authorization service is configured.
+ */
+export interface Caller {
+  id: string;
+  roles?: string[];
+}
+
 export interface ResourceRegistryConfig {
   nodeId: string;
   entityRegistryType: EntityRegistryType;
@@ -55,6 +66,7 @@ export interface ResourceRegistryConfig {
   clusterManager?: ClusterManager;
   semanticsConfig?: DistributedSemanticsConfig;
   walWriter?: WALWriter;
+  authorizationService?: ResourceAuthorizationService;
 }
 
 /**
@@ -101,6 +113,7 @@ export class ResourceRegistry extends EventEmitter {
   private clusterManager?: ClusterManager;
   private semanticsConfig: DistributedSemanticsConfig;
   private walWriter?: WALWriter;
+  private authorizationService?: ResourceAuthorizationService;
 
   /** Pending remote resource creation requests awaiting confirmation */
   private pendingCreateRequests = new Map<string, {
@@ -120,6 +133,7 @@ export class ResourceRegistry extends EventEmitter {
     this.resourceTopologyManager = config.resourceTopologyManager;
     this.clusterManager = config.clusterManager;
     this.walWriter = config.walWriter;
+    this.authorizationService = config.authorizationService;
 
     // Create the underlying EntityRegistry using the factory
     this.entityRegistry = EntityRegistryFactory.create({
@@ -143,15 +157,59 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   /**
+   * Authorize a caller for a given operation on a resource.
+   * Resolves silently when no authorization service is configured.
+   * @throws If the caller is not authorized.
+   */
+  private async authorizeOrThrow(
+    caller: Caller | undefined,
+    resourceId: string,
+    opType: 'CREATE' | 'UPDATE' | 'DELETE' | 'READ'
+  ): Promise<void> {
+    if (!this.authorizationService) {
+      return;
+    }
+
+    const principal: Principal = {
+      id: caller?.id ?? 'anonymous',
+      type: 'user',
+      attributes: { roles: caller?.roles ?? [] }
+    };
+
+    const operation = {
+      opId: '',
+      resourceId,
+      type: opType as any,
+      version: 0,
+      timestamp: Date.now(),
+      originNodeId: this.nodeId,
+      payload: {},
+      vectorClock: { nodeId: this.nodeId, vector: new Map(), increment() { return this; }, compare() { return 0; }, merge() { return this; } },
+      correlationId: '',
+      leaseTerm: 0
+    } as ResourceOperation;
+
+    const result = await this.authorizationService.authorizeOperation(principal, operation);
+    if (!result.allowed) {
+      const permLabel = opType.toLowerCase();
+      throw new Error(`Unauthorized: cannot ${permLabel} resource`);
+    }
+  }
+
+  /**
    * Create a new resource, automatically placing it on the optimal node via the topology manager.
    * @param resourceMetadata - Metadata describing the resource to create; its `resourceType` must be registered.
+   * @param caller - Optional caller identity for authorization.
    * @returns The finalised resource metadata including assigned node and timestamp.
    * @throws If the registry is not running or the resource type is unregistered.
    */
-  async createResource(resourceMetadata: ResourceMetadata): Promise<ResourceMetadata> {
+  async createResource(resourceMetadata: ResourceMetadata, caller?: Caller): Promise<ResourceMetadata> {
     if (!this.isRunning) {
       throw new Error('ResourceRegistry is not running. Call start() first.');
     }
+
+    // Authorization check
+    await this.authorizeOrThrow(caller, resourceMetadata.resourceId, 'CREATE');
 
     // Validate resource type is registered
     const typeDefinition = this.resourceTypes.get(resourceMetadata.resourceType);
@@ -411,8 +469,13 @@ export class ResourceRegistry extends EventEmitter {
 
   /**
    * Retrieve a resource by its unique identifier, or `null` if it does not exist.
+   * @param resourceId - The resource to look up.
+   * @param caller - Optional caller identity for authorization.
    */
-  getResource(resourceId: string): ResourceMetadata | null {
+  async getResource(resourceId: string, caller?: Caller): Promise<ResourceMetadata | null> {
+    // Authorization check
+    await this.authorizeOrThrow(caller, resourceId, 'READ');
+
     const entity = this.entityRegistry.getEntity(resourceId);
     if (!entity || !this.isResourceEntity(entity)) {
       return null;
@@ -437,10 +500,13 @@ export class ResourceRegistry extends EventEmitter {
    * @returns The updated resource metadata.
    * @throws If the registry is not running or the resource is not found.
    */
-  async updateResource(resourceId: string, updates: Partial<ResourceMetadata>): Promise<ResourceMetadata> {
+  async updateResource(resourceId: string, updates: Partial<ResourceMetadata>, caller?: Caller): Promise<ResourceMetadata> {
     if (!this.isRunning) {
       throw new Error('ResourceRegistry is not running. Call start() first.');
     }
+
+    // Authorization check
+    await this.authorizeOrThrow(caller, resourceId, 'UPDATE');
 
     const existingEntity = this.entityRegistry.getEntity(resourceId);
     if (!existingEntity || !this.isResourceEntity(existingEntity)) {
@@ -475,10 +541,13 @@ export class ResourceRegistry extends EventEmitter {
    * Remove a resource by ID, invoking its type's `onResourceDestroyed` lifecycle hook and persisting the deletion to the WAL.
    * @throws If the registry is not running or the resource is not found.
    */
-  async removeResource(resourceId: string): Promise<void> {
+  async removeResource(resourceId: string, caller?: Caller): Promise<void> {
     if (!this.isRunning) {
       throw new Error('ResourceRegistry is not running. Call start() first.');
     }
+
+    // Authorization check
+    await this.authorizeOrThrow(caller, resourceId, 'DELETE');
 
     const entity = this.entityRegistry.getEntity(resourceId);
     if (!entity || !this.isResourceEntity(entity)) {
@@ -888,7 +957,7 @@ export class ResourceRegistry extends EventEmitter {
   }
 
   async destroyResource(resourceId: string): Promise<void> {
-    const resource = this.getResource(resourceId);
+    const resource = await this.getResource(resourceId);
     if (!resource) {
       throw new Error(`Resource '${resourceId}' not found`);
     }

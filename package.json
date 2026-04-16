@@ -23,7 +23,10 @@
     "start": "ts-node src/cli/index.ts",
     "example:basic": "ts-node examples/basic-cluster/index.ts",
     "example:counter": "ts-node examples/distributed-counter/index.ts",
-    "example:chat": "ts-node examples/chat-room/index.ts"
+    "example:chat": "ts-node examples/chat-room/index.ts",
+    "bench:wal": "ts-node --project benchmarks/tsconfig.json benchmarks/wal-throughput.ts",
+    "bench:resources": "ts-node --project benchmarks/tsconfig.json benchmarks/resource-ops.ts",
+    "bench:cluster": "ts-node --project benchmarks/tsconfig.json benchmarks/cluster-formation.ts"
   },
   "keywords": [
     "distributed",

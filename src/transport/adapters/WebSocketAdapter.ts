@@ -1,5 +1,6 @@
 import WebSocket = require('ws');
 import * as http from 'http';
+import * as https from 'https';
 import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
@@ -15,6 +16,13 @@ interface WebSocketConnection {
   isAlive: boolean;
 }
 
+interface TlsOptions {
+  enabled: boolean;
+  key?: string | Buffer;
+  cert?: string | Buffer;
+  ca?: string | Buffer;
+}
+
 interface WebSocketAdapterOptions {
   port?: number;
   host?: string;
@@ -24,6 +32,7 @@ interface WebSocketAdapterOptions {
   upgradeTimeout?: number;
   enableCompression?: boolean;
   enableLogging?: boolean;
+  tls?: TlsOptions;
 }
 
 /**
@@ -32,15 +41,21 @@ interface WebSocketAdapterOptions {
  */
 export class WebSocketAdapter extends Transport {
   private readonly nodeId: NodeId;
-  private readonly options: Required<WebSocketAdapterOptions>;
-  private server?: http.Server;
+  private readonly options: Required<Omit<WebSocketAdapterOptions, 'tls'>> & { tls: TlsOptions };
+  private server?: http.Server | https.Server;
   private wss?: WebSocket.Server;
   private connections = new Map<string, WebSocketConnection>();
   private isStarted = false;
   private circuitBreaker: CircuitBreaker;
   private retryManager: RetryManager;
   private heartbeatTimer?: NodeJS.Timeout;
+  private _canSend = true;
   private readonly logger = Logger.create('WebSocketAdapter');
+
+  /** High-water mark in bytes — triggers backpressure */
+  private static readonly BUFFER_HIGH_WATER = 64 * 1024; // 64KB
+  /** Low-water mark — clears backpressure */
+  private static readonly BUFFER_LOW_WATER = 16 * 1024;  // 16KB
 
   constructor(nodeId: NodeId, options: WebSocketAdapterOptions = {}) {
     super();
@@ -53,7 +68,8 @@ export class WebSocketAdapter extends Transport {
       pongTimeout: options.pongTimeout || 5000, // 5 seconds
       upgradeTimeout: options.upgradeTimeout || 10000, // 10 seconds
       enableCompression: options.enableCompression !== false,
-      enableLogging: options.enableLogging !== false
+      enableLogging: options.enableLogging !== false,
+      tls: options.tls || { enabled: false }
     };
 
     this.circuitBreaker = new CircuitBreaker({
@@ -77,12 +93,45 @@ export class WebSocketAdapter extends Transport {
     return this.nodeId;
   }
 
+  override canSend(): boolean {
+    return this._canSend;
+  }
+
+  override getQueueDepth(): number {
+    let total = 0;
+    for (const conn of this.connections.values()) {
+      if (conn.isActive && conn.ws.readyState === WebSocket.OPEN) {
+        total += conn.ws.bufferedAmount;
+      }
+    }
+    return total;
+  }
+
+  private checkBackpressure(): void {
+    const depth = this.getQueueDepth();
+    if (this._canSend && depth >= WebSocketAdapter.BUFFER_HIGH_WATER) {
+      this._canSend = false;
+      this.emit('backpressure');
+    } else if (!this._canSend && depth < WebSocketAdapter.BUFFER_LOW_WATER) {
+      this._canSend = true;
+      this.emit('drain');
+    }
+  }
+
   async start(): Promise<void> {
     if (this.isStarted) return;
 
     try {
       await this.circuitBreaker.execute(async () => {
-        this.server = http.createServer();
+        if (this.options.tls.enabled) {
+          this.server = https.createServer({
+            key: this.options.tls.key,
+            cert: this.options.tls.cert,
+            ca: this.options.tls.ca
+          });
+        } else {
+          this.server = http.createServer();
+        }
 
         this.wss = new WebSocket.Server({
           server: this.server,
@@ -155,7 +204,7 @@ export class WebSocketAdapter extends Transport {
         });
       }
 
-      // Close HTTP server
+      // Close HTTP/HTTPS server
       if (this.server) {
         await new Promise<void>((resolve) => {
           this.server!.close(() => resolve());
@@ -194,6 +243,7 @@ export class WebSocketAdapter extends Transport {
         };
         
         connection.ws.send(JSON.stringify(messageToSend));
+        this.checkBackpressure();
         return;
       } catch (error) {
         this.logger.error(`Failed to send to ${target.id}:`, error);
@@ -260,7 +310,7 @@ export class WebSocketAdapter extends Transport {
     }
 
     const serialized = message.serialize();
-    
+
     return new Promise<void>((resolve, reject) => {
       connection.ws.send(serialized, (error) => {
         if (error) {
@@ -268,10 +318,11 @@ export class WebSocketAdapter extends Transport {
           reject(error);
         } else {
           connection.lastActivity = Date.now();
-          this.emit('message-sent', { 
-            nodeId: connection.nodeId, 
-            messageId: message.header.id 
+          this.emit('message-sent', {
+            nodeId: connection.nodeId,
+            messageId: message.header.id
           });
+          this.checkBackpressure();
           resolve();
         }
       });
@@ -279,11 +330,20 @@ export class WebSocketAdapter extends Transport {
   }
 
   private async createOutgoingConnection(nodeId: NodeId): Promise<WebSocketConnection> {
-    const url = `ws://${nodeId.address}:${nodeId.port}`;
-    const ws = new WebSocket(url, {
+    const protocol = this.options.tls.enabled ? 'wss' : 'ws';
+    const url = `${protocol}://${nodeId.address}:${nodeId.port}`;
+    const wsOptions: WebSocket.ClientOptions = {
       handshakeTimeout: this.options.upgradeTimeout,
       perMessageDeflate: this.options.enableCompression
-    });
+    };
+
+    if (this.options.tls.enabled) {
+      wsOptions.ca = this.options.tls.ca;
+      wsOptions.key = this.options.tls.key;
+      wsOptions.cert = this.options.tls.cert;
+    }
+
+    const ws = new WebSocket(url, wsOptions);
 
     const connection: WebSocketConnection = {
       ws,

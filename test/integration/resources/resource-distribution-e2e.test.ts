@@ -96,13 +96,13 @@ describe('Resource Distribution E2E Integration', () => {
    * Poll until a predicate is true, or throw after timeout.
    */
   async function waitFor(
-    predicate: () => boolean,
+    predicate: () => boolean | Promise<boolean>,
     timeoutMs: number = 5000,
     intervalMs: number = 50
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      if (predicate()) return;
+      if (await predicate()) return;
       await new Promise(resolve => setTimeout(resolve, intervalMs));
     }
     throw new Error(`waitFor timed out after ${timeoutMs}ms`);
@@ -192,7 +192,7 @@ describe('Resource Distribution E2E Integration', () => {
               store.set(resourceOp.resourceId, resource);
               // Also add to the node's EntityRegistry for full integration
               try {
-                const existing = node.resourceRegistry.getResource(resourceOp.resourceId);
+                const existing = await node.resourceRegistry.getResource(resourceOp.resourceId);
                 if (!existing) {
                   await node.resourceRegistry.createRemoteResource(resource);
                 }
@@ -320,18 +320,18 @@ describe('Resource Distribution E2E Integration', () => {
     expect(n2Resource.resourceType).toBe('compute');
 
     // Verify Node 1's EntityRegistry also has the resource (full integration)
-    await waitFor(() => {
-      return node1.resourceRegistry.getResource('test-resource-1') !== null;
+    await waitFor(async () => {
+      return (await node1.resourceRegistry.getResource('test-resource-1')) !== null;
     }, 2000);
-    const n1RegistryResource = node1.resourceRegistry.getResource('test-resource-1');
+    const n1RegistryResource = await node1.resourceRegistry.getResource('test-resource-1');
     expect(n1RegistryResource).toBeDefined();
     expect(n1RegistryResource!.resourceId).toBe('test-resource-1');
 
     // Verify Node 2's EntityRegistry also has the resource
-    await waitFor(() => {
-      return node2.resourceRegistry.getResource('test-resource-1') !== null;
+    await waitFor(async () => {
+      return (await node2.resourceRegistry.getResource('test-resource-1')) !== null;
     }, 2000);
-    const n2RegistryResource = node2.resourceRegistry.getResource('test-resource-1');
+    const n2RegistryResource = await node2.resourceRegistry.getResource('test-resource-1');
     expect(n2RegistryResource).toBeDefined();
     expect(n2RegistryResource!.resourceId).toBe('test-resource-1');
 
@@ -439,7 +439,7 @@ describe('Resource Distribution E2E Integration', () => {
         if (resourceOp.operation === 'add' || resourceOp.operation === 'modify') {
           n2Store.set(resourceOp.resourceId, resource);
           try {
-            const existing = node2.resourceRegistry.getResource(resourceOp.resourceId);
+            const existing = await node2.resourceRegistry.getResource(resourceOp.resourceId);
             if (!existing) {
               await node2.resourceRegistry.createRemoteResource(resource);
             }
@@ -477,10 +477,10 @@ describe('Resource Distribution E2E Integration', () => {
     expect(syncedResource.state).toBe(ResourceState.ACTIVE);
 
     // Verify EntityRegistry integration on Node 2
-    await waitFor(() => {
-      return node2.resourceRegistry.getResource('early-resource') !== null;
+    await waitFor(async () => {
+      return (await node2.resourceRegistry.getResource('early-resource')) !== null;
     }, 2000);
-    expect(node2.resourceRegistry.getResource('early-resource')!.resourceId).toBe('early-resource');
+    expect((await node2.resourceRegistry.getResource('early-resource'))!.resourceId).toBe('early-resource');
 
     // --- 6. Clean shutdown ---
     await node2.resourceRegistry.stop();
@@ -575,17 +575,17 @@ describe('Resource Distribution E2E Integration', () => {
     expect(n2Gamma.capacity!.maximum).toBe(200);
 
     // Verify EntityRegistry consistency on Node 1
-    await waitFor(() => {
+    await waitFor(async () => {
       return (
-        node1.resourceRegistry.getResource('res-alpha') !== null &&
-        node1.resourceRegistry.getResource('res-beta') !== null &&
-        node1.resourceRegistry.getResource('res-gamma') !== null
+        (await node1.resourceRegistry.getResource('res-alpha')) !== null &&
+        (await node1.resourceRegistry.getResource('res-beta')) !== null &&
+        (await node1.resourceRegistry.getResource('res-gamma')) !== null
       );
     }, 2000);
 
-    expect(node1.resourceRegistry.getResource('res-alpha')!.resourceType).toBe('compute');
-    expect(node1.resourceRegistry.getResource('res-beta')!.resourceType).toBe('compute');
-    expect(node1.resourceRegistry.getResource('res-gamma')!.resourceType).toBe('compute');
+    expect((await node1.resourceRegistry.getResource('res-alpha'))!.resourceType).toBe('compute');
+    expect((await node1.resourceRegistry.getResource('res-beta'))!.resourceType).toBe('compute');
+    expect((await node1.resourceRegistry.getResource('res-gamma'))!.resourceType).toBe('compute');
 
     // --- 4. Clean shutdown ---
     await node2.resourceRegistry.stop();

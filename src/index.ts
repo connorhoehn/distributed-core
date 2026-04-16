@@ -54,6 +54,8 @@ export { GossipMessage } from './gossip/transport/GossipMessage';
 export * from './transport/Encryption';
 export * from './transport/EncryptedTransport';
 export { MessageBatcher, type BatchConfig, type BatchedTransport, type BatchOptions, type BatchedMessage, type MessageBatch, type BatchStats } from './transport/MessageBatcher';
+export { MessageValidator, type ValidationResult, type ValidatedTransportOptions } from './transport/MessageValidator';
+export { RateLimitedTransport, RateLimitError, type RateLimitConfig, type RateLimitStats } from './transport/RateLimitedTransport';
 
 // Metrics modules
 export * from './monitoring/metrics/MetricsTracker';
@@ -94,6 +96,9 @@ export * from './factories';
 
 // Service modules
 export * from './services';
+
+// Benchmarks
+export * from './benchmarks';
 
 // Agent modules
 export * from './agent';

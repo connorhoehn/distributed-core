@@ -164,12 +164,12 @@ describe('ResourceRegistry WAL Persistence', () => {
     expect(result.entriesReplayed).toBe(4);
 
     // resource-alpha should exist with updated data
-    const recoveredAlpha = registry2.getResource('resource-alpha');
+    const recoveredAlpha = await registry2.getResource('resource-alpha');
     expect(recoveredAlpha).not.toBeNull();
     expect(recoveredAlpha!.applicationData.name).toBe('Alpha Updated');
 
     // resource-beta should NOT exist (was deleted)
-    const recoveredBeta = registry2.getResource('resource-beta');
+    const recoveredBeta = await registry2.getResource('resource-beta');
     expect(recoveredBeta).toBeNull();
 
     await registry2.stop();
@@ -200,7 +200,7 @@ describe('ResourceRegistry WAL Persistence', () => {
     expect(all).toHaveLength(5);
 
     for (let i = 1; i <= 5; i++) {
-      const r = registry2.getResource(`res-${i}`);
+      const r = await registry2.getResource(`res-${i}`);
       expect(r).not.toBeNull();
       expect(r!.applicationData.index).toBe(i);
     }
@@ -219,7 +219,7 @@ describe('ResourceRegistry WAL Persistence', () => {
     });
 
     await registry.createResource(res);
-    const retrieved = registry.getResource('ephemeral-resource');
+    const retrieved = await registry.getResource('ephemeral-resource');
     expect(retrieved).not.toBeNull();
 
     // No WAL entries should exist since we used the shared walStore
@@ -304,7 +304,7 @@ describe('ResourceRegistry WAL Persistence', () => {
 
     // Only the CREATE entry should count as replayed (not the generic one)
     expect(result.entriesReplayed).toBe(1);
-    expect(registry2.getResource('real-resource')).not.toBeNull();
+    expect(await registry2.getResource('real-resource')).not.toBeNull();
 
     await registry2.stop();
   });

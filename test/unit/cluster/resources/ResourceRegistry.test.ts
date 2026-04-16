@@ -224,14 +224,14 @@ describe('ResourceRegistry', () => {
       await resourceRegistry.createResource(resourceMetadata);
 
       // Verify it exists
-      const resource = resourceRegistry.getResource('remove-test-resource');
+      const resource = await resourceRegistry.getResource('remove-test-resource');
       expect(resource).toBeDefined();
 
       // Remove it
       await resourceRegistry.removeResource('remove-test-resource');
 
       // Verify it's gone
-      const removedResource = resourceRegistry.getResource('remove-test-resource');
+      const removedResource = await resourceRegistry.getResource('remove-test-resource');
       expect(removedResource).toBeNull();
     });
 
@@ -256,7 +256,7 @@ describe('ResourceRegistry', () => {
 
       await resourceRegistry.createResource(resourceMetadata);
 
-      const retrievedResource = resourceRegistry.getResource('get-test-resource');
+      const retrievedResource = await resourceRegistry.getResource('get-test-resource');
       expect(retrievedResource).toBeDefined();
       expect(retrievedResource!.resourceId).toBe('get-test-resource');
       expect(retrievedResource!.applicationData.name).toBe('Get Test Resource');
@@ -487,7 +487,7 @@ describe('ResourceRegistry', () => {
       await resourceRegistry.createResource(resourceMetadata);
 
       // Verify resource was created with the correct health value
-      const resource = resourceRegistry.getResource('health-test-resource-1');
+      const resource = await resourceRegistry.getResource('health-test-resource-1');
       expect(resource).toBeDefined();
       expect(resource!.health).toBe(ResourceHealth.HEALTHY);
     });

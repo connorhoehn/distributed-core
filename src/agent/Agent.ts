@@ -180,7 +180,7 @@ export class Agent {
       return null;
     }
 
-    const resource = registry.getResource(id);
+    const resource = await registry.getResource(id);
     if (!resource) {
       return null;
     }

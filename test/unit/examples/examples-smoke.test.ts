@@ -70,7 +70,7 @@ describe('Example smoke tests', () => {
 
     expect(created.resourceId).toBe('ctr-1');
 
-    const fetched = registry.getResource('ctr-1');
+    const fetched = await registry.getResource('ctr-1');
     expect(fetched).not.toBeNull();
     expect(fetched!.resourceType).toBe('counter');
 

@@ -1,4 +1,5 @@
 import * as net from 'net';
+import * as tls from 'tls';
 import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
@@ -13,6 +14,14 @@ interface TCPConnection {
   messageBuffer: Buffer;
 }
 
+interface TLSOptions {
+  enabled: boolean;
+  key?: string | Buffer;    // PEM private key
+  cert?: string | Buffer;   // PEM certificate
+  ca?: string | Buffer;     // PEM CA certificate (for client verification)
+  rejectUnauthorized?: boolean; // default true
+}
+
 interface TCPAdapterOptions {
   port?: number;
   host?: string;
@@ -21,6 +30,7 @@ interface TCPAdapterOptions {
   keepAliveInterval?: number;
   enableNagle?: boolean;
   enableLogging?: boolean;
+  tls?: TLSOptions;
   // Test-specific options for faster failures
   maxRetries?: number;
   baseRetryDelay?: number;
@@ -33,8 +43,8 @@ interface TCPAdapterOptions {
  */
 export class TCPAdapter extends Transport {
   private readonly nodeId: NodeId;
-  private readonly options: Required<TCPAdapterOptions>;
-  private server?: net.Server;
+  private readonly options: Required<Omit<TCPAdapterOptions, 'tls'>> & { tls: TLSOptions };
+  private server?: net.Server | tls.Server;
   private connections = new Map<string, TCPConnection>();
   private isStarted = false;
   private circuitBreaker: CircuitBreaker;
@@ -42,6 +52,9 @@ export class TCPAdapter extends Transport {
   private keepAliveTimer?: NodeJS.Timeout;
   private messageHandlers: Set<(message: Message) => void> = new Set();
   private readonly logger = Logger.create('TCPAdapter');
+
+  private _canSend = true;
+  private _queueDepth = 0;
 
   private static readonly MESSAGE_DELIMITER = '\n\n';
   private static readonly MAX_MESSAGE_SIZE = 64 * 1024; // 64KB
@@ -57,6 +70,7 @@ export class TCPAdapter extends Transport {
       keepAliveInterval: options.keepAliveInterval || 60000,
       enableNagle: options.enableNagle !== false,
       enableLogging: options.enableLogging ?? true,
+      tls: options.tls ?? { enabled: false },
       maxRetries: options.maxRetries ?? 3,
       baseRetryDelay: options.baseRetryDelay ?? 1000,
       circuitBreakerTimeout: options.circuitBreakerTimeout ?? 10000
@@ -87,12 +101,25 @@ export class TCPAdapter extends Transport {
 
     try {
       await this.circuitBreaker.execute(async () => {
-        this.server = net.createServer({
-          allowHalfOpen: false,
-          pauseOnConnect: false
-        });
+        if (this.options.tls.enabled) {
+          this.server = tls.createServer({
+            key: this.options.tls.key,
+            cert: this.options.tls.cert,
+            ca: this.options.tls.ca ? [this.options.tls.ca] : undefined,
+            requestCert: !!this.options.tls.ca,
+            rejectUnauthorized: this.options.tls.rejectUnauthorized ?? true,
+            allowHalfOpen: false,
+            pauseOnConnect: false
+          });
+        } else {
+          this.server = net.createServer({
+            allowHalfOpen: false,
+            pauseOnConnect: false
+          });
+        }
 
-        this.server.on('connection', (socket) => this.handleIncomingConnection(socket));
+        const connectionEvent = this.options.tls.enabled ? 'secureConnection' : 'connection';
+        this.server.on(connectionEvent, (socket: net.Socket) => this.handleIncomingConnection(socket));
         this.server.on('error', (error) => this.handleServerError(error));
         this.server.on('close', () => this.emit('server-closed'));
 
@@ -176,6 +203,14 @@ export class TCPAdapter extends Transport {
     return this.nodeId;
   }
 
+  override canSend(): boolean {
+    return this._canSend;
+  }
+
+  override getQueueDepth(): number {
+    return this._queueDepth;
+  }
+
   private async sendMessage(connection: TCPConnection, message: Message): Promise<void> {
     if (!connection.isActive) {
       throw new Error('Connection is not active');
@@ -183,12 +218,15 @@ export class TCPAdapter extends Transport {
 
     const serialized = this.serializeMessage(message);
     const messageWithDelimiter = Buffer.concat([
-      serialized, 
+      serialized,
       Buffer.from(TCPAdapter.MESSAGE_DELIMITER, 'utf8')
     ]);
 
+    this._queueDepth++;
+
     return new Promise<void>((resolve, reject) => {
-      connection.socket.write(messageWithDelimiter, (error) => {
+      const flushed = connection.socket.write(messageWithDelimiter, (error) => {
+        this._queueDepth--;
         if (error) {
           this.handleConnectionError(connection, error);
           reject(error);
@@ -198,6 +236,11 @@ export class TCPAdapter extends Transport {
           resolve();
         }
       });
+
+      if (!flushed && this._canSend) {
+        this._canSend = false;
+        this.emit('backpressure');
+      }
     });
   }
 
@@ -211,8 +254,21 @@ export class TCPAdapter extends Transport {
   }
 
   private async createOutgoingConnection(nodeId: NodeId): Promise<TCPConnection> {
-    const socket = new net.Socket();
-    
+    let socket: net.Socket;
+
+    if (this.options.tls.enabled) {
+      socket = tls.connect({
+        host: nodeId.address,
+        port: nodeId.port!,
+        key: this.options.tls.key,
+        cert: this.options.tls.cert,
+        ca: this.options.tls.ca ? [this.options.tls.ca] : undefined,
+        rejectUnauthorized: this.options.tls.rejectUnauthorized ?? true
+      });
+    } else {
+      socket = new net.Socket();
+    }
+
     // Configure socket options
     socket.setNoDelay(!this.options.enableNagle);
     socket.setKeepAlive(true, this.options.keepAliveInterval);
@@ -232,14 +288,26 @@ export class TCPAdapter extends Transport {
         reject(new Error(`Connection timeout to ${nodeId.address}:${nodeId.port}`));
       }, this.options.connectionTimeout);
 
-      socket.connect(nodeId.port!, nodeId.address, () => {
-        clearTimeout(timeout);
-        connection.isActive = true;
-        this.connections.set(nodeId.id, connection);
-        this.setupConnectionHandlers(connection);
-        this.emit('connection-established', nodeId);
-        resolve(connection);
-      });
+      if (this.options.tls.enabled) {
+        // TLS socket connects during tls.connect(), wait for 'secureConnect'
+        (socket as tls.TLSSocket).on('secureConnect', () => {
+          clearTimeout(timeout);
+          connection.isActive = true;
+          this.connections.set(nodeId.id, connection);
+          this.setupConnectionHandlers(connection);
+          this.emit('connection-established', nodeId);
+          resolve(connection);
+        });
+      } else {
+        socket.connect(nodeId.port!, nodeId.address, () => {
+          clearTimeout(timeout);
+          connection.isActive = true;
+          this.connections.set(nodeId.id, connection);
+          this.setupConnectionHandlers(connection);
+          this.emit('connection-established', nodeId);
+          resolve(connection);
+        });
+      }
 
       socket.on('error', (error) => {
         clearTimeout(timeout);
@@ -280,6 +348,12 @@ export class TCPAdapter extends Transport {
     connection.socket.on('error', (error) => this.handleConnectionError(connection, error));
     connection.socket.on('close', () => this.handleConnectionClose(connection));
     connection.socket.on('timeout', () => this.handleConnectionTimeout(connection));
+    connection.socket.on('drain', () => {
+      if (!this._canSend) {
+        this._canSend = true;
+        this.emit('drain');
+      }
+    });
   }
 
   private handleConnectionData(connection: TCPConnection, data: Buffer): void {

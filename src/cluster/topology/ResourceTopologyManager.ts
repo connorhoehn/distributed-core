@@ -282,7 +282,7 @@ export class ResourceTopologyManager extends EventEmitter {
    * Get resource distribution analysis for a specific resource
    */
   async getResourceDistribution(resourceId: string, resourceType: string): Promise<ResourceDistributionAnalysis> {
-    const resource = this.resourceRegistry.getResource(resourceId);
+    const resource = await this.resourceRegistry.getResource(resourceId);
     if (!resource) {
       throw new Error(`Resource '${resourceId}' not found`);
     }
@@ -339,11 +339,11 @@ export class ResourceTopologyManager extends EventEmitter {
       projectedThroughput: number;
     };
   }> {
-    const resource = this.resourceRegistry.getResource(resourceId);
+    const resource = await this.resourceRegistry.getResource(resourceId);
     if (!resource) {
       throw new Error(`Resource '${resourceId}' not found`);
     }
-    
+
     const typeDefinition = this.resourceTypeRegistry.getResourceType(resourceType);
     if (!typeDefinition) {
       throw new Error(`Resource type '${resourceType}' not registered`);

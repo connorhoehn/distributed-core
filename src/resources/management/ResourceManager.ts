@@ -157,7 +157,7 @@ export class ResourceManager extends EventEmitter {
   }
 
   private async checkAndScale(resourceId: string): Promise<void> {
-    const resource = this.resourceRegistry.getResource(resourceId);
+    const resource = await this.resourceRegistry.getResource(resourceId);
     if (!resource || !resource.applicationData?.scaling?.enabled) return;
 
     const metrics = await this.getResourceMetrics(resourceId);
@@ -176,7 +176,7 @@ export class ResourceManager extends EventEmitter {
   }
 
   private async scaleUp(resourceId: string): Promise<void> {
-    const resource = this.resourceRegistry.getResource(resourceId);
+    const resource = await this.resourceRegistry.getResource(resourceId);
     if (!resource) return;
 
     const newReplicaCount = Math.min(
@@ -195,7 +195,7 @@ export class ResourceManager extends EventEmitter {
   }
 
   private async scaleDown(resourceId: string): Promise<void> {
-    const resource = this.resourceRegistry.getResource(resourceId);
+    const resource = await this.resourceRegistry.getResource(resourceId);
     if (!resource) return;
 
     const newReplicaCount = Math.max(
@@ -386,8 +386,8 @@ export class ResourceManager extends EventEmitter {
     return await this.resourceRegistry.createResource(resourceMetadata);
   }
 
-  getResource(resourceId: string): ResourceMetadata | null {
-    return this.resourceRegistry.getResource(resourceId);
+  async getResource(resourceId: string): Promise<ResourceMetadata | null> {
+    return await this.resourceRegistry.getResource(resourceId);
   }
 
   getResourcesByType(resourceType: string): ResourceMetadata[] {

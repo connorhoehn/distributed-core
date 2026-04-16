@@ -45,4 +45,23 @@ export abstract class Transport extends EventEmitter {
    * Get local node information
    */
   abstract getLocalNodeInfo(): NodeId;
+
+  /**
+   * Check if the transport can accept more messages.
+   * When this returns false, callers should wait for the 'drain' event
+   * before sending additional messages.
+   *
+   * Event: 'backpressure' — emitted when the transport becomes overwhelmed
+   * Event: 'drain' — emitted when the transport can accept messages again
+   */
+  canSend(): boolean {
+    return true;
+  }
+
+  /**
+   * Get the current outbound queue depth (0 if no queuing layer exists).
+   */
+  getQueueDepth(): number {
+    return 0;
+  }
 }
