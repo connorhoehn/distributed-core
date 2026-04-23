@@ -103,6 +103,14 @@ export class StateDeltaManager {
   private config: DeltaConfig;
   private sequenceCounter = 0;
 
+  /**
+   * Track the IDs of all deltas we have seen so we can populate the
+   * `causality` field on newly-generated deltas.  A delta causally depends
+   * on every delta that was applied before it (i.e. this node has already
+   * processed those changes and the new delta builds on top of them).
+   */
+  private appliedDeltaIds: string[] = [];
+
   constructor(config: Partial<DeltaConfig> = {}) {
     this.config = {
       maxDeltaSize: 100,
@@ -182,7 +190,7 @@ export class StateDeltaManager {
         version: 1,
         sequenceNumber: this.sequenceCounter,
         vectorClockUpdates: this.generateVectorClockUpdates(chunk),
-        causality: [], // TODO: Implement causality tracking
+        causality: this.config.enableCausality ? [...this.appliedDeltaIds] : [],
         compressed: false,
         encrypted: false
       };
@@ -235,6 +243,17 @@ export class StateDeltaManager {
     // Update resulting services
     result.resultingServices = Array.from(serviceMap.values());
     result.success = result.failedOperations.length === 0;
+
+    // Record this delta's ID so subsequent generated deltas can declare a
+    // causal dependency on it (vector-clock-based causality tracking).
+    if (this.config.enableCausality && delta.id) {
+      this.appliedDeltaIds.push(delta.id);
+      // Keep the causality list bounded — retain only the most recent 1 000
+      // entries; older deltas are transitively covered by newer ones.
+      if (this.appliedDeltaIds.length > 1000) {
+        this.appliedDeltaIds = this.appliedDeltaIds.slice(-1000);
+      }
+    }
 
     return result;
   }

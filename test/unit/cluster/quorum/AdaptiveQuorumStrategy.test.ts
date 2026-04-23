@@ -79,7 +79,7 @@ describe('AdaptiveQuorumStrategy', () => {
     });
 
     it('returns 0 when all samples have failures <= 1 (single-node blips do not count)', () => {
-      // failures of 0 or 1 are below the threshold (> 2 required)
+      // PARTITION_FAILURE_THRESHOLD = 1, so only failures > 1 are partitioned
       strategy.updateNetworkMetrics(50, 0);
       strategy.updateNetworkMetrics(60, 1);
       strategy.updateNetworkMetrics(55, 0);
@@ -88,48 +88,49 @@ describe('AdaptiveQuorumStrategy', () => {
       expect(strategy.getAdaptationMetrics().partitionEvents).toBe(0);
     });
 
-    it('returns 0 for samples where failures === 2 (boundary: threshold is strictly > 2)', () => {
+    it('detects a partition window when failures === 2 (threshold is > 1)', () => {
+      // PARTITION_FAILURE_THRESHOLD = 1, so failures=2 (> 1) IS partitioned
       strategy.updateNetworkMetrics(100, 2);
       strategy.updateNetworkMetrics(110, 2);
 
-      // failures must be > 2 to count, so exactly 2 should not be counted
-      expect(strategy.getAdaptationMetrics().partitionEvents).toBe(0);
+      // Two consecutive partitioned samples → one contiguous window → 1 event
+      expect(strategy.getAdaptationMetrics().partitionEvents).toBe(1);
     });
 
-    it('returns 1 when exactly one sample has failures > 2', () => {
-      strategy.updateNetworkMetrics(50, 1);  // below threshold
-      strategy.updateNetworkMetrics(100, 3); // above threshold → counted
-      strategy.updateNetworkMetrics(50, 0);  // below threshold
+    it('returns 1 when exactly one contiguous window of high-failure samples exists', () => {
+      strategy.updateNetworkMetrics(50, 1);  // below threshold (not partitioned)
+      strategy.updateNetworkMetrics(100, 3); // above threshold → opens window
+      strategy.updateNetworkMetrics(50, 0);  // below threshold → closes window
 
       expect(strategy.getAdaptationMetrics().partitionEvents).toBe(1);
     });
 
-    it('returns 2 when two separate samples have failures > 2', () => {
-      strategy.updateNetworkMetrics(100, 5); // counted
-      strategy.updateNetworkMetrics(50, 0);  // not counted (healthy)
-      strategy.updateNetworkMetrics(200, 4); // counted
+    it('returns 2 when two separate high-failure windows are separated by a healthy sample', () => {
+      strategy.updateNetworkMetrics(100, 5); // opens window 1
+      strategy.updateNetworkMetrics(50, 0);  // healthy → closes window 1
+      strategy.updateNetworkMetrics(200, 4); // opens window 2
 
       expect(strategy.getAdaptationMetrics().partitionEvents).toBe(2);
     });
 
-    it('counts each individual high-failure sample (not windowed)', () => {
-      // Three consecutive samples each with failures > 2 → count = 3
+    it('counts consecutive high-failure samples as one contiguous partition window', () => {
+      // Three consecutive partitioned samples form a single sustained window
       strategy.updateNetworkMetrics(100, 3);
       strategy.updateNetworkMetrics(120, 7);
       strategy.updateNetworkMetrics(140, 5);
 
-      // Each sample is counted independently in the current implementation
-      expect(strategy.getAdaptationMetrics().partitionEvents).toBe(3);
+      expect(strategy.getAdaptationMetrics().partitionEvents).toBe(1);
     });
 
-    it('correctly counts only samples above the threshold when mixed with healthy ones', () => {
-      strategy.updateNetworkMetrics(50, 1);  // healthy
-      strategy.updateNetworkMetrics(100, 4); // partitioned
-      strategy.updateNetworkMetrics(50, 2);  // boundary — not counted
-      strategy.updateNetworkMetrics(200, 6); // partitioned
-      strategy.updateNetworkMetrics(50, 0);  // healthy
+    it('counts windows correctly when partitioned and healthy samples are interleaved', () => {
+      strategy.updateNetworkMetrics(50, 1);  // healthy (failures <= 1)
+      strategy.updateNetworkMetrics(100, 4); // partitioned → opens window 1
+      strategy.updateNetworkMetrics(50, 2);  // partitioned (2 > 1) → still in window 1
+      strategy.updateNetworkMetrics(200, 6); // partitioned → still in window 1
+      strategy.updateNetworkMetrics(50, 0);  // healthy → closes window 1
 
-      expect(strategy.getAdaptationMetrics().partitionEvents).toBe(2);
+      // All three partitioned samples are in one contiguous window → 1 event
+      expect(strategy.getAdaptationMetrics().partitionEvents).toBe(1);
     });
   });
 

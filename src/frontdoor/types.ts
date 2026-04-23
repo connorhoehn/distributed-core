@@ -72,7 +72,7 @@ export interface ClusterOptions {
  */
 export interface AgentOptions extends NodeOptions {
   /** Coordinator backend type. Default: 'in-memory' */
-  coordinator?: 'in-memory' | 'gossip' | 'etcd' | 'zookeeper';
+  coordinator?: 'in-memory' | 'gossip';
   /** Ring identifier for range coordination. Default: 'default-ring' */
   ringId?: string;
   /** Required: handler for range lifecycle and message processing. */

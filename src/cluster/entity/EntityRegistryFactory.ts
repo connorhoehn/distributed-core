@@ -3,8 +3,9 @@ import { WALConfig } from '../../persistence/wal/types';
 import { CheckpointConfig } from '../../persistence/checkpoint/types';
 import { WriteAheadLogEntityRegistry } from './WriteAheadLogEntityRegistry';
 import { InMemoryEntityRegistry } from './InMemoryEntityRegistry';
+import { CrdtEntityRegistry } from './CrdtEntityRegistry';
 
-export type EntityRegistryType = 'memory' | 'wal' | 'etcd' | 'zookeeper' | 'crdt';
+export type EntityRegistryType = 'memory' | 'wal' | 'crdt';
 
 export interface EntityRegistryFactoryConfig {
   type: EntityRegistryType;
@@ -12,7 +13,6 @@ export interface EntityRegistryFactoryConfig {
   walConfig?: WALConfig;
   checkpointConfig?: CheckpointConfig;
   logConfig?: { enableTestMode?: boolean };
-  // Future: etcdConfig, zkConfig, crdtConfig, etc.
 }
 
 export class EntityRegistryFactory {
@@ -26,14 +26,8 @@ export class EntityRegistryFactory {
       case 'wal':
         return new WriteAheadLogEntityRegistry(nodeId, config.walConfig);
       
-      case 'etcd':
-        throw new Error('EtcdEntityRegistry not implemented yet');
-      
-      case 'zookeeper':
-        throw new Error('ZookeeperEntityRegistry not implemented yet');
-      
       case 'crdt':
-        throw new Error('CrdtEntityRegistry not implemented yet');
+        return new CrdtEntityRegistry(nodeId);
       
       default:
         throw new Error(`Unknown entity registry type: ${type}`);

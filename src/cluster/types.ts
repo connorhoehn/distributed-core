@@ -32,6 +32,7 @@ export interface GossipMessage {
   type: 'GOSSIP';
   nodeInfo?: NodeInfo;
   membershipDiff?: NodeInfo[];
+  isFullSync?: boolean;
 }
 
 export interface LeaveMessage {

@@ -61,35 +61,6 @@ describe('Cluster Framework', () => {
       expect(coordinator).toBeDefined();
     });
 
-    it('should create a cluster node with etcd coordinator', async () => {
-      coordinator = await createClusterNode({
-        ringId: 'test-etcd-ring',
-        rangeHandler: new ChatHandler(),
-        coordinator: 'etcd',
-        transport: 'ws',
-        seedNodes: [],
-        nodeId: 'etcd-test-node',
-        coordinatorConfig: testConfig,
-        logging: loggingConfig
-      });
-
-      expect(coordinator).toBeDefined();
-    });
-
-    it('should create a cluster node with zookeeper coordinator', async () => {
-      coordinator = await createClusterNode({
-        ringId: 'test-zk-ring',
-        rangeHandler: new ChatHandler(),
-        coordinator: 'zookeeper',
-        transport: 'ws',
-        seedNodes: [],
-        nodeId: 'zk-test-node',
-        coordinatorConfig: testConfig,
-        logging: loggingConfig
-      });
-
-      expect(coordinator).toBeDefined();
-    });
   });
 
   describe('Range Management', () => {

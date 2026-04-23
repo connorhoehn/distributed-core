@@ -5,5 +5,3 @@ export { RangeCoordinator, createClusterNode, createRangeHandler } from './Range
 // Re-export coordinators for advanced usage
 export { InMemoryCoordinator } from './InMemoryCoordinator';
 export { GossipCoordinator } from '../gossip/GossipCoordinator';
-export { EtcdCoordinator } from './EtcdCoordinator';
-export { ZookeeperCoordinator } from './ZookeeperCoordinator';

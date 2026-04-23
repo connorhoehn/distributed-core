@@ -169,6 +169,19 @@ export abstract class CompactionStrategy {
     const tombstoneRatio = totalEntries > 0 ? totalTombstones / totalEntries : 0;
     const ageWeight = Math.min(Date.now() - Math.min(...segments.map(s => s.createdAt)), 86400000) / 86400000; // 0-1 based on age up to 24h
     
-    return tombstoneRatio * 0.7 + ageWeight * 0.3; // Weighted score
+    return tombstoneRatio * 0.7 + ageWeight * 0.3;
+  }
+
+  protected errorResult(planId: string, error: unknown, startTime: number): CompactionResult {
+    return {
+      planId,
+      success: false,
+      actualSpaceSaved: 0,
+      actualDuration: Date.now() - startTime,
+      segmentsCreated: [],
+      segmentsDeleted: [],
+      error: error as Error,
+      metrics: { entriesProcessed: 0, entriesCompacted: 0, tombstonesRemoved: 0, duplicatesRemoved: 0 }
+    };
   }
 }

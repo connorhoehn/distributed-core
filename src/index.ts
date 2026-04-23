@@ -80,6 +80,8 @@ export { UnifiedPersistenceFactory, createPersistenceLayer } from './persistence
 export type { PersistenceLayer, StateStoreConfig } from './persistence/PersistenceFactory';
 export { WALWriterImpl, WALReaderImpl, WALFileImpl, WALCoordinatorImpl } from './persistence/wal';
 export type { WALEntry, EntityUpdate, WALConfig, WALWriter, WALReader, WALFile, WALCoordinator } from './persistence/wal';
+export { InMemorySnapshotVersionStore } from './persistence/snapshot';
+export type { SnapshotEntry, SnapshotType, StoreSnapshotOptions, ISnapshotVersionStore } from './persistence/snapshot';
 
 // Identity modules
 export * from './identity/NodeMetadata';
@@ -97,6 +99,23 @@ export * from './connections/Connection';
 export * from './connections/ConnectionManager';
 export * from './connections/Session';
 export * from './connections/types';
+
+// Routing — ResourceRouter, placement strategies, consistent hashing
+export {
+  ResourceRouter,
+  ResourceRouterFactory,
+  LocalPlacement,
+  HashPlacement,
+  LeastLoadedPlacement,
+  RandomPlacement,
+} from './routing';
+export type {
+  RouteTarget,
+  ResourceHandle,
+  ClaimOptions,
+  ResourceRouterConfig,
+  PlacementStrategy,
+} from './routing';
 
 // Gateway domain — PubSub, Presence, Channel, Queue, MessageRouter
 export * from './gateway';

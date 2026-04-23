@@ -13,7 +13,7 @@ export interface ResolvedConfig {
   port: number;
   host: string;
   transport: 'in-memory' | 'websocket' | 'tcp' | 'udp' | 'http' | 'grpc';
-  coordinator: 'in-memory' | 'gossip' | 'etcd' | 'zookeeper';
+  coordinator: 'in-memory' | 'gossip';
   seedNodes: string[];
   enableLogging: boolean;
   region?: string;
@@ -34,7 +34,7 @@ export const DEFAULTS: ResolvedConfig = {
 };
 
 const VALID_TRANSPORTS = ['in-memory', 'websocket', 'tcp', 'udp', 'http', 'grpc'] as const;
-const VALID_COORDINATORS = ['in-memory', 'gossip', 'etcd', 'zookeeper'] as const;
+const VALID_COORDINATORS = ['in-memory', 'gossip'] as const;
 
 function isValidTransport(v: string): v is ResolvedConfig['transport'] {
   return (VALID_TRANSPORTS as readonly string[]).includes(v);

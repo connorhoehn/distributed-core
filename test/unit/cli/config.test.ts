@@ -68,7 +68,7 @@ describe('CLI Config Resolution', () => {
         port: '9090',
         host: '127.0.0.1',
         transport: 'tcp',
-        coordinator: 'etcd',
+        coordinator: 'gossip',
         seed: 'a:1,b:2',
         'node-id': 'my-node',
         log: true,
@@ -82,7 +82,7 @@ describe('CLI Config Resolution', () => {
       expect(config.port).toBe(9090);
       expect(config.host).toBe('127.0.0.1');
       expect(config.transport).toBe('tcp');
-      expect(config.coordinator).toBe('etcd');
+      expect(config.coordinator).toBe('gossip');
       expect(config.seedNodes).toEqual(['a:1', 'b:2']);
       expect(config.nodeId).toBe('my-node');
       expect(config.enableLogging).toBe(true);
@@ -98,7 +98,7 @@ describe('CLI Config Resolution', () => {
       process.env.DCORE_PORT = '3000';
       process.env.DCORE_HOST = '10.0.0.1';
       process.env.DCORE_TRANSPORT = 'udp';
-      process.env.DCORE_COORDINATOR = 'zookeeper';
+      process.env.DCORE_COORDINATOR = 'in-memory';
       process.env.DCORE_SEED = 'seed1:8080,seed2:8080';
       process.env.DCORE_NODE_ID = 'env-node';
       process.env.DCORE_REGION = 'eu-west-1';
@@ -109,7 +109,7 @@ describe('CLI Config Resolution', () => {
       expect(config.port).toBe(3000);
       expect(config.host).toBe('10.0.0.1');
       expect(config.transport).toBe('udp');
-      expect(config.coordinator).toBe('zookeeper');
+      expect(config.coordinator).toBe('in-memory');
       expect(config.seedNodes).toEqual(['seed1:8080', 'seed2:8080']);
       expect(config.nodeId).toBe('env-node');
       expect(config.region).toBe('eu-west-1');

@@ -146,17 +146,39 @@ export class TimeBasedCompactionStrategy extends CompactionStrategy {
     const startTime = Date.now();
 
     try {
-      // Calculate realistic space savings based on tombstone removal and deduplication
+      // Calculate realistic space savings based on tombstone removal and
+      // per-key deduplication: keep only the latest entry per entityId and
+      // drop all tombstones (plus the live entries they supersede).
       const totalEntries = plan.inputSegments.reduce((sum, seg) => sum + seg.entryCount, 0);
       const totalTombstones = plan.inputSegments.reduce((sum, seg) => sum + seg.tombstoneCount, 0);
       const totalSize = plan.inputSegments.reduce((sum, seg) => sum + seg.sizeBytes, 0);
-      
-      // Estimate duplicates (10% of non-tombstone entries)
-      const estimatedDuplicates = Math.floor((totalEntries - totalTombstones) * 0.1);
-      
-      // Calculate space savings: remove tombstones and duplicates
-      const entriesRemoved = totalTombstones + estimatedDuplicates;
-      const spaceSavedRatio = entriesRemoved / totalEntries;
+
+      // Deduplication model: each tombstone supersedes one live entry for the
+      // same entityId.  Beyond that, additional duplicate live entries are
+      // proportional to the duplicate-entry ratio implied by the tombstone
+      // density — a segment with many tombstones has seen many rewrites, so
+      // earlier live versions of those same keys are still present as
+      // duplicates.  We use tombstoneCount as a conservative estimate of
+      // the number of superseded live entries that exist alongside their
+      // tombstones.
+      const duplicatesFromTombstones = totalTombstones; // one stale live entry per tombstone
+      // Additional duplicates: live entries that were overwritten by newer live
+      // entries (no tombstone for them).  Approximate from duplicate-entry
+      // ratio: if X% of entries are duplicates overall (as reported by WAL
+      // metrics), the remainder after removing tombstones still carries that
+      // fraction of redundancy.
+      const nonTombstoneEntries = totalEntries - totalTombstones;
+      const duplicateEntryRatio = plan.inputSegments.length > 0
+        ? (plan.inputSegments.reduce((sum, seg) =>
+            sum + (seg.entryCount > 0 ? seg.tombstoneCount / seg.entryCount : 0), 0
+          ) / plan.inputSegments.length)
+        : 0;
+      const additionalDuplicates = Math.floor(nonTombstoneEntries * duplicateEntryRatio * 0.5);
+      const estimatedDuplicates = duplicatesFromTombstones + additionalDuplicates;
+
+      // Total entries removed = tombstones + their superseded live entries + additional dupes
+      const entriesRemoved = Math.min(totalEntries - 1, totalTombstones + estimatedDuplicates);
+      const spaceSavedRatio = totalEntries > 0 ? entriesRemoved / totalEntries : 0;
       const actualSpaceSaved = Math.floor(totalSize * spaceSavedRatio);
       
       // Estimate output size
@@ -194,22 +216,7 @@ export class TimeBasedCompactionStrategy extends CompactionStrategy {
       this.updateMetrics(result);
       return result;
     } catch (error) {
-      const result: CompactionResult = {
-        planId: plan.planId,
-        success: false,
-        actualSpaceSaved: 0,
-        actualDuration: Date.now() - startTime,
-        segmentsCreated: [],
-        segmentsDeleted: [],
-        error: error as Error,
-        metrics: {
-          entriesProcessed: 0,
-          entriesCompacted: 0,
-          tombstonesRemoved: 0,
-          duplicatesRemoved: 0
-        }
-      };
-
+      const result = this.errorResult(plan.planId, error, startTime);
       this.updateMetrics(result);
       return result;
     } finally {

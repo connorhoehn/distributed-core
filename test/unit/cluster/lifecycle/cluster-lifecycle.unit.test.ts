@@ -66,12 +66,21 @@ describe('ClusterLifecycle', () => {
       gossipStrategy: {
         sendPeriodicGossip: jest.fn().mockResolvedValue(void 0)
       },
+      hashRing: {
+        rebuild: jest.fn()
+      },
       recentUpdates: [],
       getLocalNodeInfo: jest.fn().mockReturnValue(createNodeInfo()),
       addToRecentUpdates: jest.fn(),
       incrementVersion: jest.fn(),
       isBootstrapped: jest.fn().mockReturnValue(false),
-      getClusterSize: jest.fn().mockReturnValue(1)
+      getClusterSize: jest.fn().mockReturnValue(1),
+      rebuildHashRing: jest.fn(),
+      joinCluster: jest.fn().mockResolvedValue(void 0),
+      startGossipTimer: jest.fn(),
+      stopGossipTimer: jest.fn(),
+      sendImmediateGossip: jest.fn().mockResolvedValue(void 0),
+      runAntiEntropyCycle: jest.fn()
     } as any;
 
     lifecycle = new ClusterLifecycle({

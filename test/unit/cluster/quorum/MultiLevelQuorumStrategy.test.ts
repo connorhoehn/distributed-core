@@ -319,15 +319,16 @@ describe('MultiLevelQuorumStrategy', () => {
 
     describe('combined failure scenarios', () => {
       it('combining region and node failures does not double-count node removals', () => {
-        // regions=1 is treated as 0 extra node removals; nodes=3 removes 3
-        // 9 - 3 = 6 ≥ 5 → true
+        // regions=1 removes the largest region (3 nodes), nodes=1 removes 1 additional node
+        // 9 - 3 (region) - 1 (extra node) = 5 >= 5 → true
+        // If double-counting occurred (removing region nodes twice), we'd get 9-6-1=2 < 5 → false
         const options: MultiLevelQuorumOptions = {
           ...standardOptions,
           clusterLevel: { minNodes: 5, strategy: 'simple' }
         };
 
         const result = strategy.canTolerateFailures(nineNodes, options, {
-          nodes: 3,
+          nodes: 1,
           regions: 1
         });
         expect(result).toBe(true);

@@ -11,8 +11,6 @@ import {
 } from './types';
 import { InMemoryCoordinator } from './InMemoryCoordinator';
 import { GossipCoordinator } from '../gossip/GossipCoordinator';
-import { EtcdCoordinator } from './EtcdCoordinator';
-import { ZookeeperCoordinator } from './ZookeeperCoordinator';
 import { createLogger, FrameworkLogger } from '../common/logger';
 
 /**
@@ -171,12 +169,6 @@ export class RangeCoordinator extends EventEmitter {
       
       case 'gossip':
         return new GossipCoordinator();
-      
-      case 'etcd':
-        return new EtcdCoordinator();
-      
-      case 'zookeeper':
-        return new ZookeeperCoordinator();
       
       default:
         throw new Error(`Unknown coordinator type: ${this.config.coordinator}`);

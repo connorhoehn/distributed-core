@@ -213,15 +213,6 @@ describe('EntityRegistry Unit Tests', () => {
         .toThrow('Unknown entity registry type: unknown');
     });
 
-    it('should reject unimplemented registry types', () => {
-      const etcdConfig: EntityRegistryFactoryConfig = {
-        type: 'etcd',
-        nodeId: 'node-1'
-      };
-      
-      expect(() => EntityRegistryFactory.create(etcdConfig))
-        .toThrow('EtcdEntityRegistry not implemented yet');
-    });
   });
 
   describe('Remote Updates and Synchronization', () => {

@@ -253,6 +253,40 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     this.hashRing.rebuild(aliveMembers);
   }
 
+  /**
+   * Join cluster via seed nodes (delegates to communication module)
+   */
+  async joinCluster(): Promise<void> {
+    return this.communication.joinCluster();
+  }
+
+  /**
+   * Start gossip timer (delegates to communication module)
+   */
+  startGossipTimer(): void {
+    this.communication.startGossipTimer();
+  }
+
+  /**
+   * Stop gossip timer (delegates to communication module)
+   */
+  stopGossipTimer(): void {
+    this.communication.stopGossipTimer();
+  }
+
+  /**
+   * Send an immediate gossip round to all alive members
+   */
+  async sendImmediateGossip(): Promise<void> {
+    const aliveMembers = this.membership.getAliveMembers();
+    if (aliveMembers.length > 1) {
+      const targets = aliveMembers.filter(m => m.id !== this.localNodeId);
+      await this.gossipStrategy.sendGossip(targets, this.recentUpdates.length > 0
+        ? this.recentUpdates
+        : [this.getLocalNodeInfo()]);
+    }
+  }
+
   // Public API methods
   getMembership(): Map<string, MembershipEntry> {
     return new Map(this.membership.getAllMembers().map((member: MembershipEntry) => [member.id, member]));

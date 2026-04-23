@@ -33,11 +33,18 @@ export interface IClusterManagerContext {
   getLocalNodeInfo(): NodeInfo;
   addToRecentUpdates(nodeInfo: NodeInfo): void;
   incrementVersion(): void;
-  
+
   // Utility methods
   isBootstrapped(): boolean;
   getClusterSize(): number;
   rebuildHashRing(): void;
+
+  // Cluster join / gossip / anti-entropy lifecycle methods
+  joinCluster(): Promise<void>;
+  startGossipTimer(): void;
+  stopGossipTimer(): void;
+  sendImmediateGossip(): Promise<void>;
+  runAntiEntropyCycle(): void;
 }
 
 /**

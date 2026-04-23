@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { ClusterManager } from '../ClusterManager';
 import { ClusterState, LogicalService, PerformanceMetrics, StateConflict, VectorClock } from '../introspection/ClusterIntrospection';
-import { ClusterHealth, ClusterTopology, ClusterMetadata } from '../types';
+import { ClusterHealth, ClusterTopology, ClusterMetadata, MembershipEntry } from '../types';
 import { Message, MessageType } from '../../types';
 import { StateReconciler, ResolutionResult } from '../reconciliation/StateReconciler';
 
@@ -145,7 +145,7 @@ export class StateAggregator extends EventEmitter {
       .filter(([nodeId]) => nodeId !== this.clusterManager.getNodeInfo().id)
       .map(async ([nodeId, member]) => {
         try {
-          const remoteState = await this.collectFromNode(nodeId);
+          const remoteState = await this.collectFromNode(nodeId, aliveMembers);
           nodeStates.set(nodeId, remoteState);
         } catch (error) {
           this.emit('node-collection-failed', { nodeId, error });
@@ -267,10 +267,14 @@ export class StateAggregator extends EventEmitter {
   /**
    * Collect state from a specific node
    */
-  private async collectFromNode(nodeId: string): Promise<ClusterState> {
+  private async collectFromNode(nodeId: string, membership: Map<string, MembershipEntry>): Promise<ClusterState> {
+    const targetMember = membership.get(nodeId);
+    const targetAddress = targetMember?.metadata?.address ?? 'localhost';
+    const targetPort = targetMember?.metadata?.port ?? 0;
+
     return new Promise<ClusterState>((resolve, reject) => {
       const messageId = `state-request-${Date.now()}-${Math.random()}`;
-      
+
       const timeout = setTimeout(() => {
         this.pendingCollections.delete(messageId);
         reject(new Error(`Timeout collecting state from node ${nodeId}`));
@@ -281,20 +285,20 @@ export class StateAggregator extends EventEmitter {
 
       this.pendingCollections.set(messageId, { resolve, reject, timeout });
 
-      // Send state collection request
+      const localTransportInfo = this.clusterManager.transport.getLocalNodeInfo();
       const message: Message = {
         id: messageId,
         type: MessageType.CLUSTER_STATE_REQUEST,
         data: { requestType: 'full-state' },
-        sender: { 
+        sender: {
           id: this.clusterManager.getNodeInfo().id,
-          address: 'localhost', // TODO: Get actual address
-          port: 8080 // TODO: Get actual port
+          address: localTransportInfo.address,
+          port: localTransportInfo.port
         },
         timestamp: Date.now()
       };
 
-      this.clusterManager.transport.send(message, { id: nodeId, address: 'localhost', port: 8080 });
+      this.clusterManager.transport.send(message, { id: nodeId, address: targetAddress, port: targetPort });
     });
   }
 
@@ -317,6 +321,7 @@ export class StateAggregator extends EventEmitter {
   private handleStateRequest(message: Message): void {
     const localState = this.clusterManager.getIntrospection().getCurrentState();
     
+    const localTransportInfo = this.clusterManager.transport.getLocalNodeInfo();
     const response: Message = {
       id: `state-response-${message.id}`,
       type: MessageType.CLUSTER_STATE_RESPONSE,
@@ -324,10 +329,10 @@ export class StateAggregator extends EventEmitter {
         originalRequestId: message.id,
         state: localState
       },
-      sender: { 
+      sender: {
         id: this.clusterManager.getNodeInfo().id,
-        address: 'localhost', // TODO: Get actual address
-        port: 8080 // TODO: Get actual port
+        address: localTransportInfo.address,
+        port: localTransportInfo.port
       },
       timestamp: Date.now()
     };

@@ -85,6 +85,8 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
   private metricsInterval?: NodeJS.Timeout;
   private lastGossipCount = 0;
   private lastMessageCount = 0;
+  private membershipChangeTimestamps: number[] = [];
+  private trackingStartTime: number = Date.now();
 
   constructor() {
     super();
@@ -132,13 +134,17 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
     // Listen for cluster events through the membership table
     if (this.context) {
       this.context.membership.on('member-joined', () => {
+        this.membershipChangeTimestamps.push(Date.now());
+        if (this.membershipChangeTimestamps.length > 500) this.membershipChangeTimestamps.shift();
         this.emit('topology-changed', this.getTopology());
       });
-      
+
       this.context.membership.on('member-left', () => {
+        this.membershipChangeTimestamps.push(Date.now());
+        if (this.membershipChangeTimestamps.length > 500) this.membershipChangeTimestamps.shift();
         this.emit('topology-changed', this.getTopology());
       });
-      
+
       this.context.membership.on('membership-updated', () => {
         this.emit('health-changed', this.getClusterHealth());
       });
@@ -282,23 +288,46 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
       throw new Error('ClusterIntrospection requires context to be set');
     }
 
-    // Calculate gossip rate (messages per second)
-    const currentGossipCount = 0; // TODO: Get from gossip strategy
-    const gossipRate = Math.max(0, currentGossipCount - this.lastGossipCount) / 5; // per 5 second interval
-    this.lastGossipCount = currentGossipCount;
+    // Gossip rate: count the alive nodes the gossip strategy would target
+    // per interval as a proxy for messages dispatched per second.
+    const aliveCount = this.context.membership.getAliveMembers().length;
+    // Each gossip round fans out to up to 3 peers; rate = fanout / interval_seconds.
+    const gossipFanout = Math.min(3, Math.max(0, aliveCount - 1));
+    const gossipIntervalSec = (this.context.config.gossipInterval || 1000) / 1000;
+    const gossipRate = gossipIntervalSec > 0 ? gossipFanout / gossipIntervalSec : 0;
 
-    // Calculate message rate
-    const currentMessageCount = 0; // TODO: Get from transport layer
+    // Message rate: derive from the number of connected peers on the transport.
+    // Each connected peer sends/receives heartbeats at the configured interval.
+    const connectedNodes = this.context.transport.getConnectedNodes();
+    const currentMessageCount = connectedNodes.length;
     const messageRate = Math.max(0, currentMessageCount - this.lastMessageCount) / 5;
     this.lastMessageCount = currentMessageCount;
+
+    // Failure detection latency: use the configured failure timeout from the
+    // failure detector as the upper-bound detection latency.
+    const fdStatus = this.context.failureDetector.getStatus();
+    const failureDetectionLatency = fdStatus.config?.failureTimeout ?? 3000;
+
+    // Heartbeat interval comes directly from the failure detector config.
+    const averageHeartbeatInterval = fdStatus.config?.heartbeatInterval ?? 1000;
+
+    // Message latency: average RTT across monitored nodes from the failure
+    // detector's health statuses; fall back to 50 ms when none are available.
+    const rtts = (fdStatus.healthStatuses ?? [])
+      .filter((h): h is NonNullable<typeof h> => h !== null && h !== undefined)
+      .map(h => h.roundTripTime)
+      .filter((rtt): rtt is number => rtt !== undefined && rtt > 0);
+    const messageLatency = rtts.length > 0
+      ? rtts.reduce((sum: number, rtt: number) => sum + rtt, 0) / rtts.length
+      : 50;
 
     return {
       membershipSize: this.context.membership.getAllMembers().length,
       gossipRate,
-      failureDetectionLatency: 3000, // TODO: Get from failure detector
-      averageHeartbeatInterval: 1000, // TODO: Get from failure detector config
+      failureDetectionLatency,
+      averageHeartbeatInterval,
       messageRate,
-      messageLatency: 50, // TODO: Calculate from transport metrics
+      messageLatency,
       networkThroughput: messageRate * 1024, // Estimate bytes per second
       timestamp: Date.now()
     };
@@ -346,8 +375,29 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
       healthRatio: members.length > 0 ? alive.length / members.length : 0,
       isHealthy: alive.length >= Math.ceil(members.length * 0.5), // Majority alive
       ringCoverage: 1.0, // Simplified for now, could enhance with actual ring analysis
-      partitionCount: 0 // TODO: Implement partition detection
+      partitionCount: this.detectPartitionCount(members.length, alive.length)
     };
+  }
+
+  /**
+   * Estimate the number of network partitions.
+   *
+   * A simple heuristic: if the visible alive count is below majority we
+   * assume at least one partition exists. We also check whether alive nodes
+   * span only a single zone while additional total nodes exist (zone-split).
+   */
+  private detectPartitionCount(totalMembers: number, aliveCount: number): number {
+    if (!this.context) return 0;
+    if (aliveCount >= Math.ceil(totalMembers / 2)) {
+      // Check for zone-based split
+      const aliveMembers = this.context.membership.getAliveMembers();
+      const zones = new Set(aliveMembers.map(m => m.metadata?.zone || 'unknown'));
+      if (zones.size === 1 && totalMembers > aliveCount) {
+        return 1;
+      }
+      return 0;
+    }
+    return 1;
   }
 
   /**
@@ -502,13 +552,46 @@ export class ClusterIntrospection extends EventEmitter implements IRequiresConte
       throw new Error('ClusterIntrospection requires context to be set');
     }
 
-    // TODO: Implement actual stability tracking
-    // For now, return placeholder values
+    const now = Date.now();
+    const windowMs = 60_000; // one-minute window for churn rate
+
+    // Churn rate: membership changes in the last minute, expressed as
+    // changes-per-minute.
+    const recentChanges = this.membershipChangeTimestamps.filter(
+      ts => now - ts <= windowMs
+    );
+    // Prune old entries to avoid unbounded growth.
+    this.membershipChangeTimestamps = this.membershipChangeTimestamps.filter(
+      ts => now - ts <= windowMs * 5
+    );
+    const churnRate = recentChanges.length; // changes per minute
+
+    // Partition count derived from health data.
+    const members = this.context.membership.getAllMembers();
+    const aliveCount = members.filter(m => m.status === 'ALIVE').length;
+    const partitionCount = this.detectPartitionCount(members.length, aliveCount);
+
+    // Average uptime: mean time-since-last-seen across alive members.
+    const aliveMembers = this.context.membership.getAliveMembers();
+    const averageUptime = aliveMembers.length > 0
+      ? aliveMembers.reduce((sum, m) => sum + (now - m.lastSeen), 0) / aliveMembers.length
+      : 0;
+
+    // Membership stability: ratio of intervals without any churn event over
+    // the tracking window (simple approximation).
+    const elapsedSinceStart = now - this.trackingStartTime;
+    const windowCount = Math.max(1, Math.floor(elapsedSinceStart / windowMs));
+    const churnWindows = Math.min(
+      windowCount,
+      this.membershipChangeTimestamps.length
+    );
+    const membershipStability = Math.max(0, 1 - churnWindows / windowCount);
+
     return {
-      churnRate: 0.1, // nodes joining/leaving per minute
-      partitionCount: 0,
-      averageUptime: 86400000, // 24 hours in ms
-      membershipStability: 0.95 // percentage
+      churnRate,
+      partitionCount,
+      averageUptime,
+      membershipStability
     };
   }
 }

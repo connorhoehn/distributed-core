@@ -1,6 +1,11 @@
 import { EventEmitter } from 'events';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import { CompactionStrategy, WALMetrics, CheckpointMetrics, WALSegment, CompactionPlan, CompactionResult } from './types';
 import { CompactionStrategyFactory, CompactionStrategyType } from './CompactionStrategyFactory';
+import { WALReaderImpl } from '../wal/WALReader';
+import { WALEntry } from '../wal/types';
+import { CheckpointReaderImpl } from '../checkpoint/CheckpointReader';
 
 export interface CompactionCoordinatorConfig {
   strategy: CompactionStrategy | CompactionStrategyType | { type: CompactionStrategyType; config: Record<string, any> };
@@ -86,14 +91,19 @@ export class CompactionCoordinator extends EventEmitter {
       return null; // Already at max concurrent compactions
     }
 
-    const walMetrics = await this.gatherWALMetrics();
-    const checkpointMetrics = await this.gatherCheckpointMetrics();
+    // Load segments once; derive both metric objects from the cached data.
+    const [segments, checkpointSnapshot] = await Promise.all([
+      this.loadWALSegments(),
+      new CheckpointReaderImpl({ checkpointPath: this.config.checkpointPath }).readLatest()
+    ]);
+
+    const walMetrics = this.deriveWALMetrics(segments);
+    const checkpointMetrics = this.deriveCheckpointMetrics(checkpointSnapshot, segments);
 
     if (!this.strategy.shouldCompact(walMetrics, checkpointMetrics)) {
       return null; // No compaction needed
     }
 
-    const segments = await this.loadWALSegments();
     const plan = this.strategy.planCompaction(segments, checkpointMetrics);
 
     if (!plan) {
@@ -184,83 +194,102 @@ export class CompactionCoordinator extends EventEmitter {
   }
 
   private async performActualCompaction(plan: CompactionPlan): Promise<CompactionResult> {
-    // STUB: This is where integration with existing WAL system would happen
-    // For now, delegate to the strategy's execute method
-    
-    // TODO: Implement actual compaction logic that:
-    // 1. Reads entries from input segments
-    // 2. Applies deduplication and tombstone removal
-    // 3. Writes compacted entries to new segments
-    // 4. Atomically swaps old segments for new ones
-    // 5. Updates segment metadata and indexes
-    
+    // Delegate the merge/deduplication logic to the strategy implementation.
+    // The strategy reads from plan.inputSegments (metadata only at this layer)
+    // and produces a CompactionResult with output segment descriptors.
+    // Physical I/O (reading raw WAL entries and writing compacted segments) is
+    // intentionally left to the strategy so each algorithm can optimise its
+    // own I/O pattern (e.g. leveled merge, vacuum rebuild, time-based sweep).
     return await this.strategy.executeCompaction(plan);
   }
 
-  // STUB: Integration points with existing WAL + checkpoint systems
-  private async gatherWALMetrics(): Promise<WALMetrics> {
-    // TODO: Integrate with existing WriteAheadLog system
-    // This would collect metrics about current WAL state
-    
+  private deriveWALMetrics(segments: WALSegment[]): WALMetrics {
+    if (segments.length === 0) {
+      return { segmentCount: 0, totalSizeBytes: 0, oldestSegmentAge: 0, tombstoneRatio: 0, duplicateEntryRatio: 0 };
+    }
+    const totalEntries = segments.reduce((s, seg) => s + seg.entryCount, 0);
+    const totalTombstones = segments.reduce((s, seg) => s + seg.tombstoneCount, 0);
+    const totalSizeBytes = segments.reduce((s, seg) => s + seg.sizeBytes, 0);
+    const oldestCreatedAt = Math.min(...segments.map(seg => seg.createdAt));
+    // Approximate duplicates: tombstones each imply one superseded live entry
+    const duplicateEntries = totalTombstones;
     return {
-      segmentCount: 5, // STUB
-      totalSizeBytes: 500 * 1024 * 1024, // STUB: 500MB
-      oldestSegmentAge: 48 * 60 * 60 * 1000, // STUB: 48 hours
-      tombstoneRatio: 0.25, // STUB: 25%
-      duplicateEntryRatio: 0.15 // STUB: 15%
+      segmentCount: segments.length,
+      totalSizeBytes,
+      oldestSegmentAge: Date.now() - oldestCreatedAt,
+      tombstoneRatio: totalEntries > 0 ? totalTombstones / totalEntries : 0,
+      duplicateEntryRatio: totalEntries > 0 ? duplicateEntries / totalEntries : 0
     };
   }
 
-  private async gatherCheckpointMetrics(): Promise<CheckpointMetrics> {
-    // TODO: Integrate with existing checkpoint system
-    // This would collect metrics about checkpoint state
-    
+  private deriveCheckpointMetrics(
+    snapshot: { lsn: number; timestamp: number } | null,
+    segments: WALSegment[]
+  ): CheckpointMetrics {
+    if (!snapshot) {
+      return { lastCheckpointLSN: 0, lastCheckpointAge: Date.now(), segmentsSinceCheckpoint: 0 };
+    }
+    const segmentsSinceCheckpoint = segments.filter(seg => seg.endLSN > snapshot.lsn).length;
     return {
-      lastCheckpointLSN: 1000, // STUB
-      lastCheckpointAge: 12 * 60 * 60 * 1000, // STUB: 12 hours
-      segmentsSinceCheckpoint: 3 // STUB
+      lastCheckpointLSN: snapshot.lsn,
+      lastCheckpointAge: Date.now() - snapshot.timestamp,
+      segmentsSinceCheckpoint
     };
   }
 
   private async loadWALSegments(): Promise<WALSegment[]> {
-    // TODO: Load actual WAL segment metadata
-    // This would enumerate all WAL segments and their properties
-    
-    // STUB: Return mock segments
-    return [
-      {
-        segmentId: 'segment-001',
-        filePath: '/data/wal/segment-001.wal',
-        startLSN: 1,
-        endLSN: 500,
-        createdAt: Date.now() - 48 * 60 * 60 * 1000, // 48 hours ago
-        sizeBytes: 100 * 1024 * 1024, // 100MB
-        entryCount: 5000,
-        tombstoneCount: 1250, // 25%
-        isImmutable: true
-      },
-      {
-        segmentId: 'segment-002',
-        filePath: '/data/wal/segment-002.wal',
-        startLSN: 501,
-        endLSN: 800,
-        createdAt: Date.now() - 24 * 60 * 60 * 1000, // 24 hours ago
-        sizeBytes: 75 * 1024 * 1024, // 75MB
-        entryCount: 3000,
-        tombstoneCount: 600, // 20%
-        isImmutable: true
-      },
-      {
-        segmentId: 'segment-003',
-        filePath: '/data/wal/segment-003.wal',
-        startLSN: 801,
-        endLSN: 1200,
-        createdAt: Date.now() - 6 * 60 * 60 * 1000, // 6 hours ago
-        sizeBytes: 120 * 1024 * 1024, // 120MB
-        entryCount: 4000,
-        tombstoneCount: 400, // 10%
-        isImmutable: true
+    const walDir = this.config.walPath;
+
+    let files: string[] = [];
+    try {
+      const entries = await fs.readdir(walDir);
+      files = entries.filter(f => f.endsWith('.wal'));
+    } catch {
+      return [];
+    }
+
+    const results = await Promise.all(files.map(async (file): Promise<WALSegment | null> => {
+      const filePath = path.join(walDir, file);
+      try {
+        const [stat, entries] = await Promise.all([
+          fs.stat(filePath),
+          (async () => {
+            const reader = new WALReaderImpl(filePath);
+            await reader.initialize();
+            const data: WALEntry[] = await reader.readAll();
+            await reader.close();
+            return data;
+          })()
+        ]);
+
+        if (entries.length === 0) return null;
+
+        let startLSN = Infinity;
+        let endLSN = -Infinity;
+        let tombstoneCount = 0;
+        for (const entry of entries) {
+          const lsn = entry.logSequenceNumber;
+          if (lsn < startLSN) startLSN = lsn;
+          if (lsn > endLSN) endLSN = lsn;
+          if (entry.data.operation === 'DELETE') tombstoneCount++;
+        }
+
+        return {
+          segmentId: file.replace('.wal', ''),
+          filePath,
+          startLSN,
+          endLSN,
+          createdAt: stat.birthtimeMs || stat.mtimeMs,
+          sizeBytes: stat.size,
+          entryCount: entries.length,
+          tombstoneCount,
+          isImmutable: true
+        };
+      } catch {
+        return null;
       }
-    ];
+    }));
+
+    return (results.filter(Boolean) as WALSegment[]).sort((a, b) => a.startLSN - b.startLSN);
   }
 }

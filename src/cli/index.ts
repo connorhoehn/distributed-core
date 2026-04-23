@@ -37,7 +37,7 @@ Options:
   -p, --port <number>       Port to listen on (default: 8080)
       --host <address>      Host/address to bind (default: 0.0.0.0)
   -t, --transport <type>    Transport: in-memory|websocket|tcp|udp|http|grpc
-      --coordinator <type>  Coordinator: in-memory|gossip|etcd|zookeeper
+      --coordinator <type>  Coordinator: in-memory|gossip
   -s, --seed <nodes>        Comma-separated seed node addresses
       --log                 Enable logging
       --json                Output as JSON

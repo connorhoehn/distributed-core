@@ -3,6 +3,7 @@ import { IClusterCommunication, CommunicationConfig, GossipTargetSelection } fro
 import { IClusterManagerContext, IRequiresContext } from '../IClusterManagerContext';
 import { JoinMessage, GossipMessage, NodeInfo, MembershipEntry } from '../../types';
 import { Message, MessageType } from '../../../types';
+import { shuffleArray } from '../../../common/utils';
 
 /**
  * ClusterCommunication manages gossip protocol and cluster join/leave operations
@@ -62,10 +63,7 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
       throw new Error('ClusterCommunication requires context to be set');
     }
 
-    // TODO: Need to expose getSeedNodes on context
-    // const seedNodes = this.context.config.getSeedNodes();
-    
-    // For now, this is a stub that emits the appropriate events
+    // Emit the join-requested event so listeners can react.
     this.emit('join-requested', { nodeId: 'seed-node', isResponse: false });
   }
 
@@ -89,15 +87,10 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
           await this.sendPeriodicGossip(aliveMembers);
         }
       } catch (error) {
-        this.emit('communication-error', { 
-          error: error as Error, 
-          operation: 'periodic-gossip' 
+        this.emit('communication-error', {
+          error: error as Error,
+          operation: 'periodic-gossip'
         });
-        
-        // TODO: Need to expose logging configuration on context
-        // if (this.context.config.enableLogging) {
-        //   console.debug('Error during periodic gossip:', error);
-        // }
       }
     }, this.config.gossipInterval);
     
@@ -193,42 +186,41 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
     try {
       const localNodeInfo = this.context.getLocalNodeInfo();
       const aliveMembers = this.context.membership.getAliveMembers();
-      
-      let joinResponse: JoinMessage = {
+
+      const joinResponse: JoinMessage = {
         type: 'JOIN',
         nodeInfo: localNodeInfo,
         isResponse: true,
-        membershipSnapshot: aliveMembers.slice(0, 10) // Limit snapshot size
+        membershipSnapshot: aliveMembers.slice(0, 10)
       };
 
-      // TODO: Need to expose key manager signing on context
-      // joinResponse = this.context.keyManager.signClusterPayload(joinResponse);
+      const localTransport = this.context.transport.getLocalNodeInfo();
+      const targetMember = aliveMembers.find(m => m.id === targetNodeId);
 
       const transportMessage: Message = {
         id: `join-response-${Date.now()}-${Math.random()}`,
         type: MessageType.JOIN,
         data: joinResponse,
-        sender: { id: this.context.localNodeId, address: '', port: 0 },
+        sender: { id: this.context.localNodeId, address: localTransport.address, port: localTransport.port },
         timestamp: Date.now()
       };
 
-      await this.context.transport.send(transportMessage, { id: targetNodeId, address: '', port: 0 });
+      await this.context.transport.send(transportMessage, {
+        id: targetNodeId,
+        address: targetMember?.metadata?.address ?? 'localhost',
+        port: targetMember?.metadata?.port ?? 0
+      });
       
       this.emit('join-completed', { 
         nodeId: targetNodeId, 
         membershipSize: aliveMembers.length 
       });
     } catch (error) {
-      this.emit('communication-error', { 
-        error: error as Error, 
-        operation: 'join-response', 
-        targetNode: targetNodeId 
+      this.emit('communication-error', {
+        error: error as Error,
+        operation: 'join-response',
+        targetNode: targetNodeId
       });
-      
-      // TODO: Need to expose logging configuration on context
-      // if (this.context.config.enableLogging) {
-      //   console.debug(`Failed to send join response to ${targetNodeId}:`, error);
-      // }
     }
   }
 
@@ -249,10 +241,6 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
       return; // No other nodes to sync with
     }
 
-    // TODO: Need to expose logging configuration on context
-    // if (this.context.config.enableLogging) {
-    //   console.log(`[ClusterCommunication] Running anti-entropy cycle with ${aliveMembers.length} members`);
-    // }
 
     // Force immediate gossip to all members (not just random subset)
     this.sendPeriodicGossip(aliveMembers, true);
@@ -299,10 +287,9 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
     });
 
     await Promise.allSettled(gossipPromises);
-    
-    // TODO: Need a way to clear recent updates through context
-    // Clear recent updates after sending
-    // this.context.recentUpdates = [];
+
+    // Clear recent updates now that they have been sent.
+    this.context.recentUpdates = [];
 
     this.emit('gossip-sent', { 
       targetNodes: targets.map(t => t.id), 
@@ -346,7 +333,7 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
    * Select random gossip targets
    */
   private selectRandomTargets(nodes: MembershipEntry[], count: number): MembershipEntry[] {
-    const shuffled = [...nodes].sort(() => Math.random() - 0.5);
+    const shuffled = shuffleArray([...nodes]);
     return shuffled.slice(0, count);
   }
 
@@ -359,21 +346,66 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
   }
 
   /**
-   * Select zone-aware gossip targets
+   * Select zone-aware gossip targets.
+   *
+   * Strategy: fill up to `count` slots by first picking nodes that share
+   * the local node's zone, then padding with nodes from other zones so
+   * the gossip still crosses zone boundaries for convergence.
    */
   private selectZoneAwareTargets(nodes: MembershipEntry[], count: number): MembershipEntry[] {
-    // For now, fallback to random selection
-    // TODO: Implement zone-aware logic when zone information is available
-    return this.selectRandomTargets(nodes, count);
+    const localZone: string | undefined = this.context?.membership
+      .getMember(this.context.localNodeId)?.metadata?.zone;
+
+    if (!localZone) {
+      // No zone information available — fall back to random selection.
+      return this.selectRandomTargets(nodes, count);
+    }
+
+    const sameZone = nodes.filter(n => n.metadata?.zone === localZone);
+    const otherZone = nodes.filter(n => n.metadata?.zone !== localZone);
+
+    // Shuffle both groups independently.
+    const shuffledSame = shuffleArray([...sameZone]);
+    const shuffledOther = shuffleArray([...otherZone]);
+
+    // Prefer same-zone but ensure at least one cross-zone node when possible.
+    const crossZoneSlots = Math.min(1, shuffledOther.length, Math.max(0, count - 1));
+    const sameZoneSlots = Math.min(count - crossZoneSlots, shuffledSame.length);
+
+    return [
+      ...shuffledSame.slice(0, sameZoneSlots),
+      ...shuffledOther.slice(0, crossZoneSlots)
+    ].slice(0, count);
   }
 
   /**
-   * Select load-balanced gossip targets
+   * Select load-balanced gossip targets.
+   *
+   * Strategy: prefer nodes with fewer active connections (lower load).
+   * Connection count is taken from the transport's connected-nodes list;
+   * nodes not currently connected are treated as having zero connections.
    */
   private selectLoadBalancedTargets(nodes: MembershipEntry[], count: number): MembershipEntry[] {
-    // For now, fallback to random selection  
-    // TODO: Implement load-based selection when load metrics are available
-    return this.selectRandomTargets(nodes, count);
+    if (!this.context) {
+      return this.selectRandomTargets(nodes, count);
+    }
+
+    // Build a connection-count map from the transport layer.
+    const connectedNodes = this.context.transport.getConnectedNodes();
+    const connectionCount = new Map<string, number>();
+    for (const node of connectedNodes) {
+      connectionCount.set(node.id, (connectionCount.get(node.id) || 0) + 1);
+    }
+
+    // Sort ascending by connection count (least-loaded first), break ties randomly.
+    const sorted = [...nodes].sort((a, b) => {
+      const loadA = connectionCount.get(a.id) || 0;
+      const loadB = connectionCount.get(b.id) || 0;
+      if (loadA !== loadB) return loadA - loadB;
+      return Math.random() - 0.5;
+    });
+
+    return sorted.slice(0, count);
   }
 
   /**

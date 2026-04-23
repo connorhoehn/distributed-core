@@ -3,6 +3,7 @@ import { IClusterCommunication, CommunicationConfig, GossipTargetSelection } fro
 import { IClusterManagerContext, IRequiresContext } from '../../cluster/core/IClusterManagerContext';
 import { JoinMessage, GossipMessage, MembershipEntry } from '../../cluster/types';
 import { Message, MessageType, NodeId } from '../../types';
+import { shuffleArray } from '../../common/utils';
 
 /**
  * ClusterCommunication manages gossip protocol and cluster join/leave operations
@@ -397,7 +398,7 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
    * Select random gossip targets
    */
   private selectRandomTargets(nodes: MembershipEntry[], count: number): MembershipEntry[] {
-    const shuffled = [...nodes].sort(() => Math.random() - 0.5);
+    const shuffled = shuffleArray([...nodes]);
     return shuffled.slice(0, count);
   }
 
@@ -410,21 +411,69 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
   }
 
   /**
-   * Select zone-aware gossip targets
+   * Select zone-aware gossip targets.
+   * Prefers nodes in the same availability zone as the local node, then fills
+   * any remaining slots with nodes from other zones (cross-zone).
    */
   private selectZoneAwareTargets(nodes: MembershipEntry[], count: number): MembershipEntry[] {
-    // For now, fallback to random selection
-    // TODO: Implement zone-aware logic when zone information is available
-    return this.selectRandomTargets(nodes, count);
+    if (!this.context) {
+      return this.selectRandomTargets(nodes, count);
+    }
+
+    const localZone = this.context.getLocalNodeInfo().metadata?.zone;
+
+    if (!localZone) {
+      // No zone info on local node — fall back to random
+      return this.selectRandomTargets(nodes, count);
+    }
+
+    const sameZone = nodes.filter(n => n.metadata?.zone === localZone);
+    const crossZone = nodes.filter(n => n.metadata?.zone !== localZone);
+
+    // Shuffle both pools independently
+    const shuffledSame = shuffleArray([...sameZone]);
+    const shuffledCross = shuffleArray([...crossZone]);
+
+    const selected: MembershipEntry[] = [];
+
+    // Fill from same-zone first, then cross-zone
+    for (const node of shuffledSame) {
+      if (selected.length >= count) break;
+      selected.push(node);
+    }
+    for (const node of shuffledCross) {
+      if (selected.length >= count) break;
+      selected.push(node);
+    }
+
+    return selected;
   }
 
   /**
-   * Select load-balanced gossip targets
+   * Select load-balanced gossip targets.
+   * Prefers nodes with fewer active connections reported by the transport layer.
+   * Nodes not present in the connected-node list are treated as having zero connections.
    */
   private selectLoadBalancedTargets(nodes: MembershipEntry[], count: number): MembershipEntry[] {
-    // For now, fallback to random selection  
-    // TODO: Implement load-based selection when load metrics are available
-    return this.selectRandomTargets(nodes, count);
+    if (!this.context) {
+      return this.selectRandomTargets(nodes, count);
+    }
+
+    const connectedNodes = this.context.transport.getConnectedNodes();
+    const connectionCounts = new Map<string, number>();
+
+    // Count how many times each node ID appears in the connected-nodes list
+    for (const nodeId of connectedNodes) {
+      connectionCounts.set(nodeId.id, (connectionCounts.get(nodeId.id) ?? 0) + 1);
+    }
+
+    // Sort by ascending connection count, breaking ties with a small random jitter
+    const sorted = [...nodes].sort((a, b) => {
+      const diff = (connectionCounts.get(a.id) ?? 0) - (connectionCounts.get(b.id) ?? 0);
+      return diff !== 0 ? diff : Math.random() - 0.5;
+    });
+
+    return sorted.slice(0, count);
   }
 
   /**
@@ -460,8 +509,8 @@ export class ClusterCommunication extends EventEmitter implements IClusterCommun
       
       const syncMessage: GossipMessage = {
         type: 'GOSSIP',
-        membershipDiff: allMembers
-        // isFullSync: true // TODO: Add this to GossipMessage type
+        membershipDiff: allMembers,
+        isFullSync: true
       };
 
       const transportMessage: Message = {

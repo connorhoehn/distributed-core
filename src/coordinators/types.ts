@@ -2,7 +2,7 @@
  * Core framework types for the distributed cluster coordination system
  */
 
-export type CoordinatorType = 'in-memory' | 'gossip' | 'etcd' | 'zookeeper';
+export type CoordinatorType = 'in-memory' | 'gossip';
 export type TransportType = 'ws' | 'tcp' | 'udp' | 'in-memory';
 
 /**

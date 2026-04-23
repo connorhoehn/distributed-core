@@ -4,3 +4,6 @@ export * from './presence';
 export * from './channel';
 export * from './queue';
 export { MessageRouter, MessageRouterStats } from './routing/MessageRouter';
+export * from './eviction';
+export * from './coalescing';
+export * from './state';

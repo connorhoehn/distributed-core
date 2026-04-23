@@ -56,22 +56,18 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       // Initialize local node in membership
       const localNode = this.context.getLocalNodeInfo();
       this.context.membership.addLocalNode(localNode);
-      
-      // TODO: Need to expose rebuildHashRing on context
-      // this.context.rebuildHashRing();
+
+      // Rebuild the hash ring to include the local node
+      this.context.rebuildHashRing();
 
       // Start transport layer
-      // TODO: Need to expose message handling on context  
-      // this.context.transport.onMessage(this.context.handleMessage.bind(this.context));
       await this.context.transport.start();
 
-      // Join cluster if not bootstrapping
-      // TODO: Need to expose joinCluster method on context
-      // await this.context.joinCluster();
+      // Join cluster via seed nodes
+      await this.context.joinCluster();
 
       // Start gossip protocol
-      // TODO: Need to expose gossip timer management on context
-      // this.context.startGossipTimer();
+      this.context.startGossipTimer();
 
       // Start failure detection
       this.context.failureDetector.start();
@@ -98,10 +94,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
 
     try {
       // Stop gossip timer
-      // TODO: Need to expose gossip timer management on context
-      // if (this.context.gossipTimer) {
-      //   clearInterval(this.context.gossipTimer);
-      // }
+      this.context.stopGossipTimer();
 
       // Stop failure detector
       this.context.failureDetector.stop();
@@ -109,10 +102,9 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       // Stop transport
       await this.context.transport.stop();
 
-      // Clear membership and hash ring
+      // Clear membership and rebuild hash ring with empty member list
       this.context.membership.clear();
-      // TODO: Need to expose hash ring management on context
-      // this.context.hashRing.rebuild([]);
+      this.context.hashRing.rebuild([]);
 
       this.isStarted = false;
       this.emit('stopped', { nodeId: this.context.localNodeId, timestamp: Date.now() });
@@ -148,8 +140,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       this.context.addToRecentUpdates(leavingNode);
 
       // Trigger immediate gossip to announce leaving
-      // TODO: Need to expose immediate gossip on context
-      // this.context.sendImmediateGossip();
+      await this.context.sendImmediateGossip();
 
       // Wait for graceful shutdown period
       if (this.config.enableGracefulShutdown) {
@@ -195,9 +186,23 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       this.context.membership.updateNode(drainingNode);
       this.context.addToRecentUpdates(drainingNode);
 
-      // TODO: Implement actual workload migration logic
-      // For now, just wait for drain timeout
-      await new Promise(resolve => setTimeout(resolve, this.config.drainTimeout));
+      // Announce draining status immediately via gossip so peers stop
+      // assigning new work to this node as quickly as possible.
+      await this.context.sendImmediateGossip();
+
+      // Rebuild the hash ring so the routing layer immediately stops
+      // directing new requests to the draining node.
+      this.context.rebuildHashRing();
+
+      // Trigger an anti-entropy cycle so peers pick up the updated ring
+      // and can take over any in-flight ownership (ranges, leases, etc.).
+      this.context.runAntiEntropyCycle();
+
+      // Wait for in-flight workloads to complete up to drainTimeout.
+      await new Promise<void>(resolve => {
+        const deadline = setTimeout(resolve, this.config.drainTimeout);
+        deadline.unref?.();
+      });
 
       this.isDraining = false;
       this.emit('drained', { nodeId: targetNodeId, timestamp: Date.now() });
@@ -223,17 +228,20 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
         return; // Cannot rebalance with less than 2 nodes
       }
 
-      // TODO: Implement actual rebalancing logic
-      // For now, just rebuild the hash ring
-      // this.context.rebuildHashRing();
+      // Rebuild the consistent hash ring with the current alive membership.
+      this.context.rebuildHashRing();
 
-      // Force anti-entropy to sync changes
-      // TODO: Need to expose anti-entropy on context
-      // this.context.runAntiEntropyCycle();
+      // Broadcast the updated local node info immediately so peers converge
+      // on the new ring topology as fast as possible.
+      await this.context.sendImmediateGossip();
 
-      this.emit('rebalanced', { 
-        nodeCount: members.length, 
-        timestamp: Date.now() 
+      // Run an anti-entropy cycle to detect and repair any state that is now
+      // out of place after the ring change (e.g. ranges that moved nodes).
+      this.context.runAntiEntropyCycle();
+
+      this.emit('rebalanced', {
+        nodeCount: members.length,
+        timestamp: Date.now()
       });
     } catch (error) {
       this.emit('error', { error: error as Error, operation: 'rebalance' });

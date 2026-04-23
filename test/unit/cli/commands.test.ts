@@ -85,15 +85,15 @@ describe('CLI Command Dispatch', () => {
     });
   });
 
-  describe('leave command with node-id', () => {
-    it('should print leave message when node-id is provided', async () => {
+  describe('leave command with node-id but no seed', () => {
+    it('should print error when no seed is provided', async () => {
       delete process.env.DCORE_NODE_ID;
+      delete process.env.DCORE_SEED;
 
       await main(['node', 'dcore', 'leave', '--node-id', 'test-node-123']);
-      const output = consoleOutput.join('\n');
-      expect(output).toContain('test-node-123');
-      expect(output).toContain('leave');
-      expect(process.exitCode).toBeUndefined();
+      const errOutput = consoleErrors.join('\n');
+      expect(errOutput).toContain('seed');
+      expect(process.exitCode).toBe(1);
     });
   });
 
