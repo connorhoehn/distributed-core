@@ -61,6 +61,11 @@ import { ChaosInjector } from '../diagnostics/ChaosInjector';
 import { Transport } from '../transport/Transport';
 import { InMemoryAdapter } from '../transport/adapters/InMemoryAdapter';
 import { NodeInfo, ClusterHealth, ClusterTopology, ClusterMetadata } from '../cluster/types';
+import { PubSubManager } from '../gateway/pubsub/PubSubManager';
+import { PresenceManager } from '../gateway/presence/PresenceManager';
+import { ChannelManager } from '../gateway/channel/ChannelManager';
+import { MessageRouter } from '../gateway/routing/MessageRouter';
+import { DurableQueueManager } from '../gateway/queue/DurableQueueManager';
 
 export interface NodeConfig {
   id: string;
@@ -98,7 +103,14 @@ export class Node {
   readonly metrics: MetricsTracker;
   readonly chaos: ChaosInjector;
 
-  private transport: Transport;
+  // Gateway subsystems
+  readonly pubsub: PubSubManager;
+  readonly presence: PresenceManager;
+  readonly channels: ChannelManager;
+  readonly messageRouter: MessageRouter;
+  readonly durableQueue: DurableQueueManager;
+
+  readonly transport: Transport;
   private isStarted = false;
   private enableLogging: boolean;
 
@@ -146,6 +158,13 @@ export class Node {
     this.connections = new ConnectionManager();
     this.metrics = config.enableMetrics !== false ? new MetricsTracker() : null as any;
     this.chaos = config.enableChaos !== false ? new ChaosInjector() : null as any;
+
+    // Initialize gateway subsystems
+    this.pubsub = new PubSubManager(config.id, this.transport, this.cluster);
+    this.presence = new PresenceManager(config.id, this.transport, this.cluster);
+    this.channels = new ChannelManager(config.id, this.transport, this.cluster);
+    this.messageRouter = new MessageRouter(config.id, this.transport, this.presence, this.channels, this.pubsub);
+    this.durableQueue = new DurableQueueManager(config.id);
 
     // Register core message handlers
     this.registerCoreHandlers();
@@ -219,7 +238,13 @@ export class Node {
       
       await this.cluster.stop();
       await this.transport.stop();
-      
+
+      // Cleanup gateway subsystems
+      this.pubsub.destroy();
+      this.presence.destroy();
+      this.channels.destroy();
+      await this.durableQueue.close();
+
       // Close all connections to clean up timers
       this.connections.closeAll();
 

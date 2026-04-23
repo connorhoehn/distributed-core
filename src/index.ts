@@ -93,3 +93,6 @@ export * from './connections/Connection';
 export * from './connections/ConnectionManager';
 export * from './connections/Session';
 export * from './connections/types';
+
+// Gateway domain — PubSub, Presence, Channel, Queue, MessageRouter
+export * from './gateway';
