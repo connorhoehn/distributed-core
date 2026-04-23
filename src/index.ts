@@ -67,6 +67,8 @@ export * from './transport/Encryption';
 // Metrics modules
 export * from './monitoring/metrics/MetricsTracker';
 export * from './monitoring/metrics/MetricsExporter';
+export { MetricsRegistry } from './monitoring/metrics/MetricsRegistry';
+export type { MetricLabels, MetricSample, HistogramSnapshot, RegistrySnapshot } from './monitoring/metrics/MetricsRegistry';
 
 // Diagnostics modules
 export * from './diagnostics/DiagnosticTool';
@@ -99,6 +101,7 @@ export * from './messaging';
 // Connection modules
 export * from './connections/Connection';
 export * from './connections/ConnectionManager';
+export * from './connections/ConnectionRegistry';
 export * from './connections/Session';
 export * from './connections/types';
 
@@ -121,9 +124,11 @@ export type {
   ResourceRouterSyncAdapterConfig,
 } from './routing';
 
-// Distributed coordination — locks and leader election
-export { DistributedLock, LeaderElection } from './cluster/locks';
-export type { LockHandle, DistributedLockConfig, LeaderElectionConfig } from './cluster/locks';
+// Distributed coordination — locks, leader election, sessions
+export { DistributedLock, LeaderElection, ClusterLeaderElection } from './cluster/locks';
+export type { LockHandle, DistributedLockConfig, LeaderElectionConfig, ClusterLeaderElectionConfig } from './cluster/locks';
+export { DistributedSession } from './cluster/sessions';
+export type { DistributedSessionConfig, SessionInfo } from './cluster/sessions';
 
 // Gateway domain — PubSub, Presence, Channel, Queue, MessageRouter
 export * from './gateway';

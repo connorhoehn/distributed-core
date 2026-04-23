@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { unlink } from 'fs/promises';
 import { WALWriterImpl } from '../wal/WALWriter';
 import { WALReaderImpl } from '../wal/WALReader';
 import { WALEntry } from '../wal/types';
@@ -8,6 +9,17 @@ import {
   SnapshotType,
   StoreSnapshotOptions,
 } from './types';
+
+export interface CompactionOptions {
+  maxEntriesPerKey?: number;
+  deleteExpired?: boolean;
+}
+
+export interface CompactionResult {
+  keysVisited: number;
+  entriesKept: number;
+  entriesRemoved: number;
+}
 
 interface SnapshotMetadata {
   _snapshot: true;
@@ -180,5 +192,83 @@ export class WALSnapshotVersionStore<T> implements ISnapshotVersionStore<T> {
     }
 
     return count;
+  }
+
+  async compact(options: CompactionOptions = {}): Promise<CompactionResult> {
+    const maxEntriesPerKey = options.maxEntriesPerKey ?? 10;
+    const deleteExpired = options.deleteExpired ?? true;
+    const now = Date.now();
+
+    const all = await this.readAlive();
+
+    const byKey = new Map<string, SnapshotEntry<T>[]>();
+    for (const entry of all) {
+      const group = byKey.get(entry.key);
+      if (group) {
+        group.push(entry);
+      } else {
+        byKey.set(entry.key, [entry]);
+      }
+    }
+
+    const toKeep: SnapshotEntry<T>[] = [];
+    let entriesRemoved = 0;
+
+    for (const [, entries] of byKey) {
+      let candidates = entries;
+      if (deleteExpired) {
+        candidates = candidates.filter(
+          e => e.expiresAt === undefined || e.expiresAt >= now,
+        );
+      }
+      const kept = candidates.slice(0, maxEntriesPerKey);
+      const dropped = entries.length - kept.length;
+      entriesRemoved += dropped;
+      toKeep.push(...kept);
+    }
+
+    await this.writer.close();
+    await this.reader.close();
+
+    await unlink(this.filePath).catch(() => {});
+
+    const freshWriter = new WALWriterImpl({ filePath: this.filePath, syncInterval: 0 });
+    await freshWriter.initialize();
+
+    for (const entry of toKeep) {
+      const meta: SnapshotMetadata = {
+        _snapshot: true,
+        id: entry.id,
+        key: entry.key,
+        type: entry.type,
+        data: JSON.stringify(entry.data),
+        sizeBytes: entry.sizeBytes ?? Buffer.byteLength(JSON.stringify(entry.data), 'utf8'),
+        ...(entry.name !== undefined && { name: entry.name }),
+        ...(entry.expiresAt !== undefined && { expiresAt: entry.expiresAt }),
+        ...(entry.metadata !== undefined && { metadata: entry.metadata }),
+      };
+
+      await freshWriter.append({
+        entityId: `snapshot:${entry.key}`,
+        ownerNodeId: 'local',
+        version: entry.timestamp,
+        timestamp: entry.timestamp,
+        operation: 'CREATE',
+        metadata: meta as unknown as Record<string, unknown>,
+      });
+    }
+
+    await freshWriter.close();
+
+    this.writer = new WALWriterImpl({ filePath: this.filePath, syncInterval: 0 });
+    this.reader = new WALReaderImpl(this.filePath);
+    await this.writer.initialize();
+    await this.reader.initialize();
+
+    return {
+      keysVisited: byKey.size,
+      entriesKept: toKeep.length,
+      entriesRemoved,
+    };
   }
 }

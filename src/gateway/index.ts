@@ -7,3 +7,4 @@ export { MessageRouter, MessageRouterStats } from './routing/MessageRouter';
 export * from './eviction';
 export * from './coalescing';
 export * from './state';
+export * from './backpressure';

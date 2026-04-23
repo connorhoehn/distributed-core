@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { randomUUID } from 'crypto';
 import { WALSnapshotVersionStore } from '../../../../src/persistence/snapshot/WALSnapshotVersionStore';
+import type { CompactionResult } from '../../../../src/persistence/snapshot/WALSnapshotVersionStore';
 
 function tmpPath(): string {
   return path.join(os.tmpdir(), `wal-snap-test-${randomUUID()}.wal`);
@@ -153,5 +154,127 @@ describe('WALSnapshotVersionStore', () => {
     } finally {
       await store2.close();
     }
+  });
+
+  describe('compact()', () => {
+    let compactStore: WALSnapshotVersionStore<unknown>;
+    let compactFilePath: string;
+
+    beforeEach(async () => {
+      compactFilePath = path.join(os.tmpdir(), randomUUID());
+      compactStore = new WALSnapshotVersionStore(compactFilePath);
+      await compactStore.initialize();
+    });
+
+    afterEach(async () => {
+      await compactStore.close();
+      await fs.unlink(compactFilePath).catch(() => {});
+    });
+
+    test('compaction of a key with more entries than maxEntriesPerKey keeps only the N newest', async () => {
+      for (let i = 0; i < 5; i++) {
+        await compactStore.store('k', { i });
+        await new Promise(r => setTimeout(r, 5));
+      }
+
+      await compactStore.compact({ maxEntriesPerKey: 3, deleteExpired: false });
+
+      const entries = await compactStore.list('k', 10);
+      expect(entries.length).toBe(3);
+      expect((entries[0].data as { i: number }).i).toBe(4);
+      expect((entries[1].data as { i: number }).i).toBe(3);
+      expect((entries[2].data as { i: number }).i).toBe(2);
+    });
+
+    test('after compact, list() returns the kept entries', async () => {
+      for (let i = 0; i < 4; i++) {
+        await compactStore.store('listkey', { i });
+        await new Promise(r => setTimeout(r, 5));
+      }
+
+      await compactStore.compact({ maxEntriesPerKey: 2, deleteExpired: false });
+
+      const entries = await compactStore.list('listkey', 10);
+      expect(entries.length).toBe(2);
+    });
+
+    test('compaction removes expired entries when deleteExpired: true', async () => {
+      const past = Date.now() - 5000;
+      await compactStore.store('expkey', 'expired1', { expiresAt: past });
+      await compactStore.store('expkey', 'expired2', { expiresAt: past });
+      await compactStore.store('expkey', 'alive', { expiresAt: Date.now() + 60000 });
+
+      await compactStore.compact({ deleteExpired: true, maxEntriesPerKey: 100 });
+
+      const entries = await compactStore.list('expkey', 10);
+      expect(entries.length).toBe(1);
+      expect(entries[0].data).toBe('alive');
+    });
+
+    test('compaction does NOT remove non-expired entries when deleteExpired: false', async () => {
+      const past = Date.now() - 5000;
+      await compactStore.store('expkey', 'old', { expiresAt: past });
+      await compactStore.store('expkey', 'alive', { expiresAt: Date.now() + 60000 });
+
+      await compactStore.compact({ deleteExpired: false, maxEntriesPerKey: 100 });
+
+      const entries = await compactStore.list('expkey', 10);
+      expect(entries.length).toBe(2);
+    });
+
+    test('compaction with an empty store returns zero counts', async () => {
+      const result: CompactionResult = await compactStore.compact();
+      expect(result.keysVisited).toBe(0);
+      expect(result.entriesKept).toBe(0);
+      expect(result.entriesRemoved).toBe(0);
+    });
+
+    test('after compact, new store() calls still work correctly', async () => {
+      await compactStore.store('k', { v: 1 });
+      await compactStore.compact({ maxEntriesPerKey: 1, deleteExpired: false });
+
+      await new Promise(r => setTimeout(r, 5));
+      await compactStore.store('k', { v: 2 });
+
+      const latest = await compactStore.getLatest('k');
+      expect((latest!.data as { v: number }).v).toBe(2);
+    });
+
+    test('compact returns correct entriesKept and entriesRemoved counts', async () => {
+      for (let i = 0; i < 6; i++) {
+        await compactStore.store('k', { i });
+        await new Promise(r => setTimeout(r, 5));
+      }
+
+      const result: CompactionResult = await compactStore.compact({
+        maxEntriesPerKey: 2,
+        deleteExpired: false,
+      });
+
+      expect(result.keysVisited).toBe(1);
+      expect(result.entriesKept).toBe(2);
+      expect(result.entriesRemoved).toBe(4);
+    });
+
+    test('after compact, creating a new WALSnapshotVersionStore on the same path sees the compacted state', async () => {
+      for (let i = 0; i < 5; i++) {
+        await compactStore.store('k', { i });
+        await new Promise(r => setTimeout(r, 5));
+      }
+
+      await compactStore.compact({ maxEntriesPerKey: 2, deleteExpired: false });
+      await compactStore.close();
+
+      const store2 = new WALSnapshotVersionStore(compactFilePath);
+      await store2.initialize();
+      try {
+        const entries = await store2.list('k', 10);
+        expect(entries.length).toBe(2);
+        expect((entries[0].data as { i: number }).i).toBe(4);
+        expect((entries[1].data as { i: number }).i).toBe(3);
+      } finally {
+        await store2.close();
+      }
+    });
   });
 });

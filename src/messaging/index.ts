@@ -1,4 +1,6 @@
 // Core messaging system exports
+export { EventBus } from './EventBus';
+export type { BusEvent, EventBusConfig } from './EventBus';
 export { Router } from './Router';
 export type { RoutedMessage, MessageHandler } from './types';
 
