@@ -1,21 +1,19 @@
-import { ApplicationModule } from './ApplicationModule';
-import { 
-  ApplicationModuleConfig, 
-  ApplicationModuleMetrics, 
+import {
+  ApplicationModule,
+  ApplicationModuleConfig,
+  ApplicationModuleMetrics,
   ApplicationModuleContext,
   ApplicationModuleDashboardData,
   ModuleState,
-  ScalingStrategy 
-} from './types';
-import { 
-  ResourceMetadata, 
-  ResourceTypeDefinition, 
-  ResourceState, 
+  ScalingStrategy,
+  ResourceMetadata,
+  ResourceTypeDefinition,
+  ResourceState,
   ResourceHealth,
-  DistributionStrategy 
-} from '../cluster/resources/types';
-import { ChatTopologyManager, RoomMetadata } from './chat/ChatTopologyManager';
-import { ChatRoomCoordinator } from './chat/ChatRoomCoordinator';
+  DistributionStrategy
+} from 'distributed-core';
+import { ChatTopologyManager, RoomMetadata } from './ChatTopologyManager';
+import { ChatRoomCoordinator } from './ChatRoomCoordinator';
 
 /**
  * Chat Room Resource extending ResourceMetadata with chat-specific application data
@@ -68,7 +66,7 @@ export interface ChatApplicationMetrics extends ApplicationModuleMetrics {
 
 /**
  * Chat Application Module
- * 
+ *
  * A simplified implementation demonstrating the application module pattern
  * for chat functionality in the distributed cluster system.
  */
@@ -97,11 +95,11 @@ export class ChatApplicationModule extends ApplicationModule {
    */
   protected async onStart(): Promise<void> {
     this.log('info', 'Starting Chat Application Module');
-    
+
     // Note: ChatTopologyManager requires additional dependencies not available in context
     // This would need to be initialized by the ApplicationRegistry with full cluster context
     this.log('info', 'Chat-specific topology management will be handled at cluster level');
-    
+
     this.log('info', 'Chat Application Module started successfully');
   }
 
@@ -258,7 +256,7 @@ export class ChatApplicationModule extends ApplicationModule {
   async getMetrics(): Promise<ChatApplicationMetrics> {
     const rooms = Array.from(this.rooms.values());
     const activeRooms = rooms.filter(room => room.state === ResourceState.ACTIVE);
-    
+
     return {
       moduleId: this.config.moduleId,
       timestamp: Date.now(),
@@ -285,7 +283,7 @@ export class ChatApplicationModule extends ApplicationModule {
    */
   async getDashboardData(): Promise<ApplicationModuleDashboardData> {
     const metrics = await this.getMetrics();
-    
+
     return {
       moduleId: this.config.moduleId,
       moduleName: this.config.moduleName,
@@ -370,12 +368,12 @@ export class ChatApplicationModule extends ApplicationModule {
   private calculateMessagesPerSecond(): number {
     const now = Date.now();
     const oneSecondAgo = now - 1000;
-    
+
     let recentMessages = 0;
     for (const history of this.messageHistory.values()) {
       recentMessages += history.filter(msg => msg.timestamp > oneSecondAgo).length;
     }
-    
+
     return recentMessages;
   }
 
@@ -384,7 +382,7 @@ export class ChatApplicationModule extends ApplicationModule {
    */
   private isMessageBlocked(message: string): boolean {
     const lowerMessage = message.toLowerCase();
-    return this.chatConfig.moderation.bannedWords.some(word => 
+    return this.chatConfig.moderation.bannedWords.some(word =>
       lowerMessage.includes(word.toLowerCase())
     );
   }

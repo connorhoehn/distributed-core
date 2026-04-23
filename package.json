@@ -50,8 +50,12 @@
     "ws": "^8.18.3",
     "zstd-codec": "^0.1.5"
   },
+  "bin": {
+    "dcore": "./bin/dcore.js"
+  },
   "files": [
     "dist/**/*",
+    "bin/*",
     "README.md",
     "LICENSE"
   ]

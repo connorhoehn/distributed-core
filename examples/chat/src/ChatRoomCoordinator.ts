@@ -1,7 +1,9 @@
-import { Router } from '../../messaging/Router';
-import { ClusterManager } from '../../cluster/ClusterManager';
-import { ResourceRegistry } from '../../cluster/resources/ResourceRegistry';
-import { ResourceMetadata } from '../../cluster/resources/types';
+import {
+  ClusterManager,
+  ResourceRegistry,
+  ResourceMetadata,
+  Router
+} from 'distributed-core';
 import { ChatTopologyManager, RoomMetadata } from './ChatTopologyManager';
 
 /**
@@ -29,7 +31,7 @@ export interface RoomSubscription {
 
 /**
  * Chat Room Coordinator - Extracted Chat Logic
- * 
+ *
  * This class encapsulates all chat-specific logic that was previously
  * embedded in the core cluster messaging system. It manages:
  * - Room creation and lifecycle
@@ -42,7 +44,7 @@ export class ChatRoomCoordinator {
   private clusterManager: ClusterManager;
   private resourceRegistry: ResourceRegistry;
   private chatTopologyManager: ChatTopologyManager;
-  
+
   // Chat-specific state
   private rooms = new Map<string, RoomMetadata>();
   private messageHistory = new Map<string, ChatMessageEntity[]>();
@@ -59,7 +61,7 @@ export class ChatRoomCoordinator {
     this.clusterManager = clusterManager;
     this.resourceRegistry = resourceRegistry;
     this.chatTopologyManager = chatTopologyManager;
-    
+
     this.setupMessageHandlers();
   }
 
@@ -69,7 +71,7 @@ export class ChatRoomCoordinator {
   async start(): Promise<void> {
     // Register chat room resource type
     await this.registerChatRoomResourceType();
-    
+
     // Set up periodic cleanup
     setInterval(() => this.cleanupInactiveRooms(), 300000); // 5 minutes
     setInterval(() => this.cleanupOldMessages(), 3600000); // 1 hour
@@ -142,7 +144,7 @@ export class ChatRoomCoordinator {
 
     // Register with topology manager
     await this.chatTopologyManager.registerRoom(roomMetadata);
-    
+
     // Store locally
     this.rooms.set(roomData.roomId, roomMetadata);
     this.messageHistory.set(roomData.roomId, []);
@@ -205,7 +207,7 @@ export class ChatRoomCoordinator {
     // Remove subscriptions
     const userSubscriptions = this.subscriptions.get(userId) || [];
     const filteredSubscriptions = userSubscriptions.filter(s => s.roomId !== roomId);
-    
+
     if (filteredSubscriptions.length === 0) {
       this.subscriptions.delete(userId);
     } else {
@@ -245,7 +247,7 @@ export class ChatRoomCoordinator {
     // Store message
     const history = this.messageHistory.get(message.roomId) || [];
     history.push(fullMessage);
-    
+
     // Keep only last 1000 messages
     if (history.length > 1000) {
       history.splice(0, history.length - 1000);
@@ -369,7 +371,7 @@ export class ChatRoomCoordinator {
 
   private async broadcastToRoom(roomId: string, message: ChatMessageEntity): Promise<void> {
     const subscribers: string[] = [];
-    
+
     for (const [userId, subscriptions] of this.subscriptions) {
       const roomSubscription = subscriptions.find(s => s.roomId === roomId);
       if (roomSubscription) {
@@ -393,7 +395,7 @@ export class ChatRoomCoordinator {
     const history = this.messageHistory.get(roomId) || [];
     const now = Date.now();
     const oneMinuteAgo = now - 60000;
-    
+
     const recentMessages = history.filter(msg => msg.timestamp > oneMinuteAgo);
     return recentMessages.length; // messages per minute
   }
@@ -401,10 +403,10 @@ export class ChatRoomCoordinator {
   private cleanupInactiveRooms(): void {
     const now = Date.now();
     const inactivityThreshold = 30 * 60 * 1000; // 30 minutes
-    
+
     for (const [roomId, room] of this.rooms) {
       if (room.participantCount === 0 && (now - room.lastActivity) > inactivityThreshold) {
-        this.deleteRoom(roomId).catch(err => 
+        this.deleteRoom(roomId).catch(err =>
           console.warn(`Failed to cleanup inactive room ${roomId}:`, err)
         );
       }
@@ -414,7 +416,7 @@ export class ChatRoomCoordinator {
   private cleanupOldMessages(): void {
     const now = Date.now();
     const messageRetention = 24 * 60 * 60 * 1000; // 24 hours
-    
+
     for (const [roomId, history] of this.messageHistory) {
       const filteredHistory = history.filter(msg => (now - msg.timestamp) < messageRetention);
       this.messageHistory.set(roomId, filteredHistory);

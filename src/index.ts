@@ -4,8 +4,8 @@
 export * from './types';
 
 // Cluster Framework (New Range-based Coordination)
-export { 
-  createClusterNode, 
+export {
+  createClusterNode,
   createRangeHandler,
   RangeCoordinator,
   type ClusterNodeConfig,
@@ -25,14 +25,13 @@ export * from './gossip/GossipStrategy';
 export * from './monitoring/FailureDetector';
 export * from './config/BootstrapConfig';
 
-// Enhanced Observability 
+// Enhanced Observability
 export * from './cluster/introspection/ClusterIntrospection';
 export * from './cluster/aggregation/StateAggregator';
-export * from './cluster/topology/ClusterTopologyManager';
 export * from './cluster/observability/ObservabilityManager';
-export type { 
-  PerformanceMetrics, 
-  LogicalService, 
+export type {
+  PerformanceMetrics,
+  LogicalService,
   ClusterState
 } from './cluster/introspection/ClusterIntrospection';
 export type {
@@ -41,18 +40,22 @@ export type {
   StateAggregatorConfig
 } from './cluster/aggregation/StateAggregator';
 export type {
-  RoomMetadata,
-  NodeCapacity,
-  EnhancedClusterTopology,
-  ScalingAction,
-  RoomScalingCriteria
-} from './cluster/topology/ClusterTopologyManager';
-export type {
   ClusterDashboard,
   TopologyQuery,
   ClusterScalingAnalysis,
-  RoomPlacementRecommendation
+  ResourcePlacementRecommendation
 } from './cluster/observability/ObservabilityManager';
+
+// Generic Resource System
+export * from './cluster/resources/ResourceRegistry';
+export * from './cluster/resources/ResourceTypeRegistry';
+export * from './cluster/resources/types';
+export * from './cluster/topology/ResourceTopologyManager';
+
+// Application Framework
+export { ApplicationModule } from './applications/ApplicationModule';
+export { ApplicationRegistry } from './applications/ApplicationRegistry';
+export * from './applications/types';
 
 // Transport modules
 export * from './transport/Transport';
@@ -90,20 +93,3 @@ export * from './connections/Connection';
 export * from './connections/ConnectionManager';
 export * from './connections/Session';
 export * from './connections/types';
-
-// Front Door API
-export {
-  createNode,
-  createCluster,
-  createAgent,
-} from './frontdoor';
-export type {
-  NodeOptions,
-  ClusterOptions,
-  AgentOptions,
-} from './frontdoor';
-export {
-  NodeHandle,
-  ClusterHandle,
-  AgentHandle,
-} from './frontdoor';

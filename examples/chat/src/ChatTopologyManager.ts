@@ -1,10 +1,12 @@
 import { EventEmitter } from 'events';
-import { ClusterManager } from '../../cluster/ClusterManager';
-import { StateAggregator } from '../../cluster/aggregation/StateAggregator';
-import { MetricsTracker } from '../../monitoring/metrics/MetricsTracker';
-import { ResourceTopologyManager } from '../../cluster/topology/ResourceTopologyManager';
-import { ResourceRegistry } from '../../cluster/resources/ResourceRegistry';
-import { ResourceMetadata } from '../../cluster/resources/types';
+import {
+  ClusterManager,
+  ResourceTopologyManager,
+  ResourceRegistry,
+  ResourceMetadata,
+  MetricsTracker,
+  StateAggregator
+} from 'distributed-core';
 
 /**
  * Enhanced room metadata for sharding and HA rules
@@ -16,7 +18,7 @@ export interface RoomMetadata {
   messageRate: number;
   created: number;
   lastActivity: number;
-  
+
   // Sharding configuration
   sharding: {
     enabled: boolean;
@@ -25,7 +27,7 @@ export interface RoomMetadata {
     shardNodes?: string[];
     shardingStrategy: 'participant-count' | 'message-rate' | 'geographic' | 'manual';
   };
-  
+
   // High Availability rules
   highAvailability: {
     enabled: boolean;
@@ -39,7 +41,7 @@ export interface RoomMetadata {
       minNodes?: number;
     };
   };
-  
+
   // Room type configuration
   roomType: {
     type: 'chat' | 'broadcast' | 'conference' | 'private';
@@ -50,7 +52,7 @@ export interface RoomMetadata {
       moderators?: string[];
     };
   };
-  
+
   // Performance characteristics
   performance: {
     priority: 'low' | 'normal' | 'high' | 'critical';
@@ -58,7 +60,7 @@ export interface RoomMetadata {
     maxLatency: number;
     guaranteedDelivery: boolean;
   };
-  
+
   // Geographic and deployment metadata
   geographic: {
     primaryRegion?: string;
@@ -75,7 +77,7 @@ export interface ChatNodeCapacity {
   region: string;
   zone: string;
   role: string;
-  
+
   // Chat-specific resource limits
   capacity: {
     maxRooms: number;
@@ -84,7 +86,7 @@ export interface ChatNodeCapacity {
     cpuCores: number;
     memoryGB: number;
   };
-  
+
   // Current chat utilization
   utilization: {
     activeRooms: number;
@@ -94,7 +96,7 @@ export interface ChatNodeCapacity {
     memoryUsage: number;
     networkLatency: Record<string, number>; // node -> latency
   };
-  
+
   // Chat capabilities
   capabilities: {
     supportsSharding: boolean;
@@ -102,7 +104,7 @@ export interface ChatNodeCapacity {
     supportsBroadcast: boolean;
     maxConcurrentConnections: number;
   };
-  
+
   // Health and availability
   health: {
     status: 'healthy' | 'degraded' | 'unhealthy';
@@ -123,7 +125,7 @@ export interface ChatClusterTopology {
     byZone: Record<string, number>;
     byRole: Record<string, number>;
   };
-  
+
   // Room distribution and management
   rooms: {
     total: number;
@@ -133,7 +135,7 @@ export interface ChatClusterTopology {
     shardedRooms: number;
     replicatedRooms: number;
   };
-  
+
   // Capacity and load
   clusterCapacity: {
     totalCapacity: ChatNodeCapacity['capacity'];
@@ -141,7 +143,7 @@ export interface ChatClusterTopology {
     utilizationPercentage: number;
     bottlenecks: string[];
   };
-  
+
   // Scaling recommendations
   scalingRecommendations: {
     needsScaling: boolean;
@@ -150,21 +152,21 @@ export interface ChatClusterTopology {
     urgency: 'low' | 'medium' | 'high' | 'critical';
     recommendedActions: ChatScalingAction[];
   };
-  
+
   // Health and performance
   overallHealth: {
     score: number; // 0-1
     status: 'healthy' | 'warning' | 'critical';
     issues: string[];
   };
-  
+
   // Geographic distribution
   geographic: {
     regions: string[];
     crossRegionLatency: Record<string, Record<string, number>>;
     regionHealth: Record<string, number>;
   };
-  
+
   timestamp: number;
 }
 
@@ -197,7 +199,7 @@ export interface RoomScalingCriteria {
 
 /**
  * ChatTopologyManager provides chat-specific cluster topology management
- * 
+ *
  * Features:
  * - Real-time topology visualization with room distribution
  * - Intelligent scaling recommendations based on chat load and performance
@@ -212,13 +214,13 @@ export class ChatTopologyManager extends EventEmitter {
   private metricsTracker: MetricsTracker;
   private resourceTopologyManager: ResourceTopologyManager;
   private resourceRegistry: ResourceRegistry;
-  
+
   // Chat-specific state tracking
   private nodeCapacities = new Map<string, ChatNodeCapacity>();
   private roomMetadata = new Map<string, RoomMetadata>();
   private topologyUpdateInterval?: NodeJS.Timeout;
   private lastTopologyUpdate = 0;
-  
+
   // Configuration
   private updateIntervalMs = 5000;
   private scalingCriteria: RoomScalingCriteria = {
@@ -246,7 +248,7 @@ export class ChatTopologyManager extends EventEmitter {
     this.metricsTracker = metricsTracker;
     this.resourceTopologyManager = resourceTopologyManager;
     this.resourceRegistry = resourceRegistry;
-    
+
     if (config) {
       this.updateIntervalMs = config.updateIntervalMs || this.updateIntervalMs;
       this.scalingCriteria = { ...this.scalingCriteria, ...config.scalingCriteria };
@@ -259,25 +261,25 @@ export class ChatTopologyManager extends EventEmitter {
   async start(): Promise<void> {
     // Initialize node capacity tracking for chat
     await this.initializeChatNodeCapacities();
-    
+
     // Start periodic topology updates
     this.topologyUpdateInterval = setInterval(
       this.updateChatTopology.bind(this),
       this.updateIntervalMs
     );
-    
+
     this.topologyUpdateInterval.unref();
-    
+
     // Listen for cluster events
     this.cluster.on('member-joined', this.handleNodeJoined.bind(this));
     this.cluster.on('member-left', this.handleNodeLeft.bind(this));
     this.cluster.on('member-updated', this.handleNodeUpdated.bind(this));
-    
+
     // Listen for room-related resource events
     this.resourceRegistry.on('resource:created', this.handleRoomCreated.bind(this));
     this.resourceRegistry.on('resource:destroyed', this.handleRoomDestroyed.bind(this));
     this.resourceRegistry.on('resource:updated', this.handleRoomUpdated.bind(this));
-    
+
     this.emit('started');
   }
 
@@ -289,7 +291,7 @@ export class ChatTopologyManager extends EventEmitter {
       clearInterval(this.topologyUpdateInterval);
       this.topologyUpdateInterval = undefined;
     }
-    
+
     // Remove event listeners
     this.cluster.removeAllListeners('member-joined');
     this.cluster.removeAllListeners('member-left');
@@ -297,7 +299,7 @@ export class ChatTopologyManager extends EventEmitter {
     this.resourceRegistry.removeAllListeners('resource:created');
     this.resourceRegistry.removeAllListeners('resource:destroyed');
     this.resourceRegistry.removeAllListeners('resource:updated');
-    
+
     this.emit('stopped');
   }
 
@@ -307,10 +309,10 @@ export class ChatTopologyManager extends EventEmitter {
   async getChatClusterTopology(): Promise<ChatClusterTopology> {
     // Get generic cluster topology from ResourceTopologyManager
     const genericTopology = await this.resourceTopologyManager.getResourceTopology('chat-room');
-    
+
     // Enhance with chat-specific information
     const chatRooms = this.resourceRegistry.getResourcesByType('chat-room');
-    
+
     const roomDistribution = {
       total: chatRooms.length,
       byNode: this.calculateRoomsByNode(chatRooms),
@@ -356,7 +358,7 @@ export class ChatTopologyManager extends EventEmitter {
    */
   async registerRoom(roomMetadata: RoomMetadata): Promise<void> {
     this.roomMetadata.set(roomMetadata.roomId, roomMetadata);
-    
+
     // Create resource metadata for the generic system
     const resourceMetadata: ResourceMetadata = {
       resourceId: roomMetadata.roomId,
@@ -390,7 +392,7 @@ export class ChatTopologyManager extends EventEmitter {
         geographic: roomMetadata.geographic
       }
     };
-    
+
     await this.resourceRegistry.createResource(resourceMetadata);
     this.emit('room:registered', roomMetadata);
   }
@@ -430,7 +432,7 @@ export class ChatTopologyManager extends EventEmitter {
     // Simple placement logic based on current capacity
     const aliveMembers = this.cluster.getAliveMembers();
     const nodeLoads = new Map<string, number>();
-    
+
     for (const member of aliveMembers) {
       const nodeRooms = this.resourceRegistry.getResourcesByNode(member.id)
         .filter((r: ResourceMetadata) => r.resourceType === 'chat-room');
@@ -439,9 +441,9 @@ export class ChatTopologyManager extends EventEmitter {
     }
 
     // Select node with lowest load
-    const recommendedNode = aliveMembers.reduce((bestNode, currentNode) => 
-      (nodeLoads.get(currentNode.id) || 0) < (nodeLoads.get(bestNode.id) || 0) 
-        ? currentNode 
+    const recommendedNode = aliveMembers.reduce((bestNode, currentNode) =>
+      (nodeLoads.get(currentNode.id) || 0) < (nodeLoads.get(bestNode.id) || 0)
+        ? currentNode
         : bestNode
     ).id;
 
@@ -465,7 +467,7 @@ export class ChatTopologyManager extends EventEmitter {
   // Private helper methods
   private async initializeChatNodeCapacities(): Promise<void> {
     const aliveMembers = this.cluster.getAliveMembers();
-    
+
     for (const member of aliveMembers) {
       const capacity: ChatNodeCapacity = {
         nodeId: member.id,
@@ -499,7 +501,7 @@ export class ChatTopologyManager extends EventEmitter {
           lastHealthCheck: Date.now()
         }
       };
-      
+
       this.nodeCapacities.set(member.id, capacity);
     }
   }
@@ -514,7 +516,7 @@ export class ChatTopologyManager extends EventEmitter {
 
   private async updateRoomDistribution(): Promise<void> {
     const chatRooms = this.resourceRegistry.getResourcesByType('chat-room');
-    
+
     // Update room metadata with current state
     for (const room of chatRooms) {
       const roomMeta = this.roomMetadata.get(room.resourceId);
@@ -530,10 +532,10 @@ export class ChatTopologyManager extends EventEmitter {
   private async updateNodeUtilization(): Promise<void> {
     for (const [nodeId, capacity] of this.nodeCapacities) {
       const nodeRooms = this.resourceRegistry.getResourcesByNode(nodeId).filter(r => r.resourceType === 'chat-room');
-      
+
       capacity.utilization.activeRooms = nodeRooms.length;
       capacity.utilization.totalParticipants = nodeRooms.reduce((sum, room) => sum + room.capacity.current, 0);
-      
+
       // Get CPU and memory usage from metrics
       capacity.utilization.cpuUsage = this.metricsTracker.getGaugeValue('node_cpu_usage', { node_id: nodeId }) || 0;
       capacity.utilization.memoryUsage = this.metricsTracker.getGaugeValue('node_memory_usage', { node_id: nodeId }) || 0;
@@ -626,8 +628,8 @@ export class ChatTopologyManager extends EventEmitter {
       totalUtilization.memoryUsage += capacity.utilization.memoryUsage;
     }
 
-    const utilizationPercentage = totalCapacity.maxParticipants > 0 
-      ? (totalUtilization.totalParticipants / totalCapacity.maxParticipants) * 100 
+    const utilizationPercentage = totalCapacity.maxParticipants > 0
+      ? (totalUtilization.totalParticipants / totalCapacity.maxParticipants) * 100
       : 0;
 
     const bottlenecks: string[] = [];
@@ -644,7 +646,7 @@ export class ChatTopologyManager extends EventEmitter {
 
   private async generateChatScalingRecommendations(): Promise<ChatScalingAction[]> {
     const actions: ChatScalingAction[] = [];
-    
+
     // Check for rooms that need sharding
     for (const [roomId, roomMeta] of this.roomMetadata) {
       if (roomMeta.participantCount > this.scalingCriteria.maxParticipantsPerRoom) {
@@ -653,7 +655,7 @@ export class ChatTopologyManager extends EventEmitter {
           priority: 1,
           description: `Room ${roomId} has ${roomMeta.participantCount} participants, exceeding limit of ${this.scalingCriteria.maxParticipantsPerRoom}`,
           target: roomId,
-          parameters: { 
+          parameters: {
             currentParticipants: roomMeta.participantCount,
             recommendedShards: Math.ceil(roomMeta.participantCount / this.scalingCriteria.maxParticipantsPerRoom)
           },
@@ -694,7 +696,7 @@ export class ChatTopologyManager extends EventEmitter {
 
     for (const [nodeId, capacity] of this.nodeCapacities) {
       let nodeScore = 1.0;
-      
+
       // Factor in utilization
       const utilization = capacity.utilization.totalParticipants / capacity.capacity.maxParticipants;
       if (utilization > 0.9) {
@@ -718,7 +720,7 @@ export class ChatTopologyManager extends EventEmitter {
 
     const overallScore = nodeCount > 0 ? totalScore / nodeCount : 0;
     let status: 'healthy' | 'warning' | 'critical' = 'healthy';
-    
+
     if (overallScore < 0.5) status = 'critical';
     else if (overallScore < 0.8) status = 'warning';
 

@@ -1,14 +1,14 @@
 import { EventEmitter } from 'events';
-import { ClusterTopologyManager, RoomMetadata, NodeCapacity, EnhancedClusterTopology } from '../topology/ClusterTopologyManager';
+import { ResourceTopologyManager, NodeResourceCapacity, ResourceClusterTopology } from '../topology/ResourceTopologyManager';
 import { ClusterManager } from '../ClusterManager';
-import { StateAggregator } from '../aggregation/StateAggregator';
+import { ResourceMetadata } from '../resources/types';
 import { MetricsTracker } from '../../monitoring/metrics/MetricsTracker';
 
 /**
- * Room placement and management recommendations
+ * Resource placement and management recommendations
  */
-export interface RoomPlacementRecommendation {
-  roomId: string;
+export interface ResourcePlacementRecommendation {
+  resourceId: string;
   currentPlacement: {
     primaryNode: string;
     replicaNodes: string[];
@@ -29,22 +29,22 @@ export interface RoomPlacementRecommendation {
 export interface ClusterScalingAnalysis {
   currentState: {
     totalNodes: number;
-    totalCapacity: NodeCapacity['capacity'];
+    totalCapacity: NodeResourceCapacity['capacity'];
     currentUtilization: number;
     bottlenecks: string[];
   };
   projectedDemand: {
     timeHorizon: 'immediate' | '1hour' | '6hours' | '24hours';
     expectedLoad: number;
-    expectedRooms: number;
-    expectedParticipants: number;
+    expectedResources: number;
+    expectedConnections: number;
   };
   recommendations: {
     scaleUp: boolean;
     scaleDown: boolean;
     addNodes: number;
     removeNodes: string[];
-    redistributeRooms: RoomPlacementRecommendation[];
+    redistributeResources: ResourcePlacementRecommendation[];
     urgency: 'low' | 'medium' | 'high' | 'critical';
   };
   costAnalysis: {
@@ -62,8 +62,8 @@ export interface ClusterDashboard {
   overview: {
     totalNodes: number;
     healthyNodes: number;
-    totalRooms: number;
-    totalParticipants: number;
+    totalResources: number;
+    totalConnections: number;
     messagesPerSecond: number;
     averageLatency: number;
     clusterHealth: 'healthy' | 'warning' | 'critical';
@@ -71,16 +71,16 @@ export interface ClusterDashboard {
   regions: {
     [region: string]: {
       nodes: number;
-      rooms: number;
-      participants: number;
+      resources: number;
+      connections: number;
       health: number;
       latency: number;
     };
   };
   hotspots: {
-    highTrafficRooms: Array<{
-      roomId: string;
-      participants: number;
+    highTrafficResources: Array<{
+      resourceId: string;
+      connections: number;
       messageRate: number;
       node: string;
     }>;
@@ -88,11 +88,11 @@ export interface ClusterDashboard {
       nodeId: string;
       cpuUsage: number;
       memoryUsage: number;
-      roomCount: number;
+      resourceCount: number;
     }>;
   };
   trends: {
-    participantGrowth: number; // percentage change
+    connectionGrowth: number; // percentage change
     messageVolumeGrowth: number;
     nodeHealthTrend: 'improving' | 'stable' | 'degrading';
   };
@@ -112,18 +112,18 @@ export interface TopologyQuery {
   regions?: string[];
   zones?: string[];
   nodeRoles?: string[];
-  roomTypes?: string[];
-  
+  resourceTypes?: string[];
+
   // Metrics filtering
   minHealth?: number;
   maxUtilization?: number;
-  
+
   // Time-based filtering
   since?: number;
   until?: number;
-  
+
   // Projection and grouping
-  groupBy?: 'region' | 'zone' | 'role' | 'roomType';
+  groupBy?: 'region' | 'zone' | 'role' | 'resourceType';
   includeMetrics?: boolean;
   includeHistory?: boolean;
   includeProjections?: boolean;
@@ -131,30 +131,30 @@ export interface TopologyQuery {
 
 /**
  * ObservabilityManager provides comprehensive cluster observability and management APIs
- * 
- * This manager builds on top of ClusterTopologyManager to provide:
+ *
+ * This manager builds on top of ResourceTopologyManager to provide:
  * - Real-time dashboard APIs for monitoring UIs
  * - Advanced querying and filtering of cluster topology
  * - Predictive scaling analysis and recommendations
- * - Room placement optimization
+ * - Resource placement optimization
  * - Geographic distribution optimization
  * - Performance trend analysis and alerting
  */
 export class ObservabilityManager extends EventEmitter {
-  private topologyManager: ClusterTopologyManager;
+  private topologyManager: ResourceTopologyManager;
   private cluster: ClusterManager;
   private dashboardUpdateInterval?: NodeJS.Timeout;
   private lastDashboard?: ClusterDashboard;
-  
+
   // Historical data for trend analysis
-  private historicalTopologies: EnhancedClusterTopology[] = [];
+  private historicalTopologies: ResourceClusterTopology[] = [];
   private maxHistorySize = 100;
-  
+
   // Configuration
   private dashboardUpdateIntervalMs = 10000; // 10 seconds
-  
+
   constructor(
-    topologyManager: ClusterTopologyManager,
+    topologyManager: ResourceTopologyManager,
     cluster: ClusterManager,
     config?: {
       dashboardUpdateIntervalMs?: number;
@@ -164,15 +164,15 @@ export class ObservabilityManager extends EventEmitter {
     super();
     this.topologyManager = topologyManager;
     this.cluster = cluster;
-    
+
     if (config) {
       this.dashboardUpdateIntervalMs = config.dashboardUpdateIntervalMs || this.dashboardUpdateIntervalMs;
       this.maxHistorySize = config.maxHistorySize || this.maxHistorySize;
     }
-    
+
     // Listen to topology updates
-    this.topologyManager.on('topology-updated', (topology) => {
-      this.handleTopologyUpdate(topology);
+    this.topologyManager.on('topology:updated', () => {
+      this.handleTopologyUpdate();
     });
   }
 
@@ -182,21 +182,20 @@ export class ObservabilityManager extends EventEmitter {
   async start(): Promise<void> {
     // Start topology manager
     await this.topologyManager.start();
-    
+
     // Start periodic dashboard updates with bound function
     this.dashboardUpdateInterval = setInterval(
       this.updateDashboard.bind(this),
       this.dashboardUpdateIntervalMs
     );
-    
+
     // Unref the interval so it doesn't keep the process alive
     this.dashboardUpdateInterval.unref();
-    
-    // Listen to topology events with bound handler
-    this.topologyManager.on('topology-updated', this.handleTopologyUpdate.bind(this));
-    
+
     this.emit('started');
-  }    /**
+  }
+
+  /**
    * Stop the observability system
    */
   async stop(): Promise<void> {
@@ -205,13 +204,10 @@ export class ObservabilityManager extends EventEmitter {
       clearInterval(this.dashboardUpdateInterval);
       this.dashboardUpdateInterval = undefined;
     }
-    
-    // Remove event listeners to prevent memory leaks
-    this.topologyManager.removeListener('topology-updated', this.handleTopologyUpdate.bind(this));
-    
+
     // Stop topology manager
     await this.topologyManager.stop();
-    
+
     this.emit('stopped');
   }
 
@@ -222,7 +218,7 @@ export class ObservabilityManager extends EventEmitter {
     if (this.lastDashboard) {
       return this.lastDashboard;
     }
-    
+
     return await this.buildDashboard();
   }
 
@@ -230,35 +226,35 @@ export class ObservabilityManager extends EventEmitter {
    * Query cluster topology with advanced filtering
    */
   async queryTopology(query: TopologyQuery = {}): Promise<{
-    topology: EnhancedClusterTopology;
-    filteredNodes: NodeCapacity[];
-    filteredRooms: RoomMetadata[];
+    topology: ResourceClusterTopology;
+    filteredNodes: NodeResourceCapacity[];
+    filteredResources: ResourceMetadata[];
     aggregatedMetrics?: any;
   }> {
-    const topology = await this.topologyManager.getClusterTopology();
-    
+    const topology = await this.topologyManager.getResourceTopology();
+
     // Apply filters (implementation would depend on how we store this data)
     // For now, return the full topology
     return {
       topology,
       filteredNodes: [], // Would be filtered based on query
-      filteredRooms: [], // Would be filtered based on query
+      filteredResources: [], // Would be filtered based on query
       aggregatedMetrics: query.includeMetrics ? this.calculateAggregatedMetrics(topology) : undefined
     };
   }
 
   /**
-   * Get room placement recommendations for optimization
+   * Get resource placement recommendations for optimization
    */
-  async getRoomPlacementRecommendations(
+  async getResourcePlacementRecommendations(
     optimizeFor: 'performance' | 'cost' | 'availability' | 'latency' = 'performance'
-  ): Promise<RoomPlacementRecommendation[]> {
-    const topology = await this.topologyManager.getClusterTopology();
-    const recommendations: RoomPlacementRecommendation[] = [];
-    
-    // Analyze each room for potential optimization
+  ): Promise<ResourcePlacementRecommendation[]> {
+    const topology = await this.topologyManager.getResourceTopology();
+    const recommendations: ResourcePlacementRecommendation[] = [];
+
+    // Analyze each resource for potential optimization
     // This is a simplified implementation - real optimization would be more complex
-    
+
     return recommendations;
   }
 
@@ -266,26 +262,27 @@ export class ObservabilityManager extends EventEmitter {
    * Get comprehensive cluster scaling analysis
    */
   async getScalingAnalysis(timeHorizon: '1hour' | '6hours' | '24hours' = '6hours'): Promise<ClusterScalingAnalysis> {
-    const topology = await this.topologyManager.getClusterTopology();
+    const topology = await this.topologyManager.getResourceTopology();
     const historical = this.getHistoricalTrends();
-    
+
     // Calculate projected demand based on historical trends
     const projectedDemand = this.calculateProjectedDemand(historical, timeHorizon);
-    
+
     // Analyze current state
+    const totalCapacity = this.aggregateNodeCapacity(topology.nodes);
     const currentState = {
-      totalNodes: topology.totalNodes,
-      totalCapacity: topology.clusterCapacity.totalCapacity,
-      currentUtilization: topology.clusterCapacity.utilizationPercentage,
-      bottlenecks: topology.clusterCapacity.bottlenecks
+      totalNodes: topology.nodes.length,
+      totalCapacity,
+      currentUtilization: topology.performance.utilizationRate,
+      bottlenecks: [] as string[]
     };
-    
+
     // Generate recommendations
     const recommendations = this.generateScalingRecommendations(currentState, projectedDemand, topology);
-    
+
     // Calculate cost analysis
     const costAnalysis = this.calculateCostAnalysis(currentState, recommendations);
-    
+
     return {
       currentState,
       projectedDemand,
@@ -300,46 +297,54 @@ export class ObservabilityManager extends EventEmitter {
   async getGeographicAnalysis(): Promise<{
     regions: Record<string, {
       nodes: number;
-      rooms: number;
-      participants: number;
+      resources: number;
+      connections: number;
       averageLatency: number;
       crossRegionLatency: Record<string, number>;
       recommendations: string[];
     }>;
     optimization: {
       suggestNewRegions: string[];
-      redistributeRooms: Array<{
-        roomId: string;
+      redistributeResources: Array<{
+        resourceId: string;
         fromRegion: string;
         toRegion: string;
         expectedLatencyImprovement: number;
       }>;
     };
   }> {
-    const topology = await this.topologyManager.getClusterTopology();
-    
+    const topology = await this.topologyManager.getResourceTopology();
+
     const regions: any = {};
-    
-    // Analyze each region
-    for (const region of topology.geographic.regions) {
-      const regionHealth = topology.geographic.regionHealth[region] || 0;
-      const crossRegionLatency = topology.geographic.crossRegionLatency[region] || {};
-      
+
+    // Analyze each region based on node distribution
+    const regionNodes = new Map<string, NodeResourceCapacity[]>();
+    for (const node of topology.nodes) {
+      const region = node.region;
+      if (!regionNodes.has(region)) {
+        regionNodes.set(region, []);
+      }
+      regionNodes.get(region)!.push(node);
+    }
+
+    for (const [region, nodes] of regionNodes) {
+      const regionResourceCount = nodes.reduce((sum, n) => sum + n.utilization.activeResources, 0);
+
       regions[region] = {
-        nodes: topology.nodeDistribution.byRegion[region] || 0,
-        rooms: topology.rooms.byRegion[region] || 0,
-        participants: 0, // Would need to aggregate from room data
-        averageLatency: Object.values(crossRegionLatency).reduce((a, b) => a + b, 0) / Object.values(crossRegionLatency).length || 0,
-        crossRegionLatency,
-        recommendations: this.generateRegionRecommendations(region, regionHealth, crossRegionLatency)
+        nodes: nodes.length,
+        resources: regionResourceCount,
+        connections: nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0),
+        averageLatency: 0,
+        crossRegionLatency: {},
+        recommendations: this.generateRegionRecommendations(region, 1.0, {})
       };
     }
-    
+
     return {
       regions,
       optimization: {
         suggestNewRegions: [],
-        redistributeRooms: []
+        redistributeResources: []
       }
     };
   }
@@ -349,15 +354,15 @@ export class ObservabilityManager extends EventEmitter {
    */
   async getPerformanceTrends(): Promise<{
     trends: {
-      participants: { current: number; trend: 'up' | 'down' | 'stable'; rate: number };
+      connections: { current: number; trend: 'up' | 'down' | 'stable'; rate: number };
       messageVolume: { current: number; trend: 'up' | 'down' | 'stable'; rate: number };
       nodeHealth: { current: number; trend: 'up' | 'down' | 'stable'; rate: number };
       latency: { current: number; trend: 'up' | 'down' | 'stable'; rate: number };
     };
     predictions: {
-      nextHour: { participants: number; messageVolume: number };
-      next6Hours: { participants: number; messageVolume: number };
-      next24Hours: { participants: number; messageVolume: number };
+      nextHour: { connections: number; messageVolume: number };
+      next6Hours: { connections: number; messageVolume: number };
+      next24Hours: { connections: number; messageVolume: number };
     };
     alerts: Array<{
       type: 'trend' | 'threshold' | 'anomaly';
@@ -369,41 +374,57 @@ export class ObservabilityManager extends EventEmitter {
     }>;
   }> {
     const historical = this.getHistoricalTrends();
-    
+
     // Calculate trends from historical data
     const trends = this.calculateTrends(historical);
-    
+
     // Generate predictions
     const predictions = this.generatePredictions(trends, historical);
-    
+
     // Detect alerts
     const alerts = this.detectTrendAlerts(trends, historical);
-    
+
     return { trends, predictions, alerts };
   }
 
   /**
-   * Register a room with the observability system
+   * Register a resource with the observability system
    */
-  async registerRoom(roomMetadata: RoomMetadata): Promise<void> {
-    await this.topologyManager.registerRoom(roomMetadata);
+  async registerResource(resourceType: string, config: {
+    defaultReplicationFactor?: number;
+    defaultShardingStrategy?: string;
+    capacityLimits?: {
+      maxInstancesPerNode?: number;
+      maxConnectionsPerInstance?: number;
+    };
+    placementConstraints?: {
+      allowedZones?: string[];
+      allowedRegions?: string[];
+      affinityRules?: string[];
+      antiAffinityRules?: string[];
+    };
+  }): Promise<void> {
+    this.topologyManager.registerResourceType(resourceType, config);
   }
 
   /**
-   * Update room metrics
+   * Update resource metrics
    */
-  async updateRoomMetrics(
-    roomId: string,
-    metrics: { participantCount?: number; messageRate?: number; lastActivity?: number }
+  async updateResourceMetrics(
+    resourceId: string,
+    metrics: { connectionCount?: number; messageRate?: number; lastActivity?: number }
   ): Promise<void> {
-    await this.topologyManager.updateRoomMetadata(roomId, metrics);
+    // Resource metrics are tracked through the ResourceRegistry
+    // This method provides a convenience API for observability
+    this.emit('resource-metrics-updated', { resourceId, metrics });
   }
 
   /**
    * Register node capacity
    */
-  async registerNodeCapacity(capacity: NodeCapacity): Promise<void> {
-    await this.topologyManager.registerNodeCapacity(capacity);
+  async registerNodeCapacity(capacity: NodeResourceCapacity): Promise<void> {
+    // Node capacity is tracked through ResourceTopologyManager
+    this.emit('node-capacity-registered', capacity);
   }
 
   /**
@@ -411,58 +432,79 @@ export class ObservabilityManager extends EventEmitter {
    */
 
   private async buildDashboard(): Promise<ClusterDashboard> {
-    const topology = await this.topologyManager.getClusterTopology();
-    const healthReport = await this.topologyManager.getNodeHealthReport();
-    
+    const topology = await this.topologyManager.getResourceTopology();
+
     // Build overview
+    const healthyNodeCount = topology.nodes.filter(n => n.health.status === 'healthy').length;
+    const totalConnections = topology.nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0);
+
+    const healthStatus: 'healthy' | 'warning' | 'critical' =
+      topology.clusterHealth.isHealthy ? 'healthy' :
+      topology.clusterHealth.healthRatio >= 0.5 ? 'warning' : 'critical';
+
     const overview = {
-      totalNodes: topology.totalNodes,
-      healthyNodes: topology.aliveNodes,
-      totalRooms: topology.rooms.total,
-      totalParticipants: topology.clusterCapacity.totalUtilization.totalParticipants,
+      totalNodes: topology.nodes.length,
+      healthyNodes: healthyNodeCount,
+      totalResources: topology.resources.total,
+      totalConnections: totalConnections,
       messagesPerSecond: 0, // Would need to aggregate from metrics
-      averageLatency: 0, // Would need to calculate from network metrics
-      clusterHealth: topology.overallHealth.status
+      averageLatency: topology.performance.averageLatency,
+      clusterHealth: healthStatus
     };
-    
+
     // Build regions data
     const regions: ClusterDashboard['regions'] = {};
-    for (const region of topology.geographic.regions) {
+    const regionNodes = new Map<string, NodeResourceCapacity[]>();
+    for (const node of topology.nodes) {
+      if (!regionNodes.has(node.region)) {
+        regionNodes.set(node.region, []);
+      }
+      regionNodes.get(node.region)!.push(node);
+    }
+
+    for (const [region, nodes] of regionNodes) {
       regions[region] = {
-        nodes: topology.nodeDistribution.byRegion[region] || 0,
-        rooms: topology.rooms.byRegion[region] || 0,
-        participants: 0, // Would aggregate from room data
-        health: topology.geographic.regionHealth[region] || 0,
+        nodes: nodes.length,
+        resources: nodes.reduce((sum, n) => sum + n.utilization.activeResources, 0),
+        connections: nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0),
+        health: nodes.filter(n => n.health.status === 'healthy').length / nodes.length,
         latency: 0 // Would calculate from cross-region latency
       };
     }
-    
+
     // Identify hotspots
-    const hotspots = {
-      highTrafficRooms: [], // Would identify from room metrics
-      overloadedNodes: healthReport.overloaded.map(node => ({
+    const overloadedNodes = topology.nodes
+      .filter(n => n.health.status === 'degraded' || n.health.status === 'unhealthy')
+      .map(node => ({
         nodeId: node.nodeId,
         cpuUsage: node.utilization.cpuUsage,
         memoryUsage: node.utilization.memoryUsage,
-        roomCount: node.utilization.activeRooms
-      }))
+        resourceCount: node.utilization.activeResources
+      }));
+
+    const hotspots = {
+      highTrafficResources: [] as Array<{ resourceId: string; connections: number; messageRate: number; node: string }>,
+      overloadedNodes
     };
-    
+
     // Calculate trends
     const trends = {
-      participantGrowth: 0, // Would calculate from historical data
+      connectionGrowth: 0, // Would calculate from historical data
       messageVolumeGrowth: 0, // Would calculate from historical data
       nodeHealthTrend: 'stable' as const // Would calculate from historical data
     };
-    
+
     // Generate alerts
-    const alerts = topology.overallHealth.issues.map(issue => ({
-      severity: 'warning' as const,
-      message: issue,
-      timestamp: Date.now(),
-      category: 'health' as const
-    }));
-    
+    const alerts: ClusterDashboard['alerts'] = [];
+    if (!topology.clusterHealth.isHealthy) {
+      alerts.push({
+        severity: 'warning',
+        message: 'Cluster health is degraded',
+        timestamp: Date.now(),
+        category: 'health'
+      });
+    }
+
     const dashboard: ClusterDashboard = {
       overview,
       regions,
@@ -470,36 +512,34 @@ export class ObservabilityManager extends EventEmitter {
       trends,
       alerts
     };
-    
+
     this.lastDashboard = dashboard;
     return dashboard;
   }
 
-  private handleTopologyUpdate(topology: EnhancedClusterTopology): void {
-    // Store in historical data
-    this.historicalTopologies.push(topology);
-    if (this.historicalTopologies.length > this.maxHistorySize) {
-      this.historicalTopologies.shift();
-    }
-    
-    // Emit events for real-time updates
-    this.emit('topology-changed', topology);
-    
-    // Check for alerts
-    if (topology.overallHealth.status === 'critical') {
-      this.emit('health-alert', {
-        severity: 'critical',
-        message: 'Cluster health is critical',
-        issues: topology.overallHealth.issues
-      });
-    }
-    
-    if (topology.scalingRecommendations.urgency === 'critical') {
-      this.emit('scaling-alert', {
-        severity: 'critical',
-        message: 'Immediate scaling action required',
-        recommendations: topology.scalingRecommendations.recommendedActions
-      });
+  private async handleTopologyUpdate(): Promise<void> {
+    try {
+      const topology = await this.topologyManager.getResourceTopology();
+
+      // Store in historical data
+      this.historicalTopologies.push(topology);
+      if (this.historicalTopologies.length > this.maxHistorySize) {
+        this.historicalTopologies.shift();
+      }
+
+      // Emit events for real-time updates
+      this.emit('topology-changed', topology);
+
+      // Check for alerts
+      if (!topology.clusterHealth.isHealthy && topology.clusterHealth.healthRatio < 0.5) {
+        this.emit('health-alert', {
+          severity: 'critical',
+          message: 'Cluster health is critical',
+          issues: []
+        });
+      }
+    } catch (error) {
+      this.emit('error', error);
     }
   }
 
@@ -512,22 +552,36 @@ export class ObservabilityManager extends EventEmitter {
     }
   }
 
-  private calculateAggregatedMetrics(topology: EnhancedClusterTopology): any {
+  private calculateAggregatedMetrics(topology: ResourceClusterTopology): any {
     // Calculate aggregated metrics across the cluster
     return {
-      totalCapacity: topology.clusterCapacity.totalCapacity,
-      totalUtilization: topology.clusterCapacity.totalUtilization,
-      utilizationPercentage: topology.clusterCapacity.utilizationPercentage,
-      healthScore: topology.overallHealth.score
+      totalResources: topology.resources.total,
+      healthyResources: topology.resources.healthy,
+      performance: topology.performance,
+      healthScore: topology.clusterHealth.healthRatio
     };
   }
 
-  private getHistoricalTrends(): EnhancedClusterTopology[] {
+  private getHistoricalTrends(): ResourceClusterTopology[] {
     return this.historicalTopologies.slice(-20); // Last 20 updates
   }
 
+  private aggregateNodeCapacity(nodes: NodeResourceCapacity[]): NodeResourceCapacity['capacity'] {
+    return nodes.reduce(
+      (total, node) => ({
+        maxResources: total.maxResources + node.capacity.maxResources,
+        maxResourceConnections: total.maxResourceConnections + node.capacity.maxResourceConnections,
+        maxBandwidth: total.maxBandwidth + node.capacity.maxBandwidth,
+        cpuCores: total.cpuCores + node.capacity.cpuCores,
+        memoryGB: total.memoryGB + node.capacity.memoryGB,
+        diskGB: total.diskGB + node.capacity.diskGB
+      }),
+      { maxResources: 0, maxResourceConnections: 0, maxBandwidth: 0, cpuCores: 0, memoryGB: 0, diskGB: 0 }
+    );
+  }
+
   private calculateProjectedDemand(
-    historical: EnhancedClusterTopology[],
+    historical: ResourceClusterTopology[],
     timeHorizon: string
   ): ClusterScalingAnalysis['projectedDemand'] {
     // Simple linear projection based on recent trends
@@ -536,61 +590,60 @@ export class ObservabilityManager extends EventEmitter {
       return {
         timeHorizon: timeHorizon as any,
         expectedLoad: 0,
-        expectedRooms: 0,
-        expectedParticipants: 0
+        expectedResources: 0,
+        expectedConnections: 0
       };
     }
-    
+
     const firstSnapshot = recent[0];
     const lastSnapshot = recent[recent.length - 1];
     const timeDiff = lastSnapshot.timestamp - firstSnapshot.timestamp;
-    
+
     if (timeDiff === 0) {
       return {
         timeHorizon: timeHorizon as any,
-        expectedLoad: lastSnapshot.clusterCapacity.utilizationPercentage,
-        expectedRooms: lastSnapshot.rooms.total,
-        expectedParticipants: lastSnapshot.clusterCapacity.totalUtilization.totalParticipants
+        expectedLoad: lastSnapshot.performance.utilizationRate,
+        expectedResources: lastSnapshot.resources.total,
+        expectedConnections: lastSnapshot.nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0)
       };
     }
-    
+
     // Calculate growth rates
-    const roomGrowthRate = (lastSnapshot.rooms.total - firstSnapshot.rooms.total) / timeDiff;
-    const participantGrowthRate = (
-      lastSnapshot.clusterCapacity.totalUtilization.totalParticipants - 
-      firstSnapshot.clusterCapacity.totalUtilization.totalParticipants
-    ) / timeDiff;
-    
+    const resourceGrowthRate = (lastSnapshot.resources.total - firstSnapshot.resources.total) / timeDiff;
+    const lastConnections = lastSnapshot.nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0);
+    const firstConnections = firstSnapshot.nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0);
+    const connectionGrowthRate = (lastConnections - firstConnections) / timeDiff;
+
     // Project forward based on time horizon
-    const projectionMs = timeHorizon === '1hour' ? 3600000 : 
+    const projectionMs = timeHorizon === '1hour' ? 3600000 :
                         timeHorizon === '6hours' ? 21600000 : 86400000;
-    
+
     return {
       timeHorizon: timeHorizon as any,
-      expectedLoad: lastSnapshot.clusterCapacity.utilizationPercentage,
-      expectedRooms: Math.max(0, lastSnapshot.rooms.total + (roomGrowthRate * projectionMs)),
-      expectedParticipants: Math.max(0, 
-        lastSnapshot.clusterCapacity.totalUtilization.totalParticipants + 
-        (participantGrowthRate * projectionMs)
-      )
+      expectedLoad: lastSnapshot.performance.utilizationRate,
+      expectedResources: Math.max(0, lastSnapshot.resources.total + (resourceGrowthRate * projectionMs)),
+      expectedConnections: Math.max(0, lastConnections + (connectionGrowthRate * projectionMs))
     };
   }
 
   private generateScalingRecommendations(
     currentState: any,
     projectedDemand: any,
-    topology: EnhancedClusterTopology
+    topology: ResourceClusterTopology
   ): ClusterScalingAnalysis['recommendations'] {
-    const recommendations = topology.scalingRecommendations;
-    
+    const needsScaling = topology.performance.utilizationRate > 0.8;
+    const scaleDirection = topology.performance.utilizationRate > 0.8 ? 'up' : 'down';
+
     return {
-      scaleUp: recommendations.needsScaling && recommendations.scaleDirection === 'up',
-      scaleDown: recommendations.needsScaling && recommendations.scaleDirection === 'down',
-      addNodes: recommendations.scaleDirection === 'up' ? 
+      scaleUp: needsScaling && scaleDirection === 'up',
+      scaleDown: needsScaling && scaleDirection === 'down',
+      addNodes: scaleDirection === 'up' ?
         Math.ceil(currentState.totalNodes * 0.2) : 0,
       removeNodes: [],
-      redistributeRooms: [],
-      urgency: recommendations.urgency
+      redistributeResources: [],
+      urgency: topology.performance.utilizationRate > 0.9 ? 'critical' :
+               topology.performance.utilizationRate > 0.8 ? 'high' :
+               topology.performance.utilizationRate > 0.6 ? 'medium' : 'low'
     };
   }
 
@@ -601,7 +654,7 @@ export class ObservabilityManager extends EventEmitter {
     // Simplified cost analysis
     const currentCost = currentState.totalNodes * 100; // $100 per node
     const projectedCost = currentCost + (recommendations.addNodes * 100);
-    
+
     return {
       currentCost,
       projectedCost,
@@ -616,87 +669,98 @@ export class ObservabilityManager extends EventEmitter {
     crossRegionLatency: Record<string, number>
   ): string[] {
     const recommendations: string[] = [];
-    
+
     if (health < 0.8) {
       recommendations.push(`Region ${region} health is low - consider adding nodes`);
     }
-    
-    const avgLatency = Object.values(crossRegionLatency).reduce((a, b) => a + b, 0) / 
-                      Object.values(crossRegionLatency).length;
-    
-    if (avgLatency > 200) {
-      recommendations.push(`High cross-region latency from ${region} - consider edge optimization`);
+
+    const latencyValues = Object.values(crossRegionLatency);
+    if (latencyValues.length > 0) {
+      const avgLatency = latencyValues.reduce((a, b) => a + b, 0) / latencyValues.length;
+
+      if (avgLatency > 200) {
+        recommendations.push(`High cross-region latency from ${region} - consider edge optimization`);
+      }
     }
-    
+
     return recommendations;
   }
 
-  private calculateTrends(historical: EnhancedClusterTopology[]): any {
+  private calculateTrends(historical: ResourceClusterTopology[]): any {
     if (historical.length < 2) {
       return {
-        participants: { current: 0, trend: 'stable', rate: 0 },
+        connections: { current: 0, trend: 'stable', rate: 0 },
         messageVolume: { current: 0, trend: 'stable', rate: 0 },
         nodeHealth: { current: 1, trend: 'stable', rate: 0 },
         latency: { current: 0, trend: 'stable', rate: 0 }
       };
     }
-    
+
     const recent = historical[historical.length - 1];
     const previous = historical[historical.length - 2];
-    
+
+    const recentConnections = recent.nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0);
+    const previousConnections = previous.nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0);
+
     return {
-      participants: {
-        current: recent.clusterCapacity.totalUtilization.totalParticipants,
-        trend: recent.clusterCapacity.totalUtilization.totalParticipants > 
-               previous.clusterCapacity.totalUtilization.totalParticipants ? 'up' : 
-               recent.clusterCapacity.totalUtilization.totalParticipants < 
-               previous.clusterCapacity.totalUtilization.totalParticipants ? 'down' : 'stable',
-        rate: recent.clusterCapacity.totalUtilization.totalParticipants - 
-              previous.clusterCapacity.totalUtilization.totalParticipants
+      connections: {
+        current: recentConnections,
+        trend: recentConnections > previousConnections ? 'up' :
+               recentConnections < previousConnections ? 'down' : 'stable',
+        rate: recentConnections - previousConnections
       },
       messageVolume: { current: 0, trend: 'stable' as const, rate: 0 },
       nodeHealth: {
-        current: recent.overallHealth.score,
-        trend: recent.overallHealth.score > previous.overallHealth.score ? 'up' : 
-               recent.overallHealth.score < previous.overallHealth.score ? 'down' : 'stable',
-        rate: recent.overallHealth.score - previous.overallHealth.score
+        current: recent.clusterHealth.healthRatio,
+        trend: recent.clusterHealth.healthRatio > previous.clusterHealth.healthRatio ? 'up' :
+               recent.clusterHealth.healthRatio < previous.clusterHealth.healthRatio ? 'down' : 'stable',
+        rate: recent.clusterHealth.healthRatio - previous.clusterHealth.healthRatio
       },
-      latency: { current: 0, trend: 'stable' as const, rate: 0 }
+      latency: { current: recent.performance.averageLatency, trend: 'stable' as const, rate: 0 }
     };
   }
 
-  private generatePredictions(trends: any, historical: EnhancedClusterTopology[]): any {
+  private generatePredictions(trends: any, historical: ResourceClusterTopology[]): any {
+    if (historical.length === 0) {
+      return {
+        nextHour: { connections: 0, messageVolume: 0 },
+        next6Hours: { connections: 0, messageVolume: 0 },
+        next24Hours: { connections: 0, messageVolume: 0 }
+      };
+    }
+
     const current = historical[historical.length - 1];
-    
+    const currentConnections = current.nodes.reduce((sum, n) => sum + n.utilization.totalConnections, 0);
+
     return {
       nextHour: {
-        participants: Math.max(0, current.clusterCapacity.totalUtilization.totalParticipants + trends.participants.rate),
+        connections: Math.max(0, currentConnections + trends.connections.rate),
         messageVolume: 0
       },
       next6Hours: {
-        participants: Math.max(0, current.clusterCapacity.totalUtilization.totalParticipants + (trends.participants.rate * 6)),
+        connections: Math.max(0, currentConnections + (trends.connections.rate * 6)),
         messageVolume: 0
       },
       next24Hours: {
-        participants: Math.max(0, current.clusterCapacity.totalUtilization.totalParticipants + (trends.participants.rate * 24)),
+        connections: Math.max(0, currentConnections + (trends.connections.rate * 24)),
         messageVolume: 0
       }
     };
   }
 
-  private detectTrendAlerts(trends: any, historical: EnhancedClusterTopology[]): any[] {
+  private detectTrendAlerts(trends: any, historical: ResourceClusterTopology[]): any[] {
     const alerts: any[] = [];
-    
-    if (trends.participants.trend === 'up' && trends.participants.rate > 1000) {
+
+    if (trends.connections.trend === 'up' && trends.connections.rate > 1000) {
       alerts.push({
         type: 'trend',
         severity: 'warning',
-        message: 'Rapid participant growth detected',
-        metric: 'participants',
-        value: trends.participants.current
+        message: 'Rapid connection growth detected',
+        metric: 'connections',
+        value: trends.connections.current
       });
     }
-    
+
     if (trends.nodeHealth.trend === 'down' && trends.nodeHealth.rate < -0.1) {
       alerts.push({
         type: 'trend',
@@ -706,7 +770,7 @@ export class ObservabilityManager extends EventEmitter {
         value: trends.nodeHealth.current
       });
     }
-    
+
     return alerts;
   }
 }
