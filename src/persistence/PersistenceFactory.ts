@@ -55,6 +55,24 @@ export class UnifiedPersistenceFactory {
   }
 
   /**
+   * Create a complete WAL-based persistence setup with default file paths
+   */
+  static createDefault(
+    walConfig: WALConfig = {},
+    checkpointConfig: CheckpointConfig = {}
+  ) {
+    const mergedWalConfig: WALConfig = {
+      filePath: './data/wal/default.wal',
+      ...walConfig
+    };
+    const mergedCheckpointConfig: CheckpointConfig = {
+      checkpointPath: './data/checkpoints',
+      ...checkpointConfig
+    };
+    return UnifiedPersistenceFactory.createWALPersistence(mergedWalConfig, mergedCheckpointConfig);
+  }
+
+  /**
    * Create a complete WAL-based persistence setup
    */
   static createWALPersistence(walConfig: WALConfig = {}, checkpointConfig: CheckpointConfig = {}) {
