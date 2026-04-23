@@ -100,24 +100,36 @@ export class GRPCAdapter extends Transport {
         'grpc.max_send_message_length': this.config.maxSendMessageLength
       });
 
-      // Use a simplified service implementation
-      const serviceImplementation = {
-        SendMessage: this.handleSendMessage.bind(this),
-        StreamMessages: this.handleStreamMessages.bind(this),
-        HealthCheck: this.handleHealthCheck.bind(this)
-      };
+      const serialize = (arg: any) => Buffer.from(JSON.stringify(arg));
+      const deserialize = (buf: Buffer) => JSON.parse(buf.toString());
 
-      // Create a basic service definition (simplified for transport adapter)
-      const packageDefinition = {
+      const serviceDefinition: grpc.ServiceDefinition = {
         SendMessage: {
           path: '/gossip.GossipService/SendMessage',
           requestStream: false,
-          responseStream: false
-        }
+          responseStream: false,
+          requestSerialize: serialize,
+          requestDeserialize: deserialize,
+          responseSerialize: serialize,
+          responseDeserialize: deserialize,
+        },
+        HealthCheck: {
+          path: '/gossip.GossipService/HealthCheck',
+          requestStream: false,
+          responseStream: false,
+          requestSerialize: serialize,
+          requestDeserialize: deserialize,
+          responseSerialize: serialize,
+          responseDeserialize: deserialize,
+        },
       };
 
-      // For now, we'll implement basic message handling without full gRPC proto definitions
-      // This is sufficient for transport layer functionality
+      const serviceImplementation: grpc.UntypedServiceImplementation = {
+        SendMessage: this.handleSendMessage.bind(this),
+        HealthCheck: this.handleHealthCheck.bind(this),
+      };
+
+      this.server.addService(serviceDefinition, serviceImplementation);
 
       const bindAddress = `${this.config.host}:${this.config.port}`;
       
@@ -128,7 +140,6 @@ export class GRPCAdapter extends Transport {
             return;
           }
           
-          this.server!.start();
           this.isRunning = true;
           this.startHealthChecks();
           resolve();
@@ -155,6 +166,10 @@ export class GRPCAdapter extends Transport {
     if (this.healthCheckTimer) {
       clearInterval(this.healthCheckTimer);
     }
+
+    // Destroy circuit breaker and retry manager to prevent Jest hangs
+    this.circuitBreaker.destroy();
+    this.retryManager.destroy();
 
     // Close all connections
     Array.from(this.connections.values()).forEach(connection => {

@@ -12,6 +12,9 @@
     "test:integration": "jest --config jest.integration.config.js",
     "test:e2e": "jest --config jest.e2e.config.js",
     "test:e2e:chat": "jest --config jest.e2e.config.js test/e2e/chat/",
+    "test:e2e:cluster": "jest --config jest.e2e.config.js test/e2e/cluster/",
+    "test:e2e:persistence": "jest --config jest.e2e.config.js test/e2e/persistence/",
+    "test:e2e:transport": "jest --config jest.e2e.config.js test/e2e/transport/",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "clean": "rm -rf dist",
@@ -41,7 +44,6 @@
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.13.4",
-    "@grpc/proto-loader": "^0.8.0",
     "eventemitter3": "^5.0.0",
     "js-yaml": "^4.1.0",
     "lz4": "^0.6.5",

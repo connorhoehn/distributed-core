@@ -90,3 +90,20 @@ export * from './connections/Connection';
 export * from './connections/ConnectionManager';
 export * from './connections/Session';
 export * from './connections/types';
+
+// Front Door API
+export {
+  createNode,
+  createCluster,
+  createAgent,
+} from './frontdoor';
+export type {
+  NodeOptions,
+  ClusterOptions,
+  AgentOptions,
+} from './frontdoor';
+export {
+  NodeHandle,
+  ClusterHandle,
+  AgentHandle,
+} from './frontdoor';
