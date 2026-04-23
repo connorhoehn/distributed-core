@@ -23,3 +23,6 @@ export type {
 export type {
   CompactionCoordinatorConfig
 } from './CompactionCoordinator';
+
+export { ClusterCompactionBridge } from './ClusterCompactionBridge';
+export type { ClusterCompactionBridgeConfig } from './ClusterCompactionBridge';
