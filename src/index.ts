@@ -76,6 +76,10 @@ export * from './diagnostics/ChaosInjector';
 export * from './persistence/StateStore';
 export * from './persistence/WriteAheadLog';
 export * from './persistence/BroadcastBuffer';
+export { UnifiedPersistenceFactory, createPersistenceLayer } from './persistence/PersistenceFactory';
+export type { PersistenceLayer, StateStoreConfig } from './persistence/PersistenceFactory';
+export { WALWriterImpl, WALReaderImpl, WALFileImpl, WALCoordinatorImpl } from './persistence/wal';
+export type { WALEntry, EntityUpdate, WALConfig, WALWriter, WALReader, WALFile, WALCoordinator } from './persistence/wal';
 
 // Identity modules
 export * from './identity/NodeMetadata';
