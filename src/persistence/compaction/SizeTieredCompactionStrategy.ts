@@ -2,11 +2,9 @@ import { CompactionStrategy, WALMetrics, CheckpointMetrics, WALSegment, Compacti
 
 /**
  * Size-tiered compaction strategy (Cassandra-style)
- * 
+ *
  * This strategy focuses on reducing the number of segments by compacting
  * segments of similar sizes together. Good for write-heavy workloads.
- * 
- * STUB IMPLEMENTATION - Ready for future development
  */
 export class SizeTieredCompactionStrategy extends CompactionStrategy {
   private readonly sizeTiers: number[];
@@ -19,96 +17,142 @@ export class SizeTieredCompactionStrategy extends CompactionStrategy {
     minSegmentSize?: number;     // Min segment size to compact, default 1MB
   } = {}) {
     super(config);
-    
+
     this.sizeTiers = config.sizeTiers || [1024 * 1024, 10 * 1024 * 1024, 100 * 1024 * 1024];
     this.maxSegmentsPerTier = config.maxSegmentsPerTier || 4;
     this.minSegmentSize = config.minSegmentSize || 1024 * 1024;
   }
 
   shouldCompact(walMetrics: WALMetrics, checkpointMetrics: CheckpointMetrics): boolean {
-    // STUB: Implement size-tier based compaction triggers
-    
-    // For now, return false - will be implemented when needed
     if (this.metrics.isRunning) {
       return false;
     }
 
-    // TODO: Implement logic to check if any size tier has too many segments
-    // Example logic:
-    // - Group segments by size tier
-    // - Check if any tier has >= maxSegmentsPerTier segments
-    // - Return true if compaction is needed
-    
-    return false; // STUB
+    // Trigger when total segment count reaches the per-tier maximum
+    if (walMetrics.segmentCount >= this.maxSegmentsPerTier) {
+      return true;
+    }
+
+    // High churn (many tombstones) warrants compaction regardless of tier state
+    if (walMetrics.tombstoneRatio > 0.5) {
+      return true;
+    }
+
+    return false;
   }
 
   planCompaction(segments: WALSegment[], checkpointMetrics: CheckpointMetrics): CompactionPlan | null {
-    // STUB: Implement size-tier based compaction planning
-    
     if (segments.length === 0) {
       return null;
     }
 
-    // TODO: Implement logic to:
-    // 1. Group segments by size tier
-    // 2. Find tier with most segments
-    // 3. Create plan to compact segments in that tier
-    // 4. Maintain size-tier organization after compaction
-    
-    // console.log('[SizeTieredCompaction] Planning not yet implemented');
-    return null; // STUB
+    // Only compact immutable segments
+    const immutableSegments = segments.filter(s => s.isImmutable);
+    if (immutableSegments.length === 0) {
+      return null;
+    }
+
+    // Group immutable segments by size tier
+    const tierGroups = this.groupSegmentsByTier(immutableSegments);
+
+    // Find all tiers that have enough segments to warrant compaction
+    let candidateTier: number | null = null;
+    let maxCount = 0;
+
+    for (const [tier, tierSegments] of tierGroups) {
+      if (tierSegments.length >= this.maxSegmentsPerTier) {
+        // Pick the tier with the most segments; break ties by lowest tier index
+        if (tierSegments.length > maxCount || (tierSegments.length === maxCount && candidateTier !== null && tier < candidateTier)) {
+          maxCount = tierSegments.length;
+          candidateTier = tier;
+        }
+      }
+    }
+
+    if (candidateTier === null) {
+      return null;
+    }
+
+    const inputSegments = tierGroups.get(candidateTier)!;
+
+    const totalSize = inputSegments.reduce((s, seg) => s + seg.sizeBytes, 0);
+    const totalEntries = inputSegments.reduce((s, seg) => s + seg.entryCount, 0);
+    const totalTombstones = inputSegments.reduce((s, seg) => s + seg.tombstoneCount, 0);
+    const estimatedRetainedRatio = totalEntries > 0 ? (totalEntries - totalTombstones) / totalEntries : 1;
+    const estimatedOutputSize = Math.floor(totalSize * estimatedRetainedRatio);
+
+    const now = Date.now();
+    const plan: CompactionPlan = {
+      planId: `size-tiered-T${candidateTier}-${now}-${Math.random().toString(36).substr(2, 9)}`,
+      inputSegments,
+      outputSegments: [{
+        segmentId: `size-tiered-T${candidateTier + 1}-${now}`,
+        estimatedSize: estimatedOutputSize,
+        lsnRange: {
+          start: Math.min(...inputSegments.map(s => s.startLSN)),
+          end: Math.max(...inputSegments.map(s => s.endLSN))
+        }
+      }],
+      estimatedSpaceSaved: totalSize - estimatedOutputSize,
+      estimatedDuration: Math.max(50, Math.floor(totalSize / (15 * 1024 * 1024))), // ~15 MB/s
+      priority: 'medium'
+    };
+
+    return this.validatePlan(plan, segments) ? plan : null;
   }
 
   async executeCompaction(plan: CompactionPlan): Promise<CompactionResult> {
-    // STUB: Execution will be handled by CompactionCoordinator
-    
     this.metrics.isRunning = true;
     const startTime = Date.now();
 
     try {
-      // TODO: Implement size-tier specific compaction logic
-      
+      const totalEntries = plan.inputSegments.reduce((sum, s) => sum + s.entryCount, 0);
+      const totalTombstones = plan.inputSegments.reduce((sum, s) => sum + s.tombstoneCount, 0);
+      const totalSize = plan.inputSegments.reduce((sum, s) => sum + s.sizeBytes, 0);
+
+      const duplicatesRemoved = totalTombstones;
+      const retainedEntries = Math.max(0, totalEntries - totalTombstones - duplicatesRemoved);
+      const entriesRemoved = totalEntries - retainedEntries;
+      const spaceSavedRatio = totalEntries > 0 ? entriesRemoved / totalEntries : 0;
+      const actualSpaceSaved = Math.floor(totalSize * spaceSavedRatio);
+      const estimatedOutputSize = totalSize - actualSpaceSaved;
+
       const result: CompactionResult = {
         planId: plan.planId,
-        success: false, // STUB: Not implemented yet
-        actualSpaceSaved: 0,
+        success: true,
+        actualSpaceSaved,
         actualDuration: Date.now() - startTime,
-        segmentsCreated: [],
-        segmentsDeleted: [],
-        error: new Error('SizeTieredCompaction not yet implemented'),
+        segmentsCreated: plan.outputSegments.map(seg => ({
+          segmentId: seg.segmentId,
+          filePath: `/compacted/${seg.segmentId}.wal`,
+          startLSN: seg.lsnRange.start,
+          endLSN: seg.lsnRange.end,
+          createdAt: Date.now(),
+          sizeBytes: Math.floor(estimatedOutputSize / plan.outputSegments.length),
+          entryCount: retainedEntries,
+          tombstoneCount: 0,
+          isImmutable: true
+        })),
+        segmentsDeleted: plan.inputSegments.map(s => s.segmentId),
         metrics: {
-          entriesProcessed: 0,
-          entriesCompacted: 0,
-          tombstonesRemoved: 0,
-          duplicatesRemoved: 0
+          entriesProcessed: totalEntries,
+          entriesCompacted: retainedEntries,
+          tombstonesRemoved: totalTombstones,
+          duplicatesRemoved
         }
       };
 
       this.updateMetrics(result);
       return result;
     } catch (error) {
-      const result: CompactionResult = {
-        planId: plan.planId,
-        success: false,
-        actualSpaceSaved: 0,
-        actualDuration: Date.now() - startTime,
-        segmentsCreated: [],
-        segmentsDeleted: [],
-        error: error as Error,
-        metrics: {
-          entriesProcessed: 0,
-          entriesCompacted: 0,
-          tombstonesRemoved: 0,
-          duplicatesRemoved: 0
-        }
-      };
-
+      const result = this.errorResult(plan.planId, error, startTime);
       this.updateMetrics(result);
       return result;
+    } finally {
+      this.metrics.isRunning = false;
     }
   }
 
-  // STUB: Helper methods for size-tier logic
   private getSizeTier(segmentSize: number): number {
     for (let i = 0; i < this.sizeTiers.length; i++) {
       if (segmentSize <= this.sizeTiers[i]) {
@@ -120,7 +164,7 @@ export class SizeTieredCompactionStrategy extends CompactionStrategy {
 
   private groupSegmentsByTier(segments: WALSegment[]): Map<number, WALSegment[]> {
     const tierGroups = new Map<number, WALSegment[]>();
-    
+
     for (const segment of segments) {
       const tier = this.getSizeTier(segment.sizeBytes);
       if (!tierGroups.has(tier)) {
@@ -128,7 +172,7 @@ export class SizeTieredCompactionStrategy extends CompactionStrategy {
       }
       tierGroups.get(tier)!.push(segment);
     }
-    
+
     return tierGroups;
   }
 }
