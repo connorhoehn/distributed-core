@@ -333,25 +333,26 @@ export class Node {
   }
 
   /**
-   * Inject chaos for testing - ChaosInjector doesn't have inject method yet
+   * Inject chaos for testing
    */
-  injectChaos(scenario: string, config: any): void {
-    // TODO: implement when ChaosInjector has inject method
-    // if (this.chaos) {
-    //   this.chaos.inject(scenario, config);
-    // }
+  injectChaos(scenario: string, config: Record<string, unknown> = {}): void {
+    if (this.chaos) {
+      this.chaos.inject(scenario, config).catch(err => {
+        if (this.enableLogging) {
+          console.error(`[Node ${this.id}] Chaos injection failed: ${scenario}`, err);
+        }
+      });
+    }
     if (this.enableLogging) {
       console.log(`[Node ${this.id}] Chaos injection requested: ${scenario}`, config);
     }
   }
 
   /**
-   * Get current metrics - MetricsTracker doesn't have getMetrics method yet
+   * Get current metrics snapshot from MetricsTracker
    */
-  getMetrics(): any {
-    // TODO: implement when MetricsTracker has getMetrics method
-    // return this.metrics ? this.metrics.getMetrics() : {};
-    return { nodeId: this.id, isStarted: this.isStarted };
+  getMetrics() {
+    return this.metrics ? this.metrics.getMetrics() : null;
   }
 
   /**

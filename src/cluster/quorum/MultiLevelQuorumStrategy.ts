@@ -104,13 +104,61 @@ export class MultiLevelQuorumStrategy implements QuorumStrategy {
     zones?: number;
   }): boolean {
     const aliveMembers = members.filter(m => m.status === 'ALIVE');
-    
-    // Simulate failures and check if quorum still holds
-    const remainingNodes = Math.max(0, aliveMembers.length - (failures.nodes || 0));
-    
-    // TODO: Implement region and zone failure simulation
-    // This would require more complex logic to determine which specific regions/zones fail
-    
-    return remainingNodes >= options.clusterLevel.minNodes;
+
+    // Build region → zone → node maps to simulate structured failures
+    const regionToNodes = new Map<string, MembershipEntry[]>();
+    const zoneToNodes = new Map<string, MembershipEntry[]>();
+
+    for (const member of aliveMembers) {
+      const region = member.metadata?.region || 'unknown';
+      const zone = member.metadata?.zone || 'unknown';
+
+      if (!regionToNodes.has(region)) regionToNodes.set(region, []);
+      regionToNodes.get(region)!.push(member);
+
+      if (!zoneToNodes.has(zone)) zoneToNodes.set(zone, []);
+      zoneToNodes.get(zone)!.push(member);
+    }
+
+    // Simulate region failures: remove the smallest regions first (worst-case
+    // for the cluster — losing regions that contribute least to diversity).
+    const failedNodeIds = new Set<string>();
+
+    if (failures.regions && failures.regions > 0) {
+      const regionsSortedBySize = Array.from(regionToNodes.entries())
+        .sort((a, b) => b[1].length - a[1].length); // largest first → remove largest = hardest test
+
+      const regionsToFail = regionsSortedBySize.slice(0, failures.regions);
+      for (const [, nodes] of regionsToFail) {
+        nodes.forEach(n => failedNodeIds.add(n.id));
+      }
+    }
+
+    // Simulate zone failures: remove zones whose nodes have not already been
+    // removed by a region failure, to avoid double-counting.
+    if (failures.zones && failures.zones > 0) {
+      const zonesNotAlreadyFailed = Array.from(zoneToNodes.entries())
+        .filter(([, nodes]) => nodes.some(n => !failedNodeIds.has(n.id)))
+        .sort((a, b) => b[1].length - a[1].length); // largest first
+
+      const zonesToFail = zonesNotAlreadyFailed.slice(0, failures.zones);
+      for (const [, nodes] of zonesToFail) {
+        nodes.forEach(n => failedNodeIds.add(n.id));
+      }
+    }
+
+    // Simulate raw node failures on top of region/zone failures
+    let remainingMembers = aliveMembers.filter(m => !failedNodeIds.has(m.id));
+
+    if (failures.nodes && failures.nodes > 0) {
+      remainingMembers = remainingMembers.slice(failures.nodes);
+    }
+
+    // Re-evaluate all three quorum levels against the reduced membership
+    const clusterResult = this.evaluateClusterLevel(remainingMembers, options.clusterLevel);
+    const regionResult = this.evaluateRegionLevel(remainingMembers, options.regionLevel);
+    const zoneResult = this.evaluateZoneLevel(remainingMembers, options.zoneLevel);
+
+    return clusterResult.passed && regionResult.passed && zoneResult.passed;
   }
 }

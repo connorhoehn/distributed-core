@@ -155,9 +155,38 @@ export class AdaptiveQuorumStrategy implements QuorumStrategy {
   }
 
   private detectPartitionEvents(): number {
-    // TODO: Implement sophisticated partition detection
-    // This is a placeholder that counts failure spikes
-    return this.networkHistory.filter(entry => entry.failures > 2).length;
+    if (this.networkHistory.length < 2) {
+      return 0;
+    }
+
+    // A network partition produces a sustained window of elevated failures
+    // (multiple nodes unreachable simultaneously) rather than isolated single-node blips.
+    //
+    // Algorithm:
+    //   1. Mark each history sample as "partitioned" when failures exceed the
+    //      threshold that suggests more than one node is unreachable (> 1).
+    //   2. Count distinct contiguous windows of partitioned samples, separated
+    //      by at least one healthy sample — each such window represents one
+    //      partition event regardless of how many samples it spans.
+    const PARTITION_FAILURE_THRESHOLD = 1; // more than 1 simultaneous failure suggests a split
+
+    let partitionCount = 0;
+    let inPartitionWindow = false;
+
+    for (const entry of this.networkHistory) {
+      const isPartitioned = entry.failures > PARTITION_FAILURE_THRESHOLD;
+
+      if (isPartitioned && !inPartitionWindow) {
+        // Entering a new partition window
+        partitionCount++;
+        inPartitionWindow = true;
+      } else if (!isPartitioned) {
+        // Healthy sample — close the current window if one was open
+        inPartitionWindow = false;
+      }
+    }
+
+    return partitionCount;
   }
 
   /**

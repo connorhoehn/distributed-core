@@ -154,6 +154,14 @@ export class ChaosInjector extends EventEmitter {
     };
   }
 
+  /**
+   * Generic inject entry-point used by external callers (e.g. Node.injectChaos).
+   * Delegates to startScenario so that all scenario lifecycle tracking is preserved.
+   */
+  async inject(scenario: string, config: Record<string, unknown> = {}): Promise<void> {
+    await this.startScenario(scenario, config);
+  }
+
   // Transport integration methods
   shouldInterceptMessage(): boolean {
     return this.isActive();

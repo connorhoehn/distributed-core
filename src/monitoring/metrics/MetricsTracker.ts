@@ -634,6 +634,14 @@ export class MetricsTracker extends EventEmitter {
   }
 
   /**
+   * Get current metrics snapshot. Returns the most-recently collected
+   * UnifiedMetrics, or null when no collection has run yet.
+   */
+  getMetrics(): UnifiedMetrics | null {
+    return this.getCurrentMetrics();
+  }
+
+  /**
    * Reset all metrics and alerts
    */
   reset(): void {
