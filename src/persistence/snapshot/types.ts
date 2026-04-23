@@ -27,6 +27,10 @@ export interface StoreSnapshotOptions {
   name?: string;
   /** Time-to-live in ms from now. Undefined = never expires. */
   ttlMs?: number;
+  /** Absolute expiry epoch ms. Takes precedence over ttlMs when both are set. */
+  expiresAt?: number;
+  /** Pre-computed size in bytes; store implementations may compute it themselves if omitted. */
+  sizeBytes?: number;
   metadata?: Record<string, unknown>;
 }
 

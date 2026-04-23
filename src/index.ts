@@ -80,7 +80,7 @@ export { UnifiedPersistenceFactory, createPersistenceLayer } from './persistence
 export type { PersistenceLayer, StateStoreConfig } from './persistence/PersistenceFactory';
 export { WALWriterImpl, WALReaderImpl, WALFileImpl, WALCoordinatorImpl } from './persistence/wal';
 export type { WALEntry, EntityUpdate, WALConfig, WALWriter, WALReader, WALFile, WALCoordinator } from './persistence/wal';
-export { InMemorySnapshotVersionStore } from './persistence/snapshot';
+export { InMemorySnapshotVersionStore, WALSnapshotVersionStore } from './persistence/snapshot';
 export type { SnapshotEntry, SnapshotType, StoreSnapshotOptions, ISnapshotVersionStore } from './persistence/snapshot';
 
 // Identity modules
@@ -90,6 +90,8 @@ export * from './identity/KeyManager';
 // Common modules
 export * from './common/Node';
 export * from './common/utils';
+export { RateLimiter } from './common/RateLimiter';
+export type { RateLimiterConfig, RateLimitResult } from './common/RateLimiter';
 
 // Messaging modules
 export * from './messaging';
@@ -100,10 +102,11 @@ export * from './connections/ConnectionManager';
 export * from './connections/Session';
 export * from './connections/types';
 
-// Routing — ResourceRouter, placement strategies, consistent hashing
+// Routing — ResourceRouter, placement strategies, consistent hashing, cross-node sync
 export {
   ResourceRouter,
   ResourceRouterFactory,
+  ResourceRouterSyncAdapter,
   LocalPlacement,
   HashPlacement,
   LeastLoadedPlacement,
@@ -115,7 +118,12 @@ export type {
   ClaimOptions,
   ResourceRouterConfig,
   PlacementStrategy,
+  ResourceRouterSyncAdapterConfig,
 } from './routing';
+
+// Distributed coordination — locks and leader election
+export { DistributedLock, LeaderElection } from './cluster/locks';
+export type { LockHandle, DistributedLockConfig, LeaderElectionConfig } from './cluster/locks';
 
 // Gateway domain — PubSub, Presence, Channel, Queue, MessageRouter
 export * from './gateway';
