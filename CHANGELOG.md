@@ -2,49 +2,125 @@
 
 ## Unreleased
 
-### Added
+### Added — primitives and modules
+
 - `LifecycleAware` interface in `src/common/LifecycleAware.ts`. All primitives
-  with explicit start/stop now declare `implements LifecycleAware` and expose
-  `isStarted(): boolean`. Calls to `start()` and `stop()` are now idempotent.
-- `CoreError` base class and subclasses (`NotStartedError`, `AlreadyStartedError`,
-  `ConflictError`, `TimeoutError`) in `src/common/errors.ts`. Existing thrown
-  `Error` instances are unchanged in this release; use the new types in new code.
+  with explicit start/stop declare `implements LifecycleAware` and expose
+  `isStarted(): boolean`. Calls to `start()` and `stop()` are idempotent.
+  Now extended to legacy modules: `ClusterManager`, `GossipStrategy`,
+  `FailureDetector`.
+- `CoreError` base class in `src/common/errors.ts` with subclasses:
+  `NotStartedError`, `AlreadyStartedError`, `ConflictError`, `TimeoutError`,
+  `InvalidTransferTargetError`, `NotOwnedError`, `SessionNotLocalError`,
+  `WalNotConfiguredError`, `RemoteOwnerError`, plus reparented
+  `LocalResourceError` and `UnroutableResourceError`.
 - `ConfigManager` + `ServiceRegistry` primitives (typed distributed config,
   service discovery with selection strategies).
-- `examples/cluster-collab/` end-to-end demo composing 9 primitives.
-- `README.md` and `docs/ARCHITECTURE.md`.
-- `RealCompactionExecutor` module (`src/persistence/compaction/`). All four
-  compaction strategies (`TimeBasedCompactionStrategy`,
-  `SizeTieredCompactionStrategy`, `LeveledCompactionStrategy`,
-  `VacuumBasedCompactionStrategy`) now perform real filesystem compaction
-  when input segment files exist on disk — read, dedupe by entityId
-  (latest LSN wins), drop tombstoned entities, write consolidated segment,
-  unlink inputs. Falls back to the original computed-metrics simulation
-  when paths are fake (preserving unit-test compatibility).
+- `EntityRegistrySyncAdapter` — generic cross-node sync for any
+  `EntityRegistry` (replaces the per-primitive sync pattern).
+- `AutoReclaimPolicy` — observer that re-claims orphaned resources via the
+  configured `PlacementStrategy`.
+- `ClusterLeaderElection` — leader identity made cluster-visible via
+  `ResourceRouter`.
+- `QuorumDistributedLock` — majority-ACK lock over PubSub.
+- `DistributedSession` — owned session containers with idle eviction.
+- `SharedStateManager` — refactored onto `DistributedSession`, removing
+  ~92 lines of duplicate ownership/eviction code (breaking constructor change).
+- `FailureDetectorBridge` — translates `node-failed` events into cleanup on
+  `ResourceRouter`, `ConnectionRegistry`, and `DistributedLock`.
+- `ConnectionRegistry` — TTL-heartbeat connection ownership; opt-in
+  `allowReconnect` revives existing entries on duplicate registration.
+- `ServiceRegistry` — pluggable per-endpoint health checks with
+  `service:unhealthy` / `service:healthy` / `service:healthcheck-error` events.
+- `EventBus` — typed events with WAL persistence, durable subscriptions
+  with checkpoint resume, configurable auto-compaction
+  (`autoCompactIntervalMs`).
+- `ForwardingRouter` + `HttpForwardingTransport` + `ForwardingServer` —
+  pluggable cross-node RPC over an HTTP wire protocol.
+- `BackpressureController` — per-key queues with drop-oldest /
+  drop-newest / reject strategies + optional `RateLimiter`.
+- `RateLimiter` — token-bucket per key with lazy refill.
+- `MetricsRegistry` — Counter, Gauge, Histogram (bounded ring buffer).
+  Optional `namespace` prefix and `defaultLabels` at construction; `child()`
+  returns a sub-registry sharing the parent's store.
+- `MetricsRegistry` integration: every primitive accepts an optional
+  `metrics?: MetricsRegistry` config field with `?.`-guarded emissions.
+- `PrometheusExporter` — `formatPrometheus()` and `PrometheusHttpExporter`
+  (LifecycleAware, Node `http`).
+- `WALSnapshotVersionStore` — durable snapshot store with `compact()`.
+- `WriteAheadLogEntityRegistry.compact()` — log compaction for entity registries.
+- `RealCompactionExecutor` (`src/persistence/compaction/`). All four
+  compaction strategies (Time-, Size-Tiered-, Leveled-, Vacuum-Based) now
+  perform real filesystem compaction when input segments exist; fall back
+  to computed-metrics simulation otherwise (preserving unit-test
+  compatibility).
+- `SignedPubSubManager` — optional message authentication wrapper using
+  `KeyManager`. Drops or flags unverified messages.
+- `PipelineModule` + `PipelineExecutor` — server-side port of MockExecutor
+  for cluster-aware pipeline execution. `LLMClient` is an interface only —
+  vendor SDK implementations live in the consuming project.
+  Phase-4 bridge surface: `getRun(runId)`, `getHistory(runId, fromVersion?)`,
+  `listActiveRuns()`, `runsAwaitingApproval` metric, and a placeholder
+  `pipeline.run.reassigned` event.
+
+### Added — infrastructure and tooling
+
+- `examples/cluster-collab/` — end-to-end demo composing 9 primitives,
+  with multi-node failure / auto-reclaim simulation.
+- `README.md`, `docs/ARCHITECTURE.md`, `docs/CLUSTER-READINESS-PLAN.md`,
+  `docs/PIPELINE-INTEGRATION.md`, `docs/EVENT-NAME-AUDIT.md`,
+  `docs/DEPLOYMENT.md`.
+- `Dockerfile` (multi-stage, verified-building), `.dockerignore`,
+  `k8s/` manifests (namespace, configmap, headless service, statefulset
+  with anti-affinity + init container + probes).
+- `benchmarks/` directory — per-primitive throughput + p50/p90/p99
+  harness, runnable via `npm run bench`.
+- `.gitignore` — keeps `node_modules/`, `dist/`, `coverage/`, `.claude/`
+  out of commits.
+- Multi-node integration test harness in `test/integration/helpers/`
+  with `ClusterSimulator` for partition / heal / kill scenarios.
 
 ### Fixed
-- `InMemoryEntityRegistry.applyRemoteUpdate` now emits `entity:created` /
-  `entity:updated` / `entity:deleted` / `entity:transferred` events,
-  matching local-mutation paths. Required for `ConfigManager`,
-  `EntityRegistrySyncAdapter`, and any other downstream primitive that
-  needs to observe cross-node state changes.
-- Persistence e2e test `high-throughput-compaction` now passes. Root
-  cause was that `TimeBasedCompactionStrategy.executeCompaction()` was
-  entirely simulated — no real I/O happened despite the test correctly
-  measuring real disk state. See `RealCompactionExecutor` above.
-- Lint errors (45 → 0) across existing files blocking CI. Auto-fixable
-  `no-inferrable-types` applied throughout; targeted fixes for empty
-  constructors, empty arrow functions (`.catch(() => {})`), case-block
-  lexical declarations, and inline comments for intentional dynamic
-  `require()` calls.
-- Stale `test-e2e-chat` CI job (directory moved to `examples/` in an
-  earlier commit) and its orphan npm script removed.
 
-### Unchanged (API consistency pass — conservative scope)
-- No methods renamed.
-- No constructor parameter orders changed.
-- No event names renamed.
-- No existing errors migrated to `CoreError` — that's a follow-up pass.
-- Three of four compaction strategies (`SizeTiered`, `Leveled`,
-  `VacuumBased`) have real I/O exercise only for narrow e2e scenarios;
-  broader coverage is a follow-up.
+- `InMemoryEntityRegistry.applyRemoteUpdate` emits `entity:created` /
+  `entity:updated` / `entity:deleted` / `entity:transferred` events, matching
+  local-mutation paths. Required for `ConfigManager`,
+  `EntityRegistrySyncAdapter`, and other downstream primitives.
+- Persistence e2e test `high-throughput-compaction` now passes. Root cause:
+  `TimeBasedCompactionStrategy.executeCompaction()` was simulated — no real
+  I/O. Replaced with `RealCompactionExecutor`-backed path.
+- Lint errors (45 → 0) blocking CI.
+- Stale `test-e2e-chat` CI job + npm script removed (directory moved to
+  `examples/` earlier).
+- `EventBus` version counter resets on restart caused WAL collisions —
+  counter now restored from max persisted version.
+- `WALSnapshotVersionStore.compact()` propagates non-ENOENT unlink errors
+  instead of silently swallowing them.
+- `MetricsRegistry.Histogram` uses a bounded ring buffer (default 1000
+  observations) — was unbounded.
+- `DistributedSession.start/stop` lifecycle: `ownsRouter` config makes
+  router shutdown opt-in for shared-router scenarios.
+- `BackpressureController.drain()` now retries until queues are empty
+  (previously a single flushAll, missed re-queued items on errors).
+- `ConnectionRegistry.unregister()` logs via `defaultLogger.warn` instead
+  of silently swallowing registry errors.
+
+### Test coverage
+
+110 unit suites / 1905 tests; 39 integration suites / 274 tests; 6 e2e
+persistence suites / ~40 tests; 12 e2e cluster + transport suites.
+
+### Deferred (work explicitly out of scope this cycle)
+
+- Method renames, constructor parameter standardization, event-name
+  normalization (member-* / pipeline.* / bare started/stopped/error).
+  Catalog and rename targets in `docs/EVENT-NAME-AUDIT.md`.
+- CoreError migration extended to legacy modules (only new primitives
+  swept; pre-session code untouched).
+- Full partition-tolerance for `QuorumDistributedLock` (explicit non-goal —
+  would require Raft/Paxos).
+- TLS for `HttpForwardingTransport` — caller's responsibility.
+- Pull-based `/metrics` route on `ForwardingServer`. (Standalone
+  `PrometheusHttpExporter` ships, but isn't auto-mounted in the gateway.)
+- `FailureDetector` heartbeat over PubSub (currently caller-wired).
+- State-snapshot bootstrap for newly-joining nodes.
