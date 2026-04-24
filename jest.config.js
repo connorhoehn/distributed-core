@@ -9,8 +9,7 @@ module.exports = {
   ],
   testPathIgnorePatterns: [
     '/node_modules/',
-    '/.claude/',
-    '/worktrees/',
+    '<rootDir>/.claude/',
     '.*/integration/.*',
     '.*/e2e/.*',
     '.*\\.integration\\.test\\.ts$',
