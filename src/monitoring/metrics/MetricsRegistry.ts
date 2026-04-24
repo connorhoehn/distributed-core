@@ -140,6 +140,22 @@ export class Histogram {
   }
 }
 
+export interface MetricsRegistryOptions {
+  /**
+   * Optional namespace prefix prepended to every metric name.
+   * Example: namespace='acme' turns `resource.claim.count` into
+   * `acme.resource.claim.count` in the output snapshot.
+   */
+  namespace?: string;
+
+  /**
+   * Default labels merged onto every Counter/Gauge/Histogram at creation.
+   * Explicit labels passed to counter/gauge/histogram() are merged on top —
+   * they override defaults when keys collide.
+   */
+  defaultLabels?: MetricLabels;
+}
+
 type MetricType = 'counter' | 'gauge' | 'histogram';
 
 interface StoredMetric {
@@ -151,14 +167,29 @@ interface StoredMetric {
 
 export class MetricsRegistry {
   private nodeId: string;
-  private store = new Map<string, StoredMetric>();
+  private store: Map<string, StoredMetric>;
+  private namespace: string | undefined;
+  private defaultLabels: MetricLabels;
 
-  constructor(nodeId: string) {
+  constructor(nodeId: string, options?: MetricsRegistryOptions, store?: Map<string, StoredMetric>) {
     this.nodeId = nodeId;
+    this.namespace = options?.namespace;
+    this.defaultLabels = options?.defaultLabels ?? {};
+    this.store = store ?? new Map<string, StoredMetric>();
+  }
+
+  private effectiveName(name: string): string {
+    return this.namespace ? `${this.namespace}.${name}` : name;
+  }
+
+  private effectiveLabels(labels?: MetricLabels): MetricLabels {
+    return { ...this.defaultLabels, ...(labels ?? {}) };
   }
 
   counter(name: string, labels?: MetricLabels): Counter {
-    const key = buildKey(name, labels);
+    const fullName = this.effectiveName(name);
+    const mergedLabels = this.effectiveLabels(labels);
+    const key = buildKey(fullName, mergedLabels);
     const existing = this.store.get(key);
     if (existing) {
       if (existing.type !== 'counter') {
@@ -167,12 +198,14 @@ export class MetricsRegistry {
       return existing.instance as Counter;
     }
     const instance = new Counter();
-    this.store.set(key, { type: 'counter', name, labels: labels ?? {}, instance });
+    this.store.set(key, { type: 'counter', name: fullName, labels: mergedLabels, instance });
     return instance;
   }
 
   gauge(name: string, labels?: MetricLabels): Gauge {
-    const key = buildKey(name, labels);
+    const fullName = this.effectiveName(name);
+    const mergedLabels = this.effectiveLabels(labels);
+    const key = buildKey(fullName, mergedLabels);
     const existing = this.store.get(key);
     if (existing) {
       if (existing.type !== 'gauge') {
@@ -181,12 +214,14 @@ export class MetricsRegistry {
       return existing.instance as Gauge;
     }
     const instance = new Gauge();
-    this.store.set(key, { type: 'gauge', name, labels: labels ?? {}, instance });
+    this.store.set(key, { type: 'gauge', name: fullName, labels: mergedLabels, instance });
     return instance;
   }
 
   histogram(name: string, labels?: MetricLabels, maxObservations?: number): Histogram {
-    const key = buildKey(name, labels);
+    const fullName = this.effectiveName(name);
+    const mergedLabels = this.effectiveLabels(labels);
+    const key = buildKey(fullName, mergedLabels);
     const existing = this.store.get(key);
     if (existing) {
       if (existing.type !== 'histogram') {
@@ -195,8 +230,24 @@ export class MetricsRegistry {
       return existing.instance as Histogram;
     }
     const instance = new Histogram(maxObservations);
-    this.store.set(key, { type: 'histogram', name, labels: labels ?? {}, instance });
+    this.store.set(key, { type: 'histogram', name: fullName, labels: mergedLabels, instance });
     return instance;
+  }
+
+  /**
+   * Derive a child registry that inherits the parent's namespace+defaultLabels
+   * but adds its own on top. The child shares the parent's underlying
+   * metric instances — incrementing a counter on the child affects the
+   * parent's snapshot.
+   */
+  child(childNamespace?: string, childLabels?: MetricLabels): MetricsRegistry {
+    const combinedNamespace = [this.namespace, childNamespace].filter(Boolean).join('.') || undefined;
+    const combinedLabels: MetricLabels = { ...this.defaultLabels, ...(childLabels ?? {}) };
+    return new MetricsRegistry(
+      this.nodeId,
+      { namespace: combinedNamespace, defaultLabels: combinedLabels },
+      this.store,
+    );
   }
 
   getSnapshot(): RegistrySnapshot {

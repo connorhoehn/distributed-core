@@ -1,0 +1,9 @@
+node_modules
+dist
+.git
+.claude
+coverage
+benchmarks
+test/
+*.log
+*.tsbuildinfo

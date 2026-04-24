@@ -1,0 +1,61 @@
+# service.yaml — headless Service for StatefulSet DNS.
+#
+# A headless Service (clusterIP: None) tells Kubernetes not to create a
+# load-balanced virtual IP. Instead, DNS returns individual A records for each
+# Pod: collab-0.distributed-core-svc.distributed-core-demo.svc.cluster.local
+# collab-1.distributed-core-svc...  collab-2.distributed-core-svc...
+#
+# This is the mechanism the init container uses to wait for peers and the
+# mechanism your application uses to resolve peer addresses at runtime.
+# StatefulSets require a headless Service to be named via spec.serviceName.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: distributed-core-svc
+  namespace: distributed-core-demo
+  labels:
+    app: distributed-core
+spec:
+  # clusterIP: None = headless. No virtual IP, no kube-proxy load balancing.
+  # DNS returns individual Pod IPs — required for peer discovery by ordinal index.
+  clusterIP: None
+
+  # publishNotReadyAddresses: true ensures DNS entries exist even before a Pod
+  # passes its readiness probe. The init container needs to resolve peer DNS
+  # before the peer is "ready", so this must be true.
+  publishNotReadyAddresses: true
+
+  selector:
+    # Must match .spec.template.metadata.labels in the StatefulSet.
+    app: distributed-core
+
+  ports:
+    - name: http
+      # Port the Service exposes (cluster-internal). Matches containerPort below.
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+
+---
+# Optional: a regular (non-headless) Service for external ingress or
+# kubectl port-forward during development. In production, front this with
+# an Ingress or a LoadBalancer Service instead.
+apiVersion: v1
+kind: Service
+metadata:
+  name: distributed-core-lb
+  namespace: distributed-core-demo
+  labels:
+    app: distributed-core
+spec:
+  # ClusterIP (default): internal load balancing only. Change to LoadBalancer
+  # if you need an external IP, or use an Ingress controller.
+  type: ClusterIP
+  selector:
+    app: distributed-core
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

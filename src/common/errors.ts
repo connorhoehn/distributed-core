@@ -35,3 +35,85 @@ export class TimeoutError extends CoreError {
     super('timeout', `${operation} timed out after ${ms}ms`);
   }
 }
+
+/**
+ * Thrown when a resource transfer is requested to a node that is not currently
+ * in the alive membership set (e.g., it has left or failed).
+ */
+export class InvalidTransferTargetError extends CoreError {
+  constructor(public readonly targetNodeId: string) {
+    super(
+      'invalid-transfer-target',
+      `Cannot transfer to node "${targetNodeId}": not in alive membership`,
+    );
+  }
+}
+
+/**
+ * Thrown when an operation (e.g., extend) is attempted on a lock that this
+ * node does not currently hold.
+ */
+export class NotOwnedError extends CoreError {
+  constructor(public readonly lockId: string) {
+    super('not-owned', `Cannot extend lock "${lockId}": lock is not held`);
+  }
+}
+
+/**
+ * Thrown when an operation targets a session (or channel) that is not owned
+ * by the local node. The caller must redirect the request to the owning node.
+ */
+export class SessionNotLocalError extends CoreError {
+  constructor(public readonly sessionId: string) {
+    super('session-not-local', `Session "${sessionId}" is not owned by this node`);
+  }
+}
+
+/**
+ * Thrown when a WAL-dependent operation (replay, compact) is called on an
+ * EventBus that was not configured with a WAL file path.
+ */
+export class WalNotConfiguredError extends CoreError {
+  constructor(operation: string) {
+    super('wal-not-configured', `WAL not configured: cannot ${operation}`);
+  }
+}
+
+/**
+ * Thrown by ConnectionRegistry when a reconnect is attempted for a connection
+ * currently owned by a remote node rather than the local node.
+ */
+export class RemoteOwnerError extends CoreError {
+  constructor(public readonly connectionId: string, public readonly remoteNodeId: string) {
+    super(
+      'remote-owner',
+      `Cannot reconnect '${connectionId}': owned by remote node '${remoteNodeId}'.`,
+    );
+  }
+}
+
+/**
+ * Thrown by ForwardingRouter when the target resource is owned by the local node.
+ * Callers should handle the request directly instead of forwarding.
+ * Kept for API compatibility; now extends CoreError.
+ */
+export class LocalResourceError extends CoreError {
+  constructor(public readonly resourceId: string) {
+    super(
+      'local-resource',
+      `Resource "${resourceId}" is owned by the local node — caller should handle it directly`,
+    );
+    this.name = 'LocalResourceError';
+  }
+}
+
+/**
+ * Thrown by ForwardingRouter when no route can be found for the given resource.
+ * Kept for API compatibility; now extends CoreError.
+ */
+export class UnroutableResourceError extends CoreError {
+  constructor(public readonly resourceId: string) {
+    super('unroutable-resource', `No route found for resource "${resourceId}"`);
+    this.name = 'UnroutableResourceError';
+  }
+}

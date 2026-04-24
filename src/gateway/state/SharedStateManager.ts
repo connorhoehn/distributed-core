@@ -5,6 +5,7 @@ import { ISnapshotVersionStore } from '../../persistence/snapshot/types';
 import { SharedStateAdapter, SharedStateManagerStats } from './types';
 import { PubSubMessageMetadata } from '../pubsub/types';
 import { LifecycleAware } from '../../common/LifecycleAware';
+import { SessionNotLocalError } from '../../common/errors';
 
 const DEFAULT_TOPIC_PREFIX = 'shared-state';
 const DEFAULT_SNAPSHOT_DEBOUNCE_MS = 5_000;
@@ -119,7 +120,7 @@ export class SharedStateManager<S, U = unknown> extends EventEmitter implements 
 
   async applyUpdate(channelId: string, update: U, _sourceClientId?: string): Promise<void> {
     if (!this.session.isLocal(channelId)) {
-      throw new Error('channel is not owned by this node');
+      throw new SessionNotLocalError(channelId);
     }
     await this.session.apply(channelId, update);
     await this.pubsub.publish(`${this.topicPrefix}:${channelId}`, { update } as CrossNodePayload<U>);

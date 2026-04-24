@@ -4,6 +4,7 @@ import { MembershipTable } from '../cluster/membership/MembershipTable';
 import { NodeStatus } from '../types';
 import { NodeInfo } from '../types';
 import { Message, MessageType, NodeId } from '../types';
+import { LifecycleAware } from '../common/LifecycleAware';
 
 export interface FailureDetectorConfig {
   heartbeatInterval: number;    // How often to send heartbeats (ms)
@@ -35,7 +36,7 @@ export interface NodeHealthStatus {
   isResponsive: boolean;
 }
 
-export class FailureDetector extends EventEmitter {
+export class FailureDetector extends EventEmitter implements LifecycleAware {
   private heartbeatTimers = new Map<string, NodeJS.Timeout>();
   private pingTimers = new Map<string, NodeJS.Timeout>();
   private lastSeenTimestamps = new Map<string, number>();
@@ -208,10 +209,14 @@ export class FailureDetector extends EventEmitter {
     this.recordNodeActivity(sourceNodeId);
   }
 
+  isStarted(): boolean {
+    return this.isRunning;
+  }
+
   /**
    * Start failure detection
    */
-  start(): void {
+  async start(): Promise<void> {
     if (this.isRunning) return;
     
     this.isRunning = true;
@@ -243,7 +248,7 @@ export class FailureDetector extends EventEmitter {
   /**
    * Stop failure detection
    */
-  stop(): void {
+  async stop(): Promise<void> {
     if (!this.isRunning) return;
     
     this.isRunning = false;

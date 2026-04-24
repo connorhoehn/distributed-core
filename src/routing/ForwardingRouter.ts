@@ -1,5 +1,8 @@
 import { ResourceRouter } from './ResourceRouter';
 import { RouteTarget } from './types';
+import { LocalResourceError, UnroutableResourceError } from '../common/errors';
+
+export { LocalResourceError, UnroutableResourceError };
 
 export interface ForwardingTransport {
   call(
@@ -8,20 +11,6 @@ export interface ForwardingTransport {
     payload: unknown,
     options?: { timeoutMs?: number }
   ): Promise<unknown>;
-}
-
-export class LocalResourceError extends Error {
-  constructor(public readonly resourceId: string) {
-    super(`Resource "${resourceId}" is owned by the local node — caller should handle it directly`);
-    this.name = 'LocalResourceError';
-  }
-}
-
-export class UnroutableResourceError extends Error {
-  constructor(public readonly resourceId: string) {
-    super(`No route found for resource "${resourceId}"`);
-    this.name = 'UnroutableResourceError';
-  }
 }
 
 export interface ForwardingRouterConfig {

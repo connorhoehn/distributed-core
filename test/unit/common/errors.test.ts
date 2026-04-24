@@ -4,6 +4,13 @@ import {
   AlreadyStartedError,
   ConflictError,
   TimeoutError,
+  InvalidTransferTargetError,
+  NotOwnedError,
+  SessionNotLocalError,
+  WalNotConfiguredError,
+  RemoteOwnerError,
+  LocalResourceError,
+  UnroutableResourceError,
 } from '../../../src/common/errors';
 
 describe('CoreError', () => {
@@ -65,5 +72,104 @@ describe('TimeoutError (from common/errors)', () => {
     expect(err.name).toBe('TimeoutError');
     expect(err.message).toContain('acquireLock');
     expect(err.message).toContain('5000');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New subclasses — sanity suite
+// ---------------------------------------------------------------------------
+
+describe('InvalidTransferTargetError', () => {
+  it('is a CoreError with stable code and message containing targetNodeId', () => {
+    const err = new InvalidTransferTargetError('node-dead');
+    expect(err instanceof CoreError).toBe(true);
+    expect(err instanceof Error).toBe(true);
+    expect(err.code).toBe('invalid-transfer-target');
+    expect(err.code).toBeTruthy();
+    expect(err.name).toBe('InvalidTransferTargetError');
+    expect(err.targetNodeId).toBe('node-dead');
+    expect(err.message).toContain('node-dead');
+    expect(err.message).toContain('alive membership');
+  });
+});
+
+describe('NotOwnedError', () => {
+  it('is a CoreError with stable code and message containing lockId', () => {
+    const err = new NotOwnedError('my-lock');
+    expect(err instanceof CoreError).toBe(true);
+    expect(err instanceof Error).toBe(true);
+    expect(err.code).toBe('not-owned');
+    expect(err.code).toBeTruthy();
+    expect(err.name).toBe('NotOwnedError');
+    expect(err.lockId).toBe('my-lock');
+    expect(err.message).toContain('my-lock');
+  });
+});
+
+describe('SessionNotLocalError', () => {
+  it('is a CoreError with stable code and message containing sessionId', () => {
+    const err = new SessionNotLocalError('sess-123');
+    expect(err instanceof CoreError).toBe(true);
+    expect(err instanceof Error).toBe(true);
+    expect(err.code).toBe('session-not-local');
+    expect(err.code).toBeTruthy();
+    expect(err.name).toBe('SessionNotLocalError');
+    expect(err.sessionId).toBe('sess-123');
+    expect(err.message).toContain('sess-123');
+  });
+});
+
+describe('WalNotConfiguredError', () => {
+  it('is a CoreError with stable code and message containing operation', () => {
+    const err = new WalNotConfiguredError('replay events');
+    expect(err instanceof CoreError).toBe(true);
+    expect(err instanceof Error).toBe(true);
+    expect(err.code).toBe('wal-not-configured');
+    expect(err.code).toBeTruthy();
+    expect(err.name).toBe('WalNotConfiguredError');
+    expect(err.message).toContain('replay events');
+    expect(err.message).toContain('WAL not configured');
+  });
+});
+
+describe('RemoteOwnerError', () => {
+  it('is a CoreError with stable code and message containing connectionId and remoteNodeId', () => {
+    const err = new RemoteOwnerError('conn-abc', 'node-remote');
+    expect(err instanceof CoreError).toBe(true);
+    expect(err instanceof Error).toBe(true);
+    expect(err.code).toBe('remote-owner');
+    expect(err.code).toBeTruthy();
+    expect(err.name).toBe('RemoteOwnerError');
+    expect(err.connectionId).toBe('conn-abc');
+    expect(err.remoteNodeId).toBe('node-remote');
+    expect(err.message).toContain('conn-abc');
+    expect(err.message).toContain('node-remote');
+  });
+});
+
+describe('LocalResourceError', () => {
+  it('is a CoreError with stable code and message containing resourceId', () => {
+    const err = new LocalResourceError('res-1');
+    expect(err instanceof CoreError).toBe(true);
+    expect(err instanceof Error).toBe(true);
+    expect(err.code).toBe('local-resource');
+    expect(err.code).toBeTruthy();
+    expect(err.name).toBe('LocalResourceError');
+    expect(err.resourceId).toBe('res-1');
+    expect(err.message).toContain('res-1');
+    expect(err.message).toContain('local node');
+  });
+});
+
+describe('UnroutableResourceError', () => {
+  it('is a CoreError with stable code and message containing resourceId', () => {
+    const err = new UnroutableResourceError('res-2');
+    expect(err instanceof CoreError).toBe(true);
+    expect(err instanceof Error).toBe(true);
+    expect(err.code).toBe('unroutable-resource');
+    expect(err.code).toBeTruthy();
+    expect(err.name).toBe('UnroutableResourceError');
+    expect(err.resourceId).toBe('res-2');
+    expect(err.message).toContain('res-2');
   });
 });

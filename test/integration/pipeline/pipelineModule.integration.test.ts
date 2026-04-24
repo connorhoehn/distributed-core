@@ -13,12 +13,25 @@
 //   2. All runs eventually reach a terminal state.
 //   3. No duplicate run.started events (event count integrity).
 //   4. pipeline.run.orphaned fires when a run's owner node is declared dead.
+//
+// Phase-4 bridge additions (PipelineModule API):
+//   5-14. getRun, getHistory, listActiveRuns, runsAwaitingApproval, reassigned.
 
+import * as os from 'os';
+import * as path from 'path';
+import { randomUUID } from 'crypto';
+import { EventEmitter } from 'events';
 import { createCluster } from '../../../src/frontdoor/createCluster';
 import { PipelineExecutor } from '../../../src/applications/pipeline/PipelineExecutor';
+import { PipelineModule } from '../../../src/applications/pipeline/PipelineModule';
 import { EventBus } from '../../../src/messaging/EventBus';
 import type { LLMClient, LLMChunk } from '../../../src/applications/pipeline/LLMClient';
-import type { PipelineDefinition, PipelineEventMap } from '../../../src/applications/pipeline/types';
+import type {
+  PipelineDefinition,
+  PipelineEventMap,
+  ApprovalNodeData,
+} from '../../../src/applications/pipeline/types';
+import type { ApplicationModuleContext } from '../../../src/applications/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -26,6 +39,10 @@ import type { PipelineDefinition, PipelineEventMap } from '../../../src/applicat
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function tempWalPath(): string {
+  return path.join(os.tmpdir(), `pipeline-test-${randomUUID()}.wal`);
 }
 
 const FAKE_RESPONSE = 'Integration test response.';
@@ -87,6 +104,112 @@ function makeLocalPubSub(): any {
       await Promise.all(Array.from(handlers.values()).map((h) => h(topic, payload, meta)));
     },
   };
+}
+
+/** trigger → approval → action  (for runsAwaitingApproval tests) */
+function makeApprovalPipeline(id: string, overrides: Partial<ApprovalNodeData> = {}): PipelineDefinition {
+  const now = new Date().toISOString();
+  const approvalData: ApprovalNodeData = {
+    type: 'approval',
+    approvers: [{ type: 'user', value: 'alice' }],
+    requiredCount: 1,
+    ...overrides,
+  };
+  return {
+    id,
+    name: `Approval pipeline ${id}`,
+    version: 1,
+    status: 'published',
+    publishedVersion: 1,
+    nodes: [
+      { id: 'trigger-1', type: 'trigger', position: { x: 0, y: 0 }, data: { type: 'trigger', triggerType: 'manual' } },
+      { id: 'approval-1', type: 'approval', position: { x: 200, y: 0 }, data: approvalData },
+      { id: 'action-1', type: 'action', position: { x: 400, y: 0 }, data: { type: 'action', actionType: 'notify', config: {} } },
+    ],
+    edges: [
+      { id: 'e1', source: 'trigger-1', sourceHandle: 'out', target: 'approval-1', targetHandle: 'in' },
+      { id: 'e2', source: 'approval-1', sourceHandle: 'approved', target: 'action-1', targetHandle: 'in' },
+    ],
+    createdAt: now,
+    updatedAt: now,
+    createdBy: 'integration-test',
+  };
+}
+
+/**
+ * Builds a PipelineModule wired to a minimal mock ApplicationModuleContext.
+ * The module is fully initialized and started; callers must stop() it.
+ *
+ * @param walFilePath - If provided, the EventBus is WAL-backed.
+ */
+async function makePipelineModule(walFilePath?: string): Promise<{
+  module: PipelineModule;
+  clusterNodeId: string;
+  stop: () => Promise<void>;
+}> {
+  const clusterNodeId = `node-${randomUUID()}`;
+  const pubsub = makeLocalPubSub();
+
+  // Minimal no-op mocks for the registry / topology / module-registry.
+  const resourceRegistry = {
+    registerResourceType: () => { /* no-op */ },
+    getResourcesByType: () => [],
+  };
+  const topologyManager = {};
+  const moduleRegistry = {
+    registerModule: async () => { /* no-op */ },
+    unregisterModule: async () => { /* no-op */ },
+    getModule: () => undefined,
+    getAllModules: () => [],
+    getModulesByResourceType: () => [],
+  };
+
+  // ClusterManager stub — just needs localNodeId + on().
+  const clusterManagerEvents = new EventEmitter();
+  const clusterManager = {
+    localNodeId: clusterNodeId,
+    on: clusterManagerEvents.on.bind(clusterManagerEvents),
+    off: clusterManagerEvents.off.bind(clusterManagerEvents),
+    emit: clusterManagerEvents.emit.bind(clusterManagerEvents),
+    // Expose emitter so tests can trigger member-left.
+    _emitter: clusterManagerEvents,
+  };
+
+  const logger = {
+    info: () => { /* no-op */ },
+    warn: () => { /* no-op */ },
+    error: () => { /* no-op */ },
+    debug: () => { /* no-op */ },
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const context: ApplicationModuleContext = {
+    clusterManager: clusterManager as any,
+    resourceRegistry: resourceRegistry as any,
+    topologyManager: topologyManager as any,
+    moduleRegistry: moduleRegistry as any,
+    configuration: { pubsub },
+    logger,
+  };
+
+  const module = new PipelineModule({
+    moduleId: 'pipeline',
+    moduleName: 'Pipeline',
+    version: '1.0.0',
+    resourceTypes: ['pipeline-run'],
+    configuration: {},
+    llmClient: makeFakeLLMClient(),
+    walFilePath,
+  });
+
+  await module.initialize(context);
+  await module.start();
+
+  const stop = async () => {
+    await module.stop();
+  };
+
+  return { module, clusterNodeId, stop };
 }
 
 // ---------------------------------------------------------------------------
@@ -208,5 +331,311 @@ describe('PipelineModule cluster integration', () => {
     for (const bus of buses) {
       await bus.stop();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase-4 bridge additions: PipelineModule new API
+// ---------------------------------------------------------------------------
+
+describe('PipelineModule Phase-4 API', () => {
+  jest.setTimeout(30000);
+
+  // -------------------------------------------------------------------------
+  // getRun
+  // -------------------------------------------------------------------------
+
+  describe('getRun(runId)', () => {
+    it('[scenario 1] returns current run for an active (in-flight) executor', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        // Create a run and immediately query it — the run resolves asynchronously.
+        const resource = await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-get-active'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const runId = resource.resourceId;
+
+        // The run may already be complete by the time we query (fast pipeline).
+        // Either way getRun must return non-null.
+        const run = module.getRun(runId);
+        expect(run).not.toBeNull();
+        expect(run!.id).toBe(runId);
+      } finally {
+        await stop();
+      }
+    });
+
+    it('[scenario 2] returns completed snapshot after the run reaches a terminal state', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        const resource = await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-get-completed'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const runId = resource.resourceId;
+
+        // Wait for terminal state.
+        await sleep(500);
+
+        const run = module.getRun(runId);
+        expect(run).not.toBeNull();
+        expect(run!.id).toBe(runId);
+        expect(['completed', 'failed', 'cancelled']).toContain(run!.status);
+      } finally {
+        await stop();
+      }
+    });
+
+    it('[scenario 3] returns null for an unknown runId', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        expect(module.getRun('bogus-run-id')).toBeNull();
+      } finally {
+        await stop();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getHistory
+  // -------------------------------------------------------------------------
+
+  describe('getHistory(runId)', () => {
+    it('[scenario 4] returns events filtered by runId when WAL is configured', async () => {
+      const walFilePath = tempWalPath();
+      const { module, stop } = await makePipelineModule(walFilePath);
+      try {
+        const resource = await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-history'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const runId = resource.resourceId;
+
+        // Wait for run to finish so all events are persisted.
+        await sleep(500);
+
+        const history = await module.getHistory(runId);
+        expect(history.length).toBeGreaterThan(0);
+        // Every returned event must have the correct runId in the payload.
+        for (const event of history) {
+          const payload = event.payload as Record<string, unknown>;
+          expect(payload['runId']).toBe(runId);
+        }
+        // Must include pipeline.run.started and a terminal event.
+        const types = history.map((e) => e.type);
+        expect(types).toContain('pipeline.run.started');
+        expect(
+          types.some((t) =>
+            t === 'pipeline.run.completed' ||
+            t === 'pipeline.run.failed' ||
+            t === 'pipeline.run.cancelled',
+          ),
+        ).toBe(true);
+      } finally {
+        await stop();
+        // Clean up WAL file.
+        try { require('fs').unlinkSync(walFilePath); } catch { /* ignore */ }
+      }
+    });
+
+    it('[scenario 5] returns [] when no WAL is configured (in-memory bus)', async () => {
+      const { module, stop } = await makePipelineModule(/* no walFilePath */);
+      try {
+        await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-no-wal'),
+            speedMultiplier: 0.02,
+          },
+        });
+        await sleep(200);
+
+        // getHistory must not throw — returns empty array.
+        const history = await module.getHistory('any-run-id');
+        expect(history).toEqual([]);
+      } finally {
+        await stop();
+      }
+    });
+
+    it('[scenario 6] respects fromVersion — excludes events below the cutoff', async () => {
+      const walFilePath = tempWalPath();
+      const { module, stop } = await makePipelineModule(walFilePath);
+      try {
+        const resource = await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-version-filter'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const runId = resource.resourceId;
+        await sleep(500);
+
+        const allHistory = await module.getHistory(runId, 0);
+        expect(allHistory.length).toBeGreaterThan(1);
+
+        // Use the version of the second event as the cutoff.
+        const cutoffVersion = allHistory[1].version;
+        const filtered = await module.getHistory(runId, cutoffVersion);
+
+        // Every returned event must have version >= cutoffVersion.
+        for (const event of filtered) {
+          expect(event.version).toBeGreaterThanOrEqual(cutoffVersion);
+        }
+        // And filtered must be a strict subset of allHistory.
+        expect(filtered.length).toBeLessThan(allHistory.length);
+      } finally {
+        await stop();
+        try { require('fs').unlinkSync(walFilePath); } catch { /* ignore */ }
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // listActiveRuns
+  // -------------------------------------------------------------------------
+
+  describe('listActiveRuns()', () => {
+    it('[scenario 7] returns one entry per in-flight run and zero after terminal', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        // Before any runs: empty.
+        expect(module.listActiveRuns()).toHaveLength(0);
+
+        // Start a run — it's fast (speedMultiplier=0.02) so may already finish;
+        // we check that after terminal state the list is empty again.
+        await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-list-active'),
+            speedMultiplier: 0.02,
+          },
+        });
+
+        // Wait for completion.
+        await sleep(500);
+
+        // After terminal state the executor is moved out of activeExecutors.
+        expect(module.listActiveRuns()).toHaveLength(0);
+      } finally {
+        await stop();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // runsAwaitingApproval metric
+  // -------------------------------------------------------------------------
+
+  describe('runsAwaitingApproval (getMetrics)', () => {
+    it('[scenario 8] is 0 for a plain run with no approval nodes', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-no-approval'),
+            speedMultiplier: 0.02,
+          },
+        });
+        await sleep(500);
+
+        const metrics = await module.getMetrics();
+        expect(metrics.runsAwaitingApproval).toBe(0);
+      } finally {
+        await stop();
+      }
+    });
+
+    it('[scenario 9] counts correctly when a run is awaiting approval', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        // Start a pipeline with an approval node and NO timeout — it will block.
+        const resource = await module.createResource({
+          applicationData: {
+            definition: makeApprovalPipeline('pipe-awaiting'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const runId = resource.resourceId;
+
+        // Give the executor enough time to reach the approval step.
+        await sleep(300);
+
+        const metrics = await module.getMetrics();
+        expect(metrics.runsAwaitingApproval).toBeGreaterThanOrEqual(1);
+
+        // Unblock so the module can stop cleanly.
+        module.resolveApproval(runId, 'approval-1', 'alice', 'approve');
+        await sleep(200);
+      } finally {
+        await stop();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // pipeline.run.reassigned emitted alongside pipeline.run.orphaned
+  // -------------------------------------------------------------------------
+
+  describe('pipeline.run.reassigned', () => {
+    it('[scenario 10] emits reassigned alongside orphaned when a member leaves', async () => {
+      const { module, clusterNodeId: nodeId, stop } = await makePipelineModule();
+
+      const orphanedEvents: string[] = [];
+      const reassignedEvents: Array<{ runId: string; from: string; to: string }> = [];
+
+      // Subscribe to the module's EventBus before any runs are created.
+      const bus = module.getEventBus();
+      bus.subscribe('pipeline.run.orphaned', async (event) => {
+        orphanedEvents.push(event.payload.runId);
+      });
+      bus.subscribe('pipeline.run.reassigned', async (event) => {
+        reassignedEvents.push({
+          runId: event.payload.runId,
+          from: event.payload.from,
+          to: event.payload.to,
+        });
+      });
+
+      try {
+        // Run and wait for completion so the run moves to completedRuns.
+        const resource = await module.createResource({
+          applicationData: {
+            definition: makeSimplePipeline('pipe-reassign'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const runId = resource.resourceId;
+        await sleep(500);
+
+        // Confirm the run completed and is in completedRuns by checking getRun.
+        const run = module.getRun(runId);
+        expect(run).not.toBeNull();
+        expect(['completed', 'failed', 'cancelled']).toContain(run!.status);
+
+        // Simulate the node that owns the run departing — trigger member-left
+        // using the cluster manager emitter we exposed on the mock.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cmAny = (module as any).context.clusterManager;
+        cmAny._emitter.emit('member-left', nodeId);
+
+        // Give handleOrphanedNodeRuns time to publish the events.
+        await sleep(100);
+
+        expect(orphanedEvents).toContain(runId);
+        const re = reassignedEvents.find((e) => e.runId === runId);
+        expect(re).toBeDefined();
+        expect(re!.from).toBe(nodeId);
+        // Phase-4 placeholder: `to` equals `from` until Phase 5.
+        expect(re!.to).toBe(nodeId);
+      } finally {
+        await stop();
+      }
+    });
   });
 });

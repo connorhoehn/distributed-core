@@ -1,0 +1,267 @@
+# statefulset.yaml — 3-node StatefulSet for distributed-core services.
+#
+# WHY StatefulSet and not Deployment?
+# Deployments give Pods ephemeral, random names (collab-x7f2q) that change on
+# every reschedule. StatefulSets give Pods stable, predictable names
+# (collab-0, collab-1, collab-2) and stable DNS hostnames. distributed-core
+# nodes reference each other by address; stable DNS is required for the
+# EntityRegistrySyncAdapter, ForwardingRouter peer table, and the init container
+# DNS-wait loop to work correctly.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: distributed-core-collab
+  namespace: distributed-core-demo
+  labels:
+    app: distributed-core
+spec:
+  # Three replicas = minimum quorum-safe cluster (majority = 2).
+  # Increasing to 5 raises resilience: the cluster survives any 2 node failures.
+  replicas: 3
+
+  # Must match metadata.name of the headless Service in service.yaml.
+  # Kubernetes uses this to construct per-Pod DNS names:
+  #   collab-{i}.distributed-core-svc.distributed-core-demo.svc.cluster.local
+  serviceName: distributed-core-svc
+
+  selector:
+    matchLabels:
+      app: distributed-core  # Must match spec.template.metadata.labels
+
+  # Rolling update: replace one Pod at a time.
+  # maxUnavailable: 1 means the cluster is never reduced below 2 alive nodes
+  # during a rollout, preserving quorum for LeaderElection and QuorumDistributedLock.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+
+  # podManagementPolicy: OrderedReady (default) starts/stops Pods one at a time
+  # in ordinal order (0, 1, 2). Use Parallel for faster scale-up when your
+  # application handles simultaneous peer joins gracefully.
+  podManagementPolicy: OrderedReady
+
+  template:
+    metadata:
+      labels:
+        app: distributed-core
+
+    spec:
+      # ---------------------------------------------------------------------------
+      # Pod anti-affinity: spread Pods across physical nodes.
+      # Without this, Kubernetes may schedule all three Pods on the same node.
+      # If that node dies, the entire cluster goes down — defeating the purpose
+      # of a 3-node StatefulSet. preferredDuringScheduling (soft rule) is used
+      # instead of required so scheduling still succeeds on a small cluster or
+      # local dev environment that has fewer than 3 nodes.
+      # ---------------------------------------------------------------------------
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100  # Maximum preference weight — strongly prefer spreading
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: distributed-core
+                # topologyKey=kubernetes.io/hostname means "one Pod per physical host"
+                topologyKey: kubernetes.io/hostname
+
+      # ---------------------------------------------------------------------------
+      # Init container: wait for all peer DNS entries to resolve before starting.
+      #
+      # WHY: When a StatefulSet rolls out, Pod collab-0 starts first. At this point
+      # collab-1 and collab-2 do not yet exist — their DNS entries are absent.
+      # If the application connects to peers at startup and peer DNS is missing,
+      # it either errors out or skips those peers, resulting in a split-cluster
+      # where nodes don't know about each other.
+      #
+      # The init container loops over each peer hostname using `nslookup`. It only
+      # exits (unblocking the main container) once all peers respond to DNS.
+      # This adds a few seconds to cold-start but prevents cluster misconfiguration.
+      #
+      # In a rolling restart, only the Pod being replaced runs this init; the
+      # others are already running and healthy.
+      # ---------------------------------------------------------------------------
+      initContainers:
+        - name: wait-for-peers
+          image: busybox:1.36
+          # PEERS env var is set to a space-separated list of all peer DNS names.
+          # The loop exits 0 only when every peer resolves. `sleep 2` between
+          # retries avoids hammering DNS with tight-loop queries.
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for peer DNS to propagate..."
+              for peer in $PEERS; do
+                echo "  checking $peer..."
+                until nslookup "$peer" > /dev/null 2>&1; do
+                  echo "    $peer not yet resolvable, retrying in 2s..."
+                  sleep 2
+                done
+                echo "  $peer resolved OK"
+              done
+              echo "All peers resolved. Starting main container."
+          env:
+            - name: PEERS
+              value: >-
+                collab-0.distributed-core-svc.distributed-core-demo.svc.cluster.local
+                collab-1.distributed-core-svc.distributed-core-demo.svc.cluster.local
+                collab-2.distributed-core-svc.distributed-core-demo.svc.cluster.local
+
+      containers:
+        - name: collab
+          # Replace with your built image. Tag with a Git SHA for traceability;
+          # avoid :latest in production (makes rollbacks and audits harder).
+          image: distributed-core-example:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 8080  # Must match PORT env var below
+              protocol: TCP
+
+          env:
+            # NODE_ID: stable ordinal identity for this Pod.
+            # Kubernetes exposes the Pod name via fieldRef; the StatefulSet ordinal
+            # is the suffix (collab-0 → NODE_ID=collab-0). Your application should
+            # use NODE_ID as the localNodeId passed to EntityRegistry,
+            # EntityRegistrySyncAdapter, ResourceRouter, etc.
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+
+            # PEERS: comma-separated list of peer addresses. The application uses
+            # these to populate its ClusterManager membership table at startup.
+            # All peers are listed; each node excludes its own NODE_ID at runtime.
+            - name: PEERS
+              value: >-
+                collab-0.distributed-core-svc.distributed-core-demo.svc.cluster.local,
+                collab-1.distributed-core-svc.distributed-core-demo.svc.cluster.local,
+                collab-2.distributed-core-svc.distributed-core-demo.svc.cluster.local
+
+            # POD_IP: the Pod's own IP, useful for registering the node's address
+            # in the ClusterManager / ForwardingRouter so peers can reach it.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+
+            # Remaining config loaded from ConfigMap to keep this file DRY.
+            # ConfigMap values are referenced by key.
+            - name: PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: distributed-core-config
+                  key: PORT
+            - name: ENTITY_SYNC_TOPIC
+              valueFrom:
+                configMapKeyRef:
+                  name: distributed-core-config
+                  key: ENTITY_SYNC_TOPIC
+            - name: STATE_TOPIC_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: distributed-core-config
+                  key: STATE_TOPIC_PREFIX
+            - name: IDLE_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: distributed-core-config
+                  key: IDLE_TIMEOUT_MS
+            - name: RECLAIM_JITTER_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: distributed-core-config
+                  key: RECLAIM_JITTER_MS
+            - name: CONNECTION_TTL_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: distributed-core-config
+                  key: CONNECTION_TTL_MS
+            - name: LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: distributed-core-config
+                  key: LOG_LEVEL
+
+          # ---------------------------------------------------------------------------
+          # Liveness probe: if the container stops responding, Kubernetes restarts it.
+          # Your application must expose GET /health returning 2xx. Wire ForwardingServer
+          # or a minimal http.createServer to handle this route. See DEPLOYMENT.md.
+          #
+          # initialDelaySeconds: give the app time to start up and claim resources
+          # before the first probe. Set this higher than your startup time.
+          # failureThreshold: 3 means the container is killed after 3 consecutive
+          # failures. With a 10s period, that's 30s of unresponsiveness before restart.
+          # ---------------------------------------------------------------------------
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20  # Wait for startup before first probe
+            periodSeconds: 10        # Check every 10 seconds
+            timeoutSeconds: 5        # Fail if no response within 5 seconds
+            failureThreshold: 3      # Kill + restart after 3 consecutive failures
+
+          # ---------------------------------------------------------------------------
+          # Readiness probe: if the container is not ready, Kubernetes removes it
+          # from Service endpoints (stops routing traffic to it) but does NOT restart it.
+          # A Pod fails readiness during startup, reclaim storms, or WAL replay.
+          # Using the same /health endpoint is fine; you can return 503 from /health
+          # during warm-up to signal "alive but not ready for traffic."
+          # ---------------------------------------------------------------------------
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10  # Shorter than liveness — check readiness sooner
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          resources:
+            # Requests: guaranteed capacity. Set based on your capacity plan.
+            # See docs/DEPLOYMENT.md §Capacity Planning for sizing guidance.
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            # Limits: hard ceiling. OOMKilled if exceeded. Set conservatively —
+            # running out of memory mid-WAL-write is worse than being evicted by
+            # the scheduler. Tune upward based on observed peak usage.
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          volumeMounts:
+            # WAL and snapshot data must survive Pod restarts. Mount a
+            # PersistentVolume at /app/data so WAL files are not lost when the
+            # container is killed and rescheduled. See volumeClaimTemplates below.
+            - name: data
+              mountPath: /app/data
+
+  # ---------------------------------------------------------------------------
+  # volumeClaimTemplates: each Pod gets its own PersistentVolumeClaim.
+  # StatefulSets create one PVC per replica (data-collab-0, data-collab-1, etc.)
+  # and bind them to the same Pod ordinal across reschedules. This is how WAL
+  # files survive node restarts — the Pod always gets the same disk back.
+  #
+  # storageClassName: use your cluster's fast SSD class (e.g. gp3 on EKS,
+  # premium-rwo on GKE). Avoid the default HDD class for WAL workloads; WAL
+  # writes are sequential but latency matters for lock acquire times.
+  # ---------------------------------------------------------------------------
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          # ReadWriteOnce: the volume is mounted by exactly one Pod at a time.
+          # Correct for WAL — only the owning Pod should write its own WAL.
+          - ReadWriteOnce
+        resources:
+          requests:
+            # 1Gi is sufficient for moderate WAL and snapshot workloads.
+            # See docs/DEPLOYMENT.md §Persistence for WAL growth guidance.
+            storage: 1Gi
+        # storageClassName: fast-ssd  # Uncomment and set your storage class

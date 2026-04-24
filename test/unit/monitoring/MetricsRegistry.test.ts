@@ -6,6 +6,92 @@ import {
   HistogramSnapshot,
 } from '../../../src/monitoring/metrics/MetricsRegistry';
 
+describe('namespace and defaultLabels', () => {
+  it('1. no options → existing behavior unchanged', () => {
+    const registry = new MetricsRegistry('node-1');
+    const c = registry.counter('req.count');
+    c.inc(3);
+    const snap = registry.getSnapshot();
+    const sample = snap.metrics.find((m) => m.name === 'req.count');
+    expect(sample).toBeDefined();
+    expect(sample?.value).toBe(3);
+  });
+
+  it('2. namespace: "acme" → snapshot name is "acme.req.count"', () => {
+    const registry = new MetricsRegistry('node-1', { namespace: 'acme' });
+    const c = registry.counter('req.count');
+    c.inc(1);
+    const snap = registry.getSnapshot();
+    const sample = snap.metrics.find((m) => m.name === 'acme.req.count');
+    expect(sample).toBeDefined();
+    expect(sample?.value).toBe(1);
+  });
+
+  it('3. defaultLabels applied when counter called with no labels', () => {
+    const registry = new MetricsRegistry('node-1', { defaultLabels: { tenant: 'acme' } });
+    registry.counter('req.count');
+    const snap = registry.getSnapshot();
+    const sample = snap.metrics.find((m) => m.name === 'req.count');
+    expect(sample?.labels).toEqual({ tenant: 'acme' });
+  });
+
+  it('4. explicit label overrides default when keys collide', () => {
+    const registry = new MetricsRegistry('node-1', { defaultLabels: { tenant: 'acme', region: 'us-east' } });
+    registry.counter('req.count', { tenant: 'beta' });
+    const snap = registry.getSnapshot();
+    const sample = snap.metrics.find((m) => m.name === 'req.count');
+    expect(sample?.labels).toEqual({ tenant: 'beta', region: 'us-east' });
+  });
+
+  it('5. child("svc-a") prefixes both namespaces → "acme.svc-a.req.count"', () => {
+    const parent = new MetricsRegistry('node-1', { namespace: 'acme' });
+    const child = parent.child('svc-a');
+    child.counter('req.count').inc(1);
+    const snap = parent.getSnapshot();
+    const sample = snap.metrics.find((m) => m.name === 'acme.svc-a.req.count');
+    expect(sample).toBeDefined();
+    expect(sample?.value).toBe(1);
+  });
+
+  it('6. child labels merge: parent {tenant} + child {svc} → both present', () => {
+    const parent = new MetricsRegistry('node-1', { defaultLabels: { tenant: 'acme' } });
+    const child = parent.child(undefined, { svc: 'auth' });
+    child.counter('req.count');
+    const snap = parent.getSnapshot();
+    const sample = snap.metrics.find((m) => m.name === 'req.count');
+    expect(sample?.labels).toEqual({ tenant: 'acme', svc: 'auth' });
+  });
+
+  it('7. child and parent share the underlying store', () => {
+    const parent = new MetricsRegistry('node-1', { namespace: 'acme' });
+    const child = parent.child('svc-a');
+    child.counter('req.count').inc(5);
+    const parentSnap = parent.getSnapshot();
+    const sample = parentSnap.metrics.find((m) => m.name === 'acme.svc-a.req.count');
+    expect(sample?.value).toBe(5);
+  });
+
+  it('8. reset() on parent clears child metrics too (shared store)', () => {
+    const parent = new MetricsRegistry('node-1', { namespace: 'acme' });
+    const child = parent.child('svc-a');
+    const c = child.counter('req.count');
+    c.inc(10);
+    parent.reset();
+    expect(c.get()).toBe(0);
+  });
+
+  it('9. getMetricNames() returns the namespaced names', () => {
+    const registry = new MetricsRegistry('node-1', { namespace: 'acme' });
+    registry.counter('req.count');
+    registry.gauge('active');
+    const names = registry.getMetricNames();
+    expect(names).toContain('acme.req.count');
+    expect(names).toContain('acme.active');
+    expect(names).not.toContain('req.count');
+    expect(names).not.toContain('active');
+  });
+});
+
 describe('Counter', () => {
   it('inc() defaults to 1 and accumulates', () => {
     const c = new Counter();

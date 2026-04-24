@@ -2,6 +2,7 @@ import { GossipStrategy } from '../../../src/gossip/GossipStrategy';
 import { InMemoryAdapter } from '../../../src/transport/adapters/InMemoryAdapter';
 import { MembershipEntry } from '../../../src/cluster/types';
 import { MessageType } from '../../../src/types';
+import { LifecycleAware } from '../../../src/common/LifecycleAware';
 
 describe('GossipStrategy', () => {
   let gossipStrategy: GossipStrategy;
@@ -92,5 +93,67 @@ describe('GossipStrategy', () => {
     );
     
     await transport.stop();
+  });
+});
+
+describe('GossipStrategy — LifecycleAware', () => {
+  function makeStrategy() {
+    const nodeIdObj = { id: 'lc-gossip', address: '127.0.0.1', port: 4000 };
+    const transport = new InMemoryAdapter(nodeIdObj);
+    return new GossipStrategy('lc-gossip', transport, 1000);
+  }
+
+  it('isStarted() returns false before start()', () => {
+    const gs = makeStrategy();
+    expect(gs.isStarted()).toBe(false);
+  });
+
+  it('isStarted() returns true after start()', async () => {
+    const gs = makeStrategy();
+    await gs.start();
+    expect(gs.isStarted()).toBe(true);
+    await gs.stop();
+  });
+
+  it('isStarted() returns false after stop()', async () => {
+    const gs = makeStrategy();
+    await gs.start();
+    await gs.stop();
+    expect(gs.isStarted()).toBe(false);
+  });
+
+  it('start() twice is a no-op — isStarted stays true, no double-initialization', async () => {
+    const gs = makeStrategy();
+    await gs.start();
+    expect(gs.isStarted()).toBe(true);
+    // A second start() must not re-enter the body (which would reset and re-set the flag).
+    // We verify by calling stop() to reset the flag, then calling start() again — but for
+    // the idempotency test we confirm the state is consistent after two starts.
+    await gs.start();
+    expect(gs.isStarted()).toBe(true);
+    await gs.stop();
+  });
+
+  it('stop() twice is a no-op', async () => {
+    const gs = makeStrategy();
+    await gs.start();
+    await gs.stop();
+    expect(gs.isStarted()).toBe(false);
+    await gs.stop();
+    expect(gs.isStarted()).toBe(false);
+  });
+
+  it('stop() before start() is a no-op — does not throw', async () => {
+    const gs = makeStrategy();
+    await expect(gs.stop()).resolves.toBeUndefined();
+    expect(gs.isStarted()).toBe(false);
+  });
+
+  it('satisfies the LifecycleAware interface at the type level', () => {
+    const gs = makeStrategy();
+    const lc: LifecycleAware = gs;
+    expect(typeof lc.start).toBe('function');
+    expect(typeof lc.stop).toBe('function');
+    expect(typeof lc.isStarted).toBe('function');
   });
 });

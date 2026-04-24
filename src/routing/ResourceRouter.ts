@@ -12,6 +12,7 @@ import {
 } from './types';
 import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
 import { LifecycleAware } from '../common/LifecycleAware';
+import { InvalidTransferTargetError } from '../common/errors';
 
 const DEFAULTS: Omit<Required<ResourceRouterConfig>, 'metrics'> = {
   placement: new LocalPlacement(),
@@ -208,7 +209,7 @@ export class ResourceRouter extends EventEmitter implements LifecycleAware {
    */
   async transfer(resourceId: string, targetNodeId: string): Promise<ResourceHandle> {
     if (!this._getAliveNodeIds().includes(targetNodeId)) {
-      throw new Error(`Cannot transfer to node "${targetNodeId}": not in alive membership`);
+      throw new InvalidTransferTargetError(targetNodeId);
     }
     const record = await this.registry.transferEntity(resourceId, targetNodeId);
     this.metrics?.counter('resource.transfer.count').inc();

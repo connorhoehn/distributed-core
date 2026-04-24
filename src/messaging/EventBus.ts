@@ -8,6 +8,7 @@ import { WALReaderImpl } from '../persistence/wal/WALReader';
 import { ISnapshotVersionStore } from '../persistence/snapshot/types';
 import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
 import { LifecycleAware } from '../common/LifecycleAware';
+import { WalNotConfiguredError } from '../common/errors';
 
 export interface BusEvent<T = unknown> {
   id: string;
@@ -331,7 +332,7 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
 
   async replay(fromVersion: number, handler: (event: BusEvent) => Promise<void>): Promise<void> {
     if (!this.config.walFilePath) {
-      throw new Error('WAL not configured: cannot replay events');
+      throw new WalNotConfiguredError('replay events');
     }
 
     const reader = new WALReaderImpl(this.config.walFilePath);
@@ -358,7 +359,7 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
 
   async compact(options?: EventBusCompactionOptions): Promise<EventBusCompactionResult> {
     if (!this.config.walFilePath) {
-      throw new Error('WAL not configured: cannot compact');
+      throw new WalNotConfiguredError('compact');
     }
 
     const keepLastNPerType = options?.keepLastNPerType ?? 100;

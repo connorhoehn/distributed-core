@@ -8,6 +8,7 @@ import { LocalPlacement } from '../../../../src/routing/PlacementStrategy';
 import { InMemorySnapshotVersionStore } from '../../../../src/persistence/snapshot/InMemorySnapshotVersionStore';
 import { MembershipEntry } from '../../../../src/cluster/types';
 import { PubSubMessageMetadata } from '../../../../src/gateway/pubsub/types';
+import { CoreError, SessionNotLocalError } from '../../../../src/common/errors';
 
 // ---------------------------------------------------------------------------
 // Counter adapter
@@ -298,17 +299,20 @@ describe('SharedStateManager', () => {
     expect(await mgr.getSnapshot('nonexistent')).toBeNull();
   });
 
-  // 10. applyUpdate on non-local channel throws
-  it('applyUpdate() throws when channel is not owned by this node', async () => {
+  // 10. applyUpdate on non-local channel throws SessionNotLocalError
+  it('applyUpdate() throws SessionNotLocalError when channel is not owned by this node', async () => {
     const { session } = await makeSetup();
     activeSessions.push(session);
     const pubsub = makeMockPubSub();
     const mgr = new SharedStateManager(session, pubsub as any, adapter);
     await mgr.start();
 
-    await expect(mgr.applyUpdate('not-owned', { inc: 1 })).rejects.toThrow(
-      'channel is not owned by this node'
-    );
+    const err = await mgr.applyUpdate('not-owned', { inc: 1 }).catch(e => e);
+    expect(err).toBeInstanceOf(CoreError);
+    expect(err).toBeInstanceOf(SessionNotLocalError);
+    expect(err.code).toBe('session-not-local');
+    expect(err.sessionId).toBe('not-owned');
+    expect(err.message).toContain('not-owned');
   });
 
   // 11. stop() persists all active channels to the snapshot store

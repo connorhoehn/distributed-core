@@ -26,8 +26,9 @@ import { ClusterIntrospection } from './introspection/ClusterIntrospection';
 import { ClusterSecurity } from '../identity/keys/ClusterSecurity';
 import { ClusterQuorum } from './quorum/ClusterQuorum';
 import { ClusterRouting } from '../routing/ClusterRouting';
+import { LifecycleAware } from '../common/LifecycleAware';
 
-export class ClusterManager extends EventEmitter implements IClusterManagerContext {
+export class ClusterManager extends EventEmitter implements IClusterManagerContext, LifecycleAware {
   // Core components (exposed via IClusterManagerContext)
   readonly membership: MembershipTable;
   readonly gossipStrategy: GossipStrategy;
@@ -39,7 +40,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
   readonly localNodeId: string;
   
   // Internal state
-  private isStarted = false;
+  private _started = false;
   recentUpdates: NodeInfo[] = [];
   private localVersion = 1;
 
@@ -146,8 +147,12 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     });
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   async start(): Promise<void> {
-    if (this.isStarted) return;
+    if (this._started) return;
 
     // Set up message handling delegation to communication module
     this.transport.onMessage((message: Message) => {
@@ -166,12 +171,12 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
       this.introspection.startTracking();
     }
 
-    this.isStarted = true;
+    this._started = true;
     this.emit('started');
   }
 
   async stop(): Promise<void> {
-    if (!this.isStarted) return;
+    if (!this._started) return;
 
     // Stop communication first
     this.communication.stopGossipTimer();
@@ -192,7 +197,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     // Remove all event listeners to prevent memory leaks
     this.removeAllListeners();
 
-    this.isStarted = false;
+    this._started = false;
     this.emit('stopped');
   }
 
@@ -235,7 +240,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
    * Check if cluster is bootstrapped (required by IClusterManagerContext)
    */
   isBootstrapped(): boolean {
-    return this.isStarted && this.membership.getAllMembers().length > 0;
+    return this._started && this.membership.getAllMembers().length > 0;
   }
 
   /**

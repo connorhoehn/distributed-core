@@ -1,14 +1,31 @@
 import { Transport } from '../transport/Transport';
 import { MembershipEntry, GossipMessage, NodeInfo } from '../cluster/types';
 import { Message, MessageType } from '../types';
+import { LifecycleAware } from '../common/LifecycleAware';
 
-export class GossipStrategy {
+export class GossipStrategy implements LifecycleAware {
+  private _started = false;
+
   constructor(
     private localNodeId: string,
     private transport: Transport,
     private gossipInterval: number = 1000,
     private enableLogging: boolean = false
   ) {}
+
+  isStarted(): boolean {
+    return this._started;
+  }
+
+  async start(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
+  }
+
+  async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
+  }
 
   /**
    * Send gossip message to target nodes

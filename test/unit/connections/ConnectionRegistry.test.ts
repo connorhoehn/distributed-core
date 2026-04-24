@@ -3,6 +3,7 @@ import { EntityRegistryFactory } from '../../../src/cluster/entity/EntityRegistr
 import { EntityRegistry } from '../../../src/cluster/entity/types';
 import { EntityUpdate } from '../../../src/persistence/wal/types';
 import { MetricsRegistry } from '../../../src/monitoring/metrics/MetricsRegistry';
+import { CoreError, RemoteOwnerError } from '../../../src/common/errors';
 
 jest.useFakeTimers();
 
@@ -407,8 +408,8 @@ describe('ConnectionRegistry', () => {
       expect(registeredHandler).toHaveBeenCalledTimes(1);
     });
 
-    // 5. allowReconnect: true + remote-owned connection: throws.
-    it('allowReconnect: true — throws when trying to reconnect a remote-owned connection', async () => {
+    // 5. allowReconnect: true + remote-owned connection: throws RemoteOwnerError.
+    it('allowReconnect: true — throws RemoteOwnerError when trying to reconnect a remote-owned connection', async () => {
       registry = makeReconnectRegistry();
       await registry.start();
 
@@ -416,9 +417,14 @@ describe('ConnectionRegistry', () => {
       const remoteUpdate = makeRemoteUpdate({ entityId: 'conn-remote-rc', operation: 'CREATE' });
       await registry.applyRemoteUpdate(remoteUpdate);
 
-      await expect(registry.register('conn-remote-rc')).rejects.toThrow(
-        /Cannot reconnect.*owned by remote node/,
-      );
+      const err = await registry.register('conn-remote-rc').catch(e => e);
+      expect(err).toBeInstanceOf(CoreError);
+      expect(err).toBeInstanceOf(RemoteOwnerError);
+      expect(err.code).toBe('remote-owner');
+      expect(err.connectionId).toBe('conn-remote-rc');
+      expect(err.remoteNodeId).toBe(REMOTE_NODE);
+      expect(err.message).toContain('conn-remote-rc');
+      expect(err.message).toContain(REMOTE_NODE);
     });
 
     // 6. After reconnect, TTL timer is rescheduled correctly.

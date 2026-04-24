@@ -1,6 +1,7 @@
 import { ForwardingRouter, ForwardingTransport, LocalResourceError, UnroutableResourceError } from '../../../src/routing/ForwardingRouter';
 import { MisdirectedError } from '../../../src/routing/HttpForwardingTransport';
 import { RouteTarget } from '../../../src/routing/types';
+import { CoreError } from '../../../src/common/errors';
 
 function makeRouter(routeResult: RouteTarget | null | Array<RouteTarget | null>) {
   const results = Array.isArray(routeResult) ? [...routeResult] : null;
@@ -43,21 +44,33 @@ describe('ForwardingRouter', () => {
     };
   });
 
-  test('local resource throws LocalResourceError', async () => {
+  test('local resource throws LocalResourceError (instanceof CoreError)', async () => {
     const router = makeRouter(localTarget);
     const fr = new ForwardingRouter(router, mockTransport);
 
-    await expect(fr.call('res-1', '/action', {})).rejects.toThrow(LocalResourceError);
-    await expect(fr.call('res-1', '/action', {})).rejects.toThrow('"res-1"');
+    let caughtErr: unknown;
+    await fr.call('res-1', '/action', {}).catch(e => { caughtErr = e; });
+    expect(caughtErr).toBeInstanceOf(LocalResourceError);
+    expect(caughtErr).toBeInstanceOf(CoreError);
+    const err = caughtErr as LocalResourceError;
+    expect(err.code).toBe('local-resource');
+    expect(err.resourceId).toBe('res-1');
+    expect(err.message).toContain('res-1');
     expect(mockTransport.call).not.toHaveBeenCalled();
   });
 
-  test('unknown resource throws UnroutableResourceError', async () => {
+  test('unknown resource throws UnroutableResourceError (instanceof CoreError)', async () => {
     const router = makeRouter(null);
     const fr = new ForwardingRouter(router, mockTransport);
 
-    await expect(fr.call('res-x', '/action', {})).rejects.toThrow(UnroutableResourceError);
-    await expect(fr.call('res-x', '/action', {})).rejects.toThrow('"res-x"');
+    let caughtErr: unknown;
+    await fr.call('res-x', '/action', {}).catch(e => { caughtErr = e; });
+    expect(caughtErr).toBeInstanceOf(UnroutableResourceError);
+    expect(caughtErr).toBeInstanceOf(CoreError);
+    const err = caughtErr as UnroutableResourceError;
+    expect(err.code).toBe('unroutable-resource');
+    expect(err.resourceId).toBe('res-x');
+    expect(err.message).toContain('res-x');
     expect(mockTransport.call).not.toHaveBeenCalled();
   });
 

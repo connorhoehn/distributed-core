@@ -25,7 +25,7 @@ import {
   ResourceHealth,
   DistributionStrategy,
 } from '../../cluster/resources/types';
-import { EventBus } from '../../messaging/EventBus';
+import { EventBus, BusEvent } from '../../messaging/EventBus';
 import { PubSubManager } from '../../gateway/pubsub/PubSubManager';
 import { PipelineExecutor, PipelineExecutorOptions } from './PipelineExecutor';
 import { LLMClient } from './LLMClient';
@@ -34,6 +34,8 @@ import type {
   PipelineEventMap,
   PipelineRun,
 } from './types';
+
+export type { BusEvent };
 
 // ---------------------------------------------------------------------------
 // Pipeline-run resource metadata
@@ -377,6 +379,14 @@ export class PipelineModule extends ApplicationModule {
           previousOwner: departedNodeId,
           at,
         });
+        // Emit a placeholder reassigned event so downstream consumers can wire
+        // on this event now. Phase 5 will replace `to` with the real new owner.
+        await this.eventBus.publish('pipeline.run.reassigned', {
+          runId: run.id,
+          from: departedNodeId,
+          to: departedNodeId, // placeholder — Phase 5 sets the actual new owner
+          at,
+        });
         this.log('warn', `Run ${run.id} orphaned from node ${departedNodeId}`);
       }
     }
@@ -391,6 +401,7 @@ export class PipelineModule extends ApplicationModule {
     runsCompleted: number;
     runsFailed: number;
     runsActive: number;
+    runsAwaitingApproval: number;
     avgDurationMs: number;
     llmTokensIn: number;
     llmTokensOut: number;
@@ -405,6 +416,11 @@ export class PipelineModule extends ApplicationModule {
       this.metrics.runsStarted > 0
         ? this.metrics.runsFailed / this.metrics.runsStarted
         : 0;
+
+    let runsAwaitingApproval = 0;
+    for (const exec of this.activeExecutors.values()) {
+      runsAwaitingApproval += exec.getPendingApprovalCount();
+    }
 
     return {
       moduleId: this.config.moduleId,
@@ -424,6 +440,7 @@ export class PipelineModule extends ApplicationModule {
       runsCompleted: this.metrics.runsCompleted,
       runsFailed: this.metrics.runsFailed,
       runsActive: this.activeExecutors.size,
+      runsAwaitingApproval,
       avgDurationMs,
       llmTokensIn: this.metrics.llmTokensIn,
       llmTokensOut: this.metrics.llmTokensOut,
@@ -487,6 +504,71 @@ export class PipelineModule extends ApplicationModule {
   /** The EventBus this module publishes all pipeline events to. */
   getEventBus(): EventBus<PipelineEventMap> {
     return this.eventBus;
+  }
+
+  /**
+   * Synchronously returns the current snapshot of a run.
+   * Active runs win over completed if both maps somehow have the same runId.
+   * Returns null when the runId is unknown to this node.
+   */
+  getRun(runId: string): PipelineRun | null {
+    const activeRun = this.activeExecutors.get(runId)?.getCurrentRun() ?? null;
+    if (activeRun !== null) return activeRun;
+    return this.completedRuns.get(runId) ?? null;
+  }
+
+  /**
+   * Returns all WAL-persisted events for the given runId, optionally starting
+   * at `fromVersion`. If the EventBus has no WAL configured, returns `[]`
+   * and logs a warning — "no history" is a valid answer for in-memory buses.
+   */
+  async getHistory(runId: string, fromVersion = 0): Promise<BusEvent[]> {
+    const matching: BusEvent[] = [];
+    try {
+      await this.eventBus.replay(fromVersion, async (event) => {
+        if ((event.payload as Record<string, unknown> | null)?.['runId'] === runId) {
+          matching.push(event);
+        }
+      });
+    } catch (err) {
+      // WalNotConfiguredError or similar — treat as "no history available".
+      this.log('warn', `getHistory(${runId}): EventBus has no WAL; returning empty history. (${String(err)})`);
+      return [];
+    }
+    return matching;
+  }
+
+  /**
+   * Returns a resource descriptor for every run currently in-flight on this node.
+   */
+  listActiveRuns(): PipelineRunResource[] {
+    const localNodeId = this.context.clusterManager.localNodeId;
+    const result: PipelineRunResource[] = [];
+    for (const [runId, executor] of this.activeExecutors) {
+      const run = executor.getCurrentRun();
+      result.push({
+        resourceId: runId,
+        resourceType: 'pipeline-run',
+        nodeId: localNodeId,
+        timestamp: Date.now(),
+        capacity: { current: 1, maximum: 1, unit: 'run' },
+        performance: { latency: 0, throughput: 0, errorRate: 0 },
+        distribution: { shardCount: 1, replicationFactor: 1 },
+        applicationData: {
+          runId,
+          pipelineId: run.pipelineId,
+          pipelineVersion: run.pipelineVersion,
+          status: run.status,
+          startedAt: run.startedAt,
+          completedAt: run.completedAt,
+          durationMs: run.durationMs,
+          ownerNodeId: run.ownerNodeId,
+        },
+        state: ResourceState.ACTIVE,
+        health: ResourceHealth.HEALTHY,
+      });
+    }
+    return result;
   }
 
   /** Cancel a specific run by ID. No-op if the run is not active on this node. */

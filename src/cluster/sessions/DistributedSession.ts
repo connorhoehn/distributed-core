@@ -6,6 +6,7 @@ import { EvictionTimer } from '../../gateway/eviction/EvictionTimer';
 import { ResourceHandle } from '../../routing/types';
 import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
 import { LifecycleAware } from '../../common/LifecycleAware';
+import { SessionNotLocalError } from '../../common/errors';
 
 export interface DistributedSessionConfig {
   idleTimeoutMs?: number;
@@ -143,11 +144,11 @@ export class DistributedSession<S, U = unknown> extends EventEmitter implements 
 
   async apply(sessionId: string, update: U): Promise<S> {
     if (!this.router.isLocal(sessionId)) {
-      throw new Error(`session ${sessionId} is not local`);
+      throw new SessionNotLocalError(sessionId);
     }
     const current = this.sessions.get(sessionId);
     if (current === undefined) {
-      throw new Error(`session ${sessionId} is not local`);
+      throw new SessionNotLocalError(sessionId);
     }
     const start = Date.now();
     const newState = this.adapter.applyUpdate(current, update);
@@ -186,7 +187,7 @@ export class DistributedSession<S, U = unknown> extends EventEmitter implements 
    */
   hydrate(sessionId: string, state: S): void {
     if (!this.router.isLocal(sessionId)) {
-      throw new Error(`session ${sessionId} is not local`);
+      throw new SessionNotLocalError(sessionId);
     }
     this.sessions.set(sessionId, state);
   }

@@ -6,6 +6,7 @@ import { HashPlacement, LocalPlacement } from '../../../../src/routing/Placement
 import { DistributedSession } from '../../../../src/cluster/sessions/DistributedSession';
 import { SharedStateAdapter } from '../../../../src/gateway/state/types';
 import { MetricsRegistry } from '../../../../src/monitoring/metrics/MetricsRegistry';
+import { CoreError, SessionNotLocalError } from '../../../../src/common/errors';
 
 // ---------------------------------------------------------------------------
 // Minimal ClusterManager stub
@@ -149,10 +150,15 @@ describe('DistributedSession', () => {
     expect(session.isLocal('sess-apply')).toBe(false);
   });
 
-  // 4. apply() on non-local session throws
-  it('apply() on non-local session throws', async () => {
+  // 4. apply() on non-local session throws SessionNotLocalError
+  it('apply() on non-local session throws SessionNotLocalError', async () => {
     const { session } = await makeSession();
-    await expect(session.apply('unknown-sess', { inc: 1 })).rejects.toThrow('unknown-sess is not local');
+    const err = await session.apply('unknown-sess', { inc: 1 }).catch(e => e);
+    expect(err).toBeInstanceOf(CoreError);
+    expect(err).toBeInstanceOf(SessionNotLocalError);
+    expect(err.code).toBe('session-not-local');
+    expect(err.sessionId).toBe('unknown-sess');
+    expect(err.message).toContain('unknown-sess');
   });
 
   // 5. Idle timeout fires: emits 'session:evicted', session is no longer local
@@ -463,5 +469,23 @@ describe('DistributedSession', () => {
     expect(router.listenerCount('resource:orphaned')).toBe(0);
 
     await router.stop();
+  });
+
+  // hydrate() throws SessionNotLocalError when the session is not owned locally
+  it('hydrate() throws SessionNotLocalError when the session is not local', async () => {
+    const { session } = await makeSession();
+    const err = (() => {
+      try {
+        session.hydrate('ghost-sess', { count: 99 });
+        return null;
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(CoreError);
+    expect(err).toBeInstanceOf(SessionNotLocalError);
+    expect((err as SessionNotLocalError).code).toBe('session-not-local');
+    expect((err as SessionNotLocalError).sessionId).toBe('ghost-sess');
+    expect((err as Error).message).toContain('ghost-sess');
   });
 });

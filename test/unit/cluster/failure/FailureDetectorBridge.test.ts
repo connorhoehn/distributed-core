@@ -6,6 +6,9 @@ import { DistributedLock } from '../../../../src/cluster/locks/DistributedLock';
 import { EntityRegistryFactory } from '../../../../src/cluster/entity/EntityRegistryFactory';
 import { MembershipEntry } from '../../../../src/cluster/types';
 import { FailureDetector } from '../../../../src/monitoring/FailureDetector';
+import { MembershipTable } from '../../../../src/cluster/membership/MembershipTable';
+import { InMemoryAdapter } from '../../../../src/transport/adapters/InMemoryAdapter';
+import { LifecycleAware } from '../../../../src/common/LifecycleAware';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -445,5 +448,92 @@ describe('FailureDetectorBridge', () => {
 
     await session.stop();
     bridge.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FailureDetector — LifecycleAware contract
+// ---------------------------------------------------------------------------
+
+describe('FailureDetector — LifecycleAware', () => {
+  function makeDetector() {
+    const localNode = { id: 'fd-node', address: '127.0.0.1', port: 5000 };
+    const transport = new InMemoryAdapter(localNode);
+    const membership = new MembershipTable('fd-node');
+    return new FailureDetector('fd-node', localNode, transport, membership, {
+      heartbeatInterval: 60000,   // large — prevents real timer firings during tests
+      failureTimeout: 120000,
+      deadTimeout: 180000,
+      pingTimeout: 60000,
+      maxMissedHeartbeats: 3,
+      maxMissedPings: 2,
+      enableActiveProbing: false,
+      enableLogging: false,
+    });
+  }
+
+  it('isStarted() returns false before start()', () => {
+    const fd = makeDetector();
+    expect(fd.isStarted()).toBe(false);
+  });
+
+  it('isStarted() returns true after start()', async () => {
+    const fd = makeDetector();
+    await fd.start();
+    expect(fd.isStarted()).toBe(true);
+    await fd.stop();
+  });
+
+  it('isStarted() returns false after stop()', async () => {
+    const fd = makeDetector();
+    await fd.start();
+    await fd.stop();
+    expect(fd.isStarted()).toBe(false);
+  });
+
+  it('start() twice is a no-op — monitoring timer started only once', async () => {
+    const fd = makeDetector();
+    // Spy on setInterval before starting; each start() call creates 2 intervals
+    // (heartbeat + monitoring). A second start() must not create any more.
+    const origSetInterval = global.setInterval;
+    const calls: unknown[][] = [];
+    global.setInterval = ((...args: unknown[]) => {
+      calls.push(args);
+      return (origSetInterval as Function)(...args);
+    }) as unknown as typeof setInterval;
+    try {
+      await fd.start();
+      const countAfterFirst = calls.length;
+      expect(countAfterFirst).toBeGreaterThan(0);
+      await fd.start();
+      // Second start() is a no-op — no new intervals created.
+      expect(calls.length).toBe(countAfterFirst);
+    } finally {
+      global.setInterval = origSetInterval;
+      await fd.stop();
+    }
+  });
+
+  it('stop() twice is a no-op', async () => {
+    const fd = makeDetector();
+    await fd.start();
+    await fd.stop();
+    expect(fd.isStarted()).toBe(false);
+    await fd.stop();
+    expect(fd.isStarted()).toBe(false);
+  });
+
+  it('stop() before start() is a no-op — does not throw', async () => {
+    const fd = makeDetector();
+    await expect(fd.stop()).resolves.toBeUndefined();
+    expect(fd.isStarted()).toBe(false);
+  });
+
+  it('satisfies the LifecycleAware interface at the type level', () => {
+    const fd = makeDetector();
+    const lc: LifecycleAware = fd;
+    expect(typeof lc.start).toBe('function');
+    expect(typeof lc.stop).toBe('function');
+    expect(typeof lc.isStarted).toBe('function');
   });
 });

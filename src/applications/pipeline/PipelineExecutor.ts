@@ -335,6 +335,11 @@ export class PipelineExecutor {
     }));
   }
 
+  /** Returns the number of steps currently awaiting an approval decision. */
+  getPendingApprovalCount(): number {
+    return this.pendingApprovals.size;
+  }
+
   getCurrentRun(): PipelineRun {
     return this.pipelineRun;
   }

@@ -1,0 +1,46 @@
+# configmap.yaml — example runtime configuration injected as environment variables.
+#
+# Keep non-secret tuning parameters here. Secrets (signing keys, TLS certs) must
+# live in Kubernetes Secrets, not ConfigMaps, because ConfigMaps are not encrypted
+# at rest by default.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: distributed-core-config
+  namespace: distributed-core-demo
+  labels:
+    app: distributed-core
+data:
+  # Port the ForwardingServer / HTTP server listens on inside the container.
+  # Must match the containerPort in the StatefulSet and the Service targetPort.
+  PORT: "8080"
+
+  # Entity sync topic: all nodes must use the same topic for the
+  # EntityRegistrySyncAdapter to propagate ownership changes across the cluster.
+  ENTITY_SYNC_TOPIC: "entity-sync"
+
+  # PubSub topic prefix used by SharedStateManager for cross-node state fanout.
+  STATE_TOPIC_PREFIX: "counter-state"
+
+  # Collab events topic (EventBus). Each node uses its own sub-topic; the prefix
+  # keeps them namespaced.
+  EVENTS_TOPIC_PREFIX: "collab-events"
+
+  # Idle session eviction timeout in milliseconds. Counters/sessions with no
+  # activity for this long are evicted from the owning node. Set higher in prod
+  # to avoid thrashing during temporary client disconnections.
+  IDLE_TIMEOUT_MS: "60000"
+
+  # AutoReclaimPolicy jitter window (ms). When a node dies, surviving nodes each
+  # wait a random delay in [0, jitterMs] before attempting to reclaim its orphaned
+  # resources. Jitter prevents the thundering-herd race where all survivors try
+  # to claim at the same instant.
+  RECLAIM_JITTER_MS: "300"
+
+  # Connection TTL — how long a registered connection is considered alive without
+  # a heartbeat. Increase if your clients heartbeat less frequently.
+  CONNECTION_TTL_MS: "120000"
+
+  # Log level passed to the application's logger. Supported values (application-
+  # defined): debug | info | warn | error
+  LOG_LEVEL: "info"

@@ -10,6 +10,7 @@ import {
 import { EntityRegistryFactory } from '../../../src/cluster/entity/EntityRegistryFactory';
 import { MembershipEntry } from '../../../src/cluster/types';
 import { MetricsRegistry } from '../../../src/monitoring/metrics/MetricsRegistry';
+import { CoreError, InvalidTransferTargetError } from '../../../src/common/errors';
 
 // ---------------------------------------------------------------------------
 // Minimal ClusterManager stub — only what ResourceRouter touches
@@ -304,19 +305,29 @@ describe('ResourceRouter', () => {
       expect(spy).toHaveBeenCalledTimes(1);
     });
 
-    it('throws when transferring to a node not in alive membership', async () => {
+    it('throws InvalidTransferTargetError when transferring to a node not in alive membership', async () => {
       const { router, cluster } = await makeRouter('node-1', [
         { id: 'node-2', address: '10.0.0.2', port: 7001 },
       ]);
       await router.claim('room-1');
       cluster.simulateLeave('node-2');
-      await expect(router.transfer('room-1', 'node-2')).rejects.toThrow(/not in alive membership/);
+      const err = await router.transfer('room-1', 'node-2').catch(e => e);
+      expect(err).toBeInstanceOf(CoreError);
+      expect(err).toBeInstanceOf(InvalidTransferTargetError);
+      expect(err.code).toBe('invalid-transfer-target');
+      expect(err.targetNodeId).toBe('node-2');
+      expect(err.message).toContain('node-2');
+      expect(err.message).toContain('alive membership');
     });
 
-    it('throws when transferring to a completely unknown node', async () => {
+    it('throws InvalidTransferTargetError when transferring to a completely unknown node', async () => {
       const { router } = await makeRouter('node-1');
       await router.claim('room-1');
-      await expect(router.transfer('room-1', 'node-ghost')).rejects.toThrow(/not in alive membership/);
+      const err = await router.transfer('room-1', 'node-ghost').catch(e => e);
+      expect(err).toBeInstanceOf(CoreError);
+      expect(err).toBeInstanceOf(InvalidTransferTargetError);
+      expect(err.code).toBe('invalid-transfer-target');
+      expect(err.targetNodeId).toBe('node-ghost');
     });
   });
 

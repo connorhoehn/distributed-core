@@ -1,0 +1,12 @@
+# namespace.yaml — isolated scope for all distributed-core demo resources.
+#
+# A dedicated namespace keeps demo resources separate from system workloads,
+# makes RBAC easier to scope, and lets you tear down the entire demo with a
+# single `kubectl delete namespace distributed-core-demo`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: distributed-core-demo
+  labels:
+    # Label lets tooling (e.g. Istio, NetworkPolicy selectors) target this ns.
+    app.kubernetes.io/part-of: distributed-core

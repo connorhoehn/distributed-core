@@ -5,6 +5,7 @@ import { EvictionTimer } from '../gateway/eviction/EvictionTimer';
 import { defaultLogger } from '../common/logger';
 import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
 import { LifecycleAware } from '../common/LifecycleAware';
+import { RemoteOwnerError } from '../common/errors';
 
 export interface ConnectionHandle {
   connectionId: string;
@@ -113,9 +114,7 @@ export class ConnectionRegistry extends EventEmitter implements LifecycleAware {
       const existing = this.registry.getEntity(connectionId);
       if (existing !== null) {
         if (existing.ownerNodeId !== this.localNodeId) {
-          throw new Error(
-            `[ConnectionRegistry] Cannot reconnect '${connectionId}': owned by remote node '${existing.ownerNodeId}'.`,
-          );
+          throw new RemoteOwnerError(connectionId, existing.ownerNodeId);
         }
         // Merge metadata (new values win) and reset the TTL timer.
         const mergedMetadata = { ...((existing.metadata as Record<string, unknown>) ?? {}), ...metadata };

@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { EventBus, BusEvent } from '../../../src/messaging/EventBus';
 import { InMemorySnapshotVersionStore } from '../../../src/persistence/snapshot/InMemorySnapshotVersionStore';
 import { MetricsRegistry } from '../../../src/monitoring/metrics/MetricsRegistry';
+import { CoreError, WalNotConfiguredError } from '../../../src/common/errors';
 
 function makePubSub(localNodeId = 'node-1') {
   let handler: ((topic: string, payload: unknown, meta: any) => void) | null = null;
@@ -245,12 +246,17 @@ describe('EventBus', () => {
     await bus.stop();
   });
 
-  it('replay() throws when WAL not configured', async () => {
+  it('replay() throws WalNotConfiguredError when WAL not configured', async () => {
     const pubsub = makePubSub();
     const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', { topic: 'events:test' });
     await bus.start();
 
-    await expect(bus.replay(1, async () => {})).rejects.toThrow('WAL not configured');
+    const err = await bus.replay(1, async () => {}).catch(e => e);
+    expect(err).toBeInstanceOf(CoreError);
+    expect(err).toBeInstanceOf(WalNotConfiguredError);
+    expect(err.code).toBe('wal-not-configured');
+    expect(err.message).toContain('WAL not configured');
+    expect(err.message).toContain('replay events');
 
     await bus.stop();
   });
@@ -644,12 +650,17 @@ describe('compact()', () => {
     await bus.stop();
   });
 
-  it('compact throws if WAL not configured', async () => {
+  it('compact throws WalNotConfiguredError if WAL not configured', async () => {
     const pubsub = makePubSub();
     const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', { topic: 'events:test' });
     await bus.start();
 
-    await expect(bus.compact()).rejects.toThrow('WAL not configured');
+    const err = await bus.compact().catch(e => e);
+    expect(err).toBeInstanceOf(CoreError);
+    expect(err).toBeInstanceOf(WalNotConfiguredError);
+    expect(err.code).toBe('wal-not-configured');
+    expect(err.message).toContain('WAL not configured');
+    expect(err.message).toContain('compact');
 
     await bus.stop();
   });

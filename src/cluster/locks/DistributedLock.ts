@@ -1,5 +1,6 @@
 import { EntityRegistry } from '../entity/types';
 import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
+import { TimeoutError, NotOwnedError } from '../../common/errors';
 
 export interface LockHandle {
   lockId: string;
@@ -70,7 +71,7 @@ export class DistributedLock {
       }
       if (Date.now() + this.config.retryIntervalMs > deadline) {
         this.metrics?.counter('lock.acquire.count', { result: 'timeout' }).inc();
-        throw new Error(`Failed to acquire lock "${lockId}" within ${this.config.acquireTimeoutMs}ms`);
+        throw new TimeoutError(`acquire lock "${lockId}"`, this.config.acquireTimeoutMs);
       }
       await this._sleep(this.config.retryIntervalMs);
     }
@@ -90,7 +91,7 @@ export class DistributedLock {
   async extend(lockHandle: LockHandle, additionalMs?: number): Promise<LockHandle> {
     const { lockId } = lockHandle;
     if (!this.heldLocks.has(lockId) || this.registry.getEntityHost(lockId) === null) {
-      throw new Error(`Cannot extend lock "${lockId}": lock is not held`);
+      throw new NotOwnedError(lockId);
     }
     const extra = additionalMs ?? this.config.defaultTtlMs;
     this._clearTimer(lockId);

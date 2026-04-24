@@ -2,6 +2,7 @@ import { EntityRegistryFactory } from '../../../../src/cluster/entity/EntityRegi
 import { EntityRegistry } from '../../../../src/cluster/entity/types';
 import { DistributedLock } from '../../../../src/cluster/locks/DistributedLock';
 import { MetricsRegistry } from '../../../../src/monitoring/metrics/MetricsRegistry';
+import { CoreError, TimeoutError, NotOwnedError } from '../../../../src/common/errors';
 
 describe('DistributedLock', () => {
   let registry: EntityRegistry;
@@ -106,7 +107,7 @@ describe('DistributedLock', () => {
     expect(handle1.nodeId).toBe('node-1');
   });
 
-  it('acquire throws after acquireTimeoutMs if lock never becomes free', async () => {
+  it('acquire throws TimeoutError after acquireTimeoutMs if lock never becomes free', async () => {
     const blockingLock = new DistributedLock(registry, 'node-1', {
       defaultTtlMs: 10_000,
       acquireTimeoutMs: 500,
@@ -115,9 +116,25 @@ describe('DistributedLock', () => {
     await lock2.tryAcquire('lock-1', { ttlMs: 10_000 });
 
     const acquirePromise = blockingLock.acquire('lock-1', { ttlMs: 10_000 });
-    const rejectAssertion = expect(acquirePromise).rejects.toThrow(/Failed to acquire lock/);
+    const rejectPromise = acquirePromise.catch(e => e);
     await jest.advanceTimersByTimeAsync(600);
-    await rejectAssertion;
+    const err = await rejectPromise;
+    expect(err).toBeInstanceOf(CoreError);
+    expect(err).toBeInstanceOf(TimeoutError);
+    expect(err.code).toBe('timeout');
+    expect(err.message).toContain('lock-1');
+    expect(err.message).toContain('500');
+  });
+
+  it('extend throws NotOwnedError when the lock is not held', async () => {
+    // Create a fake handle pointing to a lock we never acquired.
+    const fakeHandle = { lockId: 'nonexistent', nodeId: 'node-1', acquiredAt: 0, expiresAt: 9999 };
+    const err = await lock.extend(fakeHandle).catch(e => e);
+    expect(err).toBeInstanceOf(CoreError);
+    expect(err).toBeInstanceOf(NotOwnedError);
+    expect(err.code).toBe('not-owned');
+    expect(err.lockId).toBe('nonexistent');
+    expect(err.message).toContain('nonexistent');
   });
 
   it('extend resets the TTL so the lock is still held past the original expiry', async () => {
@@ -205,7 +222,7 @@ describe('DistributedLock', () => {
       await blockLock.tryAcquire('lock-timeout', { ttlMs: 10_000 });
 
       const acquirePromise = metricsLock.acquire('lock-timeout');
-      const rejectAssertion = expect(acquirePromise).rejects.toThrow(/Failed to acquire/);
+      const rejectAssertion = expect(acquirePromise).rejects.toBeInstanceOf(TimeoutError);
       await jest.advanceTimersByTimeAsync(600);
       await rejectAssertion;
 
