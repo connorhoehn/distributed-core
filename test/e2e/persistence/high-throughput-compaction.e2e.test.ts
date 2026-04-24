@@ -1,10 +1,14 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { tmpdir } from 'os';
+import { randomUUID } from 'crypto';
 import { WALFileImpl } from '../../../src/persistence/wal/WALFile';
 import { WALCoordinatorImpl } from '../../../src/persistence/wal/WALCoordinator';
 import { CompactionCoordinator } from '../../../src/persistence/compaction/CompactionCoordinator';
 import { TimeBasedCompactionStrategy } from '../../../src/persistence/compaction/TimeBasedCompactionStrategy';
+import { SizeTieredCompactionStrategy } from '../../../src/persistence/compaction/SizeTieredCompactionStrategy';
+import { LeveledCompactionStrategy } from '../../../src/persistence/compaction/LeveledCompactionStrategy';
+import { VacuumBasedCompactionStrategy } from '../../../src/persistence/compaction/VacuumBasedCompactionStrategy';
 import { WALEntry, EntityUpdate } from '../../../src/persistence/wal/types';
 import { WALSegment } from '../../../src/persistence/compaction/types';
 
@@ -428,4 +432,199 @@ describe('High-Throughput Storage with Compaction E2E', () => {
     await compactionCoordinator.stop();
     console.log(`  🎯 Concurrent operations test completed!`);
   }, 25000);
+
+  // ---------------------------------------------------------------------------
+  // E2E tests for SizeTieredCompactionStrategy with real filesystem I/O
+  // ---------------------------------------------------------------------------
+  it('SizeTieredCompactionStrategy: compacts real WAL files and saves space', async () => {
+    const segDir = path.join(testDir, `size-tiered-${randomUUID()}`);
+    await fs.mkdir(segDir, { recursive: true });
+
+    // Write 50 entries (10 tombstones) into a single WAL file
+    const walPath = path.join(segDir, 'seg-st-001.wal');
+    const walFile = new WALFileImpl(walPath);
+    await walFile.open();
+    const entries: WALEntry[] = [];
+    for (let i = 0; i < 50; i++) {
+      const update: EntityUpdate = {
+        entityId: `st-entity-${i % 10}`, // 10 distinct entities → many duplicates
+        ownerNodeId: 'node-1',
+        version: Math.floor(i / 10) + 1,
+        timestamp: Date.now() + i,
+        operation: i >= 45 ? 'DELETE' : 'UPDATE', // last 5 are tombstones
+        metadata: { payload: 'x'.repeat(80) }
+      };
+      const entry = walCoordinator.createEntry(update);
+      entries.push(entry);
+      await walFile.append(entry);
+    }
+    await walFile.close();
+
+    const sizeBefore = await walFile.getSize();
+    const tombstoneCount = entries.filter(e => e.data.operation === 'DELETE').length;
+
+    const segment: WALSegment = {
+      segmentId: 'seg-st-001',
+      filePath: walPath,
+      startLSN: entries[0].logSequenceNumber,
+      endLSN: entries[entries.length - 1].logSequenceNumber,
+      createdAt: Date.now() - 5000,
+      sizeBytes: sizeBefore,
+      entryCount: entries.length,
+      tombstoneCount,
+      isImmutable: true,
+    };
+
+    const strategy = new SizeTieredCompactionStrategy({
+      sizeTiers: [sizeBefore * 2], // put our segment in tier 0
+      maxSegmentsPerTier: 1,       // 1 segment is enough to trigger
+    });
+
+    const plan = {
+      planId: `st-e2e-${Date.now()}`,
+      inputSegments: [segment],
+      outputSegments: [{ segmentId: `st-out-${Date.now()}`, estimatedSize: sizeBefore, lsnRange: { start: segment.startLSN, end: segment.endLSN } }],
+      estimatedSpaceSaved: 0,
+      estimatedDuration: 100,
+      priority: 'medium' as const,
+    };
+
+    const result = await strategy.executeCompaction(plan);
+
+    expect(result.success).toBe(true);
+    expect(result.actualSpaceSaved).toBeGreaterThan(0);
+    expect(result.metrics.entriesProcessed).toBe(50);
+    // Input file should have been deleted
+    await expect(fs.access(walPath)).rejects.toThrow();
+    // Output file exists
+    expect(result.segmentsCreated.length).toBe(1);
+    await expect(fs.access(result.segmentsCreated[0].filePath)).resolves.toBeUndefined();
+  }, 15000);
+
+  // ---------------------------------------------------------------------------
+  // E2E tests for LeveledCompactionStrategy with real filesystem I/O
+  // ---------------------------------------------------------------------------
+  it('LeveledCompactionStrategy: compacts real WAL files and saves space', async () => {
+    const segDir = path.join(testDir, `leveled-${randomUUID()}`);
+    await fs.mkdir(segDir, { recursive: true });
+
+    const walPath = path.join(segDir, 'seg-lv-001.wal');
+    const walFile = new WALFileImpl(walPath);
+    await walFile.open();
+    const entries: WALEntry[] = [];
+    for (let i = 0; i < 50; i++) {
+      const update: EntityUpdate = {
+        entityId: `lv-entity-${i % 8}`, // 8 distinct entities → duplicates
+        ownerNodeId: 'node-2',
+        version: Math.floor(i / 8) + 1,
+        timestamp: Date.now() + i,
+        operation: i >= 44 ? 'DELETE' : 'UPDATE', // last 6 are tombstones
+        metadata: { payload: 'y'.repeat(80) }
+      };
+      const entry = walCoordinator.createEntry(update);
+      entries.push(entry);
+      await walFile.append(entry);
+    }
+    await walFile.close();
+
+    const sizeBefore = await walFile.getSize();
+    const tombstoneCount = entries.filter(e => e.data.operation === 'DELETE').length;
+
+    const segment: WALSegment = {
+      segmentId: 'seg-lv-001',
+      filePath: walPath,
+      startLSN: entries[0].logSequenceNumber,
+      endLSN: entries[entries.length - 1].logSequenceNumber,
+      createdAt: Date.now() - 5000,
+      sizeBytes: sizeBefore,
+      entryCount: entries.length,
+      tombstoneCount,
+      isImmutable: true,
+    };
+
+    const strategy = new LeveledCompactionStrategy({ level0SegmentLimit: 1 });
+
+    const plan = {
+      planId: `lv-e2e-${Date.now()}`,
+      inputSegments: [segment],
+      outputSegments: [{ segmentId: `lv-out-${Date.now()}`, estimatedSize: sizeBefore, lsnRange: { start: segment.startLSN, end: segment.endLSN } }],
+      estimatedSpaceSaved: 0,
+      estimatedDuration: 100,
+      priority: 'high' as const,
+    };
+
+    const result = await strategy.executeCompaction(plan);
+
+    expect(result.success).toBe(true);
+    expect(result.actualSpaceSaved).toBeGreaterThan(0);
+    expect(result.metrics.entriesProcessed).toBe(50);
+    await expect(fs.access(walPath)).rejects.toThrow();
+    expect(result.segmentsCreated.length).toBe(1);
+    await expect(fs.access(result.segmentsCreated[0].filePath)).resolves.toBeUndefined();
+  }, 15000);
+
+  // ---------------------------------------------------------------------------
+  // E2E tests for VacuumBasedCompactionStrategy with real filesystem I/O
+  // ---------------------------------------------------------------------------
+  it('VacuumBasedCompactionStrategy: compacts real WAL files and saves space', async () => {
+    const segDir = path.join(testDir, `vacuum-${randomUUID()}`);
+    await fs.mkdir(segDir, { recursive: true });
+
+    const walPath = path.join(segDir, 'seg-vac-001.wal');
+    const walFile = new WALFileImpl(walPath);
+    await walFile.open();
+    const entries: WALEntry[] = [];
+    for (let i = 0; i < 50; i++) {
+      const update: EntityUpdate = {
+        entityId: `vac-entity-${i % 12}`, // 12 distinct entities → duplicates
+        ownerNodeId: 'node-3',
+        version: Math.floor(i / 12) + 1,
+        timestamp: Date.now() + i,
+        operation: i >= 42 ? 'DELETE' : 'UPDATE', // last 8 are tombstones
+        metadata: { payload: 'z'.repeat(80) }
+      };
+      const entry = walCoordinator.createEntry(update);
+      entries.push(entry);
+      await walFile.append(entry);
+    }
+    await walFile.close();
+
+    const sizeBefore = await walFile.getSize();
+    const tombstoneCount = entries.filter(e => e.data.operation === 'DELETE').length;
+
+    const segment: WALSegment = {
+      segmentId: 'seg-vac-001',
+      filePath: walPath,
+      startLSN: entries[0].logSequenceNumber,
+      endLSN: entries[entries.length - 1].logSequenceNumber,
+      createdAt: Date.now() - 5000,
+      sizeBytes: sizeBefore,
+      entryCount: entries.length,
+      tombstoneCount,
+      isImmutable: true,
+    };
+
+    const strategy = new VacuumBasedCompactionStrategy({
+      deadTupleThreshold: 0.01, // very sensitive — any tombstone triggers
+      vacuumIntervalMs: 0,       // no cooldown
+    });
+
+    const plan = {
+      planId: `vac-e2e-${Date.now()}`,
+      inputSegments: [segment],
+      outputSegments: [{ segmentId: `vac-out-${Date.now()}`, estimatedSize: sizeBefore, lsnRange: { start: segment.startLSN, end: segment.endLSN } }],
+      estimatedSpaceSaved: 0,
+      estimatedDuration: 100,
+      priority: 'high' as const,
+    };
+
+    const result = await strategy.executeCompaction(plan);
+
+    expect(result.success).toBe(true);
+    expect(result.actualSpaceSaved).toBeGreaterThan(0);
+    expect(result.metrics.entriesProcessed).toBe(50);
+    await expect(fs.access(walPath)).rejects.toThrow();
+    expect(result.segmentsCreated.length).toBe(1);
+    await expect(fs.access(result.segmentsCreated[0].filePath)).resolves.toBeUndefined();
+  }, 15000);
 });

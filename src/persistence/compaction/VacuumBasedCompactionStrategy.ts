@@ -1,4 +1,5 @@
 import { CompactionStrategy, WALMetrics, CheckpointMetrics, WALSegment, CompactionPlan, CompactionResult } from './types';
+import { executeRealCompaction, inputsExistOnDisk } from './RealCompactionExecutor';
 
 /**
  * Vacuum-based compaction strategy (PostgreSQL-style)
@@ -118,6 +119,14 @@ export class VacuumBasedCompactionStrategy extends CompactionStrategy {
     const startTime = Date.now();
 
     try {
+      // If all input segment files exist on disk, perform real compaction.
+      // Otherwise fall through to the computed-metrics simulation used by unit tests.
+      if (await inputsExistOnDisk(plan)) {
+        const realResult = await executeRealCompaction(plan, startTime);
+        this.updateMetrics(realResult);
+        return realResult;
+      }
+
       const totalEntries = plan.inputSegments.reduce((sum, s) => sum + s.entryCount, 0);
       const totalTombstones = plan.inputSegments.reduce((sum, s) => sum + s.tombstoneCount, 0);
       const totalSize = plan.inputSegments.reduce((sum, s) => sum + s.sizeBytes, 0);
