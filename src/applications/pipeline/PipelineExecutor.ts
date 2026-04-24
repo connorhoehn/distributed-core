@@ -40,6 +40,37 @@ import type {
 } from './types';
 
 // ---------------------------------------------------------------------------
+// Deprecation bridge — maps each canonical colon-form event to its legacy
+// dot-form equivalent. The executor dual-emits both names during the
+// transition window. Remove this map when dot-form events are dropped.
+// ---------------------------------------------------------------------------
+
+const CANONICAL_TO_DEPRECATED: Record<string, string> = {
+  'pipeline:run:started':          'pipeline.run.started',
+  'pipeline:run:completed':        'pipeline.run.completed',
+  'pipeline:run:failed':           'pipeline.run.failed',
+  'pipeline:run:cancelled':        'pipeline.run.cancelled',
+  'pipeline:run:orphaned':         'pipeline.run.orphaned',
+  'pipeline:run:reassigned':       'pipeline.run.reassigned',
+  'pipeline:step:started':         'pipeline.step.started',
+  'pipeline:step:completed':       'pipeline.step.completed',
+  'pipeline:step:failed':          'pipeline.step.failed',
+  'pipeline:step:skipped':         'pipeline.step.skipped',
+  'pipeline:step:cancelled':       'pipeline.step.cancelled',
+  'pipeline:llm:prompt':           'pipeline.llm.prompt',
+  'pipeline:llm:token':            'pipeline.llm.token',
+  'pipeline:llm:response':         'pipeline.llm.response',
+  'pipeline:approval:requested':   'pipeline.approval.requested',
+  'pipeline:approval:recorded':    'pipeline.approval.recorded',
+  'pipeline:run:paused':           'pipeline.run.paused',
+  'pipeline:run:resumed':          'pipeline.run.resumed',
+  'pipeline:run:resume-from-step': 'pipeline.run.resumeFromStep',
+  'pipeline:run:retry':            'pipeline.run.retry',
+  'pipeline:join:waiting':         'pipeline.join.waiting',
+  'pipeline:join:fired':           'pipeline.join.fired',
+};
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -165,7 +196,7 @@ export class PipelineExecutor {
       this.pipelineRun.error = { nodeId: '(none)', message: 'No trigger node in definition' };
       this.pipelineRun.completedAt = at;
       this.pipelineRun.durationMs = 0;
-      await this.emit('pipeline.run.failed', {
+      await this.emit('pipeline:run:failed', {
         runId: this.runId,
         error: this.pipelineRun.error,
         at,
@@ -173,7 +204,7 @@ export class PipelineExecutor {
       return this.pipelineRun;
     }
 
-    await this.emit('pipeline.run.started', {
+    await this.emit('pipeline:run:started', {
       runId: this.runId,
       pipelineId: this.definition.id,
       triggeredBy: this.pipelineRun.triggeredBy,
@@ -199,7 +230,7 @@ export class PipelineExecutor {
         this.pipelineRun.completedAt = at;
         this.pipelineRun.durationMs =
           Date.parse(at) - Date.parse(this.pipelineRun.startedAt);
-        await this.emit('pipeline.run.completed', {
+        await this.emit('pipeline:run:completed', {
           runId: this.runId,
           durationMs: this.pipelineRun.durationMs,
           at,
@@ -215,7 +246,7 @@ export class PipelineExecutor {
         this.pipelineRun.completedAt = at;
         this.pipelineRun.durationMs =
           Date.parse(at) - Date.parse(this.pipelineRun.startedAt);
-        await this.emit('pipeline.run.failed', {
+        await this.emit('pipeline:run:failed', {
           runId: this.runId,
           error: this.pipelineRun.error,
           at,
@@ -257,7 +288,7 @@ export class PipelineExecutor {
         if (step.startedAt) step.durationMs = Date.parse(at) - Date.parse(step.startedAt);
       }
       // Emit synchronously — we can't await inside cancel() but we fire-and-forget here.
-      this.emit('pipeline.step.cancelled', { runId: this.runId, stepId, at }).catch(() => {/* no-op */});
+      this.emit('pipeline:step:cancelled', { runId: this.runId, stepId, at }).catch(() => {/* no-op */});
     }
 
     // Every node we never reached is reported as skipped per §17.4.
@@ -270,7 +301,7 @@ export class PipelineExecutor {
           completedAt: at,
           durationMs: 0,
         };
-        this.emit('pipeline.step.skipped', {
+        this.emit('pipeline:step:skipped', {
           runId: this.runId,
           stepId: node.id,
           reason: 'run_cancelled',
@@ -283,7 +314,7 @@ export class PipelineExecutor {
     this.pipelineRun.completedAt = at;
     this.pipelineRun.durationMs =
       Date.parse(at) - Date.parse(this.pipelineRun.startedAt);
-    this.emit('pipeline.run.cancelled', { runId: this.runId, at }).catch(() => {/* no-op */});
+    this.emit('pipeline:run:cancelled', { runId: this.runId, at }).catch(() => {/* no-op */});
     this.runPromiseResolve?.(this.pipelineRun);
   }
 
@@ -304,7 +335,7 @@ export class PipelineExecutor {
     const step = this.pipelineRun.steps[stepId];
     if (step) step.approvals = [...(step.approvals ?? []), record];
 
-    this.emit('pipeline.approval.recorded', {
+    this.emit('pipeline:approval:recorded', {
       runId,
       stepId,
       userId,
@@ -509,7 +540,7 @@ export class PipelineExecutor {
     this.pipelineRun.steps[stepId] = step;
     this.currentStepIds.add(stepId);
     this.pipelineRun.currentStepIds = Array.from(this.currentStepIds);
-    await this.emit('pipeline.step.started', {
+    await this.emit('pipeline:step:started', {
       runId: this.runId,
       stepId,
       nodeType: node.type satisfies NodeType,
@@ -539,7 +570,7 @@ export class PipelineExecutor {
       step.status = 'completed';
       step.output = outcome.output;
       this.accumulateContext(node, context, outcome.output);
-      await this.emit('pipeline.step.completed', {
+      await this.emit('pipeline:step:completed', {
         runId: this.runId,
         stepId,
         durationMs: step.durationMs,
@@ -549,7 +580,7 @@ export class PipelineExecutor {
     } else {
       step.status = 'failed';
       step.error = outcome.error;
-      await this.emit('pipeline.step.failed', {
+      await this.emit('pipeline:step:failed', {
         runId: this.runId,
         stepId,
         error: outcome.error ?? 'unknown error',
@@ -610,7 +641,7 @@ export class PipelineExecutor {
 
     const prompt = data.userPromptTemplate;
 
-    await this.emit('pipeline.llm.prompt', {
+    await this.emit('pipeline:llm:prompt', {
       runId: this.runId,
       stepId,
       model: data.model,
@@ -636,7 +667,7 @@ export class PipelineExecutor {
         if (streamCancelled || this.cancelled) break;
 
         if (!chunk.done) {
-          await this.emit('pipeline.llm.token', {
+          await this.emit('pipeline:llm:token', {
             runId: this.runId,
             stepId,
             token: chunk.token,
@@ -659,7 +690,7 @@ export class PipelineExecutor {
     this.cancelHooks.delete(cancelStream);
     if (this.cancelled) return { status: 'cancelled' };
 
-    await this.emit('pipeline.llm.response', {
+    await this.emit('pipeline:llm:response', {
       runId: this.runId,
       stepId,
       response: fullResponse,
@@ -728,7 +759,7 @@ export class PipelineExecutor {
   private async execApproval(stepId: string, data: ApprovalNodeData): Promise<StepOutcome> {
     await this.sleep(sampleNormal(10, 5));
     const at = nowISO();
-    await this.emit('pipeline.approval.requested', {
+    await this.emit('pipeline:approval:requested', {
       runId: this.runId,
       stepId,
       approvers: data.approvers,
@@ -763,7 +794,7 @@ export class PipelineExecutor {
           if (persistedStep) {
             persistedStep.approvals = [...(persistedStep.approvals ?? []), auto];
           }
-          this.emit('pipeline.approval.recorded', {
+          this.emit('pipeline:approval:recorded', {
             runId: this.runId,
             stepId,
             userId: auto.userId,
@@ -828,7 +859,7 @@ export class PipelineExecutor {
       };
       this.currentStepIds.add(stepId);
       this.pipelineRun.currentStepIds = Array.from(this.currentStepIds);
-      await this.emit('pipeline.step.started', {
+      await this.emit('pipeline:step:started', {
         runId: this.runId,
         stepId,
         nodeType: 'join',
@@ -847,7 +878,7 @@ export class PipelineExecutor {
 
     const connectedCount = this.incomingByTarget.get(joinNode.id)?.length ?? 0;
     const required = this.requiredInputsFor(joinNode, data);
-    await this.emit('pipeline.join.waiting', {
+    await this.emit('pipeline:join:waiting', {
       runId: this.runId,
       stepId,
       received: state.arrivals.length,
@@ -947,7 +978,7 @@ export class PipelineExecutor {
       if (step.startedAt) step.durationMs = Date.parse(at) - Date.parse(step.startedAt);
     }
 
-    await this.emit('pipeline.join.fired', { runId: this.runId, stepId, inputs, at });
+    await this.emit('pipeline:join:fired', { runId: this.runId, stepId, inputs, at });
     this.currentStepIds.delete(stepId);
     this.pipelineRun.currentStepIds = Array.from(this.currentStepIds);
     // Clear state so late arrivals are dropped.
@@ -959,7 +990,7 @@ export class PipelineExecutor {
         step.status = 'failed';
         step.error = failReason;
       }
-      await this.emit('pipeline.step.failed', {
+      await this.emit('pipeline:step:failed', {
         runId: this.runId,
         stepId,
         error: failReason,
@@ -985,7 +1016,7 @@ export class PipelineExecutor {
       step.output = merged;
     }
     Object.assign(lastContext, merged);
-    await this.emit('pipeline.step.completed', {
+    await this.emit('pipeline:step:completed', {
       runId: this.runId,
       stepId,
       durationMs: step?.durationMs ?? 0,
@@ -1064,8 +1095,26 @@ export class PipelineExecutor {
     return { ...context };
   }
 
+  /**
+   * Dual-emit helper: publishes the canonical colon-form event and schedules
+   * the deprecated dot-form event as a best-effort follow-up.
+   *
+   * The canonical publish is fully awaited. The deprecated alias publish is
+   * fire-and-forget — it does not block the executor's critical path. This
+   * avoids open-handle accumulation in tests and keeps emit latency predictable.
+   *
+   * Limitation: only the executor's own publish sites dual-emit. External code
+   * that calls `eventBus.publish('pipeline.run.started', …)` directly will NOT
+   * automatically receive the colon-form event — migration of external callers
+   * must be done explicitly.
+   */
   private async emit<K extends keyof PipelineEventMap>(type: K, payload: PipelineEventMap[K]): Promise<void> {
     await this.eventBus.publish(type, payload);
+    // Best-effort deprecated alias publish — fire-and-forget, does not block caller.
+    const deprecated = CANONICAL_TO_DEPRECATED[type as string];
+    if (deprecated) {
+      this.eventBus.publish(deprecated as keyof PipelineEventMap, payload as PipelineEventMap[keyof PipelineEventMap]).catch(() => {/* deprecated alias; no-op on error */});
+    }
   }
 
   private sleep(durationMs: number): Promise<void> {

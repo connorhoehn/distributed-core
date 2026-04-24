@@ -124,16 +124,28 @@
 - `ConnectionRegistry.unregister()` logs via `defaultLogger.warn` instead
   of silently swallowing registry errors.
 
+### Deprecated
+
+- Pipeline event names using dot separators (`pipeline.run.started`, etc.)
+  are deprecated in favor of colon-separated forms (`pipeline:run:started`,
+  etc.). 22 names affected (all events in `PipelineEventMap`). Dual-emit
+  active: the executor publishes both the canonical colon form and the legacy
+  dot form on every event. Old dot-form names will be removed in a future
+  major release. See `docs/EVENT-NAME-AUDIT.md` and
+  `test/unit/applications/pipeline/EventRenameDeprecation.test.ts`.
+
 ### Test coverage
 
-110 unit suites / 1905 tests; 39 integration suites / 274 tests; 6 e2e
+111 unit suites / 1921 tests; 39 integration suites / 274 tests; 6 e2e
 persistence suites / ~40 tests; 12 e2e cluster + transport suites.
+(+16 tests from EventRenameDeprecation suite.)
 
 ### Deferred (work explicitly out of scope this cycle)
 
 - Method renames, constructor parameter standardization, event-name
-  normalization (member-* / pipeline.* / bare started/stopped/error).
-  Catalog and rename targets in `docs/EVENT-NAME-AUDIT.md`.
+  normalization (member-* / bare started/stopped/error).
+  Catalog and rename targets in `docs/EVENT-NAME-AUDIT.md`. Pipeline
+  events already renamed; member-* events are a separate task.
 - CoreError migration extended to legacy modules (only new primitives
   swept; pre-session code untouched).
 - Full partition-tolerance for `QuorumDistributedLock` (explicit non-goal —

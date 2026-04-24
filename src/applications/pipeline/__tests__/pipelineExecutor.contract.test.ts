@@ -291,8 +291,15 @@ async function collectEvents(
   const bus = makeEventBus();
   await bus.start();
 
-  // Collect all events from the bus.
+  // Collect only canonical (colon-form) events from the bus.
+  // The executor dual-emits both 'pipeline:run:started' (canonical) and
+  // 'pipeline.run.started' (deprecated). Contract tests only validate the
+  // canonical form; the deprecation bridge is tested separately in
+  // test/unit/applications/pipeline/EventRenameDeprecation.test.ts.
   bus.subscribeAll(async (event) => {
+    if (typeof event.type === 'string' && (event.type as string).includes('.')) {
+      return; // skip deprecated dot-form events
+    }
     events.push({ type: event.type, payload: event.payload } as EventRecord);
   });
 
@@ -342,16 +349,16 @@ function eventsOfType<K extends keyof PipelineEventMap>(
 }
 
 const TERMINAL_STEP_EVENTS: ReadonlyArray<keyof PipelineEventMap> = [
-  'pipeline.step.completed',
-  'pipeline.step.failed',
-  'pipeline.step.skipped',
-  'pipeline.step.cancelled',
+  'pipeline:step:completed',
+  'pipeline:step:failed',
+  'pipeline:step:skipped',
+  'pipeline:step:cancelled',
 ] as const;
 
 const TERMINAL_RUN_EVENTS: ReadonlyArray<keyof PipelineEventMap> = [
-  'pipeline.run.completed',
-  'pipeline.run.failed',
-  'pipeline.run.cancelled',
+  'pipeline:run:completed',
+  'pipeline:run:failed',
+  'pipeline:run:cancelled',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -360,7 +367,7 @@ const TERMINAL_RUN_EVENTS: ReadonlyArray<keyof PipelineEventMap> = [
 
 describe('PipelineExecutor contract', () => {
   describe('Ordering invariants (§17.9)', () => {
-    test('pipeline.run.started precedes every pipeline.step.started', async () => {
+    test('pipeline:run:started precedes every pipeline:step:started', async () => {
       // trigger → action → action : multiple steps, all must come after run.started
       const t = triggerNode();
       const a1 = actionNode();
@@ -371,12 +378,12 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      const runStartedIdx = indexOf(events, 'pipeline.run.started');
+      const runStartedIdx = indexOf(events, 'pipeline:run:started');
       expect(runStartedIdx).toBeGreaterThanOrEqual(0);
 
       const stepStarts = events
         .map((e, i) => ({ e, i }))
-        .filter(({ e }) => e.type === 'pipeline.step.started');
+        .filter(({ e }) => e.type === 'pipeline:step:started');
       expect(stepStarts.length).toBeGreaterThan(0);
       for (const { i } of stepStarts) {
         expect(i).toBeGreaterThan(runStartedIdx);
@@ -404,7 +411,7 @@ describe('PipelineExecutor contract', () => {
 
       // Every started step should have a matching terminal, and exactly one.
       const startedIds = new Set(
-        eventsOfType(events, 'pipeline.step.started').map((e) => e.payload.stepId),
+        eventsOfType(events, 'pipeline:step:started').map((e) => e.payload.stepId),
       );
       expect(startedIds.size).toBeGreaterThan(0);
       for (const id of startedIds) {
@@ -412,7 +419,7 @@ describe('PipelineExecutor contract', () => {
       }
     });
 
-    test('pipeline.llm.prompt precedes all tokens which precede pipeline.llm.response for the same stepId', async () => {
+    test('pipeline:llm:prompt precedes all tokens which precede pipeline:llm:response for the same stepId', async () => {
       const t = triggerNode();
       const l = llmNode();
       const def = buildPipeline({
@@ -421,8 +428,8 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      const promptIdx = indexOf(events, 'pipeline.llm.prompt', l.id);
-      const responseIdx = indexOf(events, 'pipeline.llm.response', l.id);
+      const promptIdx = indexOf(events, 'pipeline:llm:prompt', l.id);
+      const responseIdx = indexOf(events, 'pipeline:llm:response', l.id);
 
       expect(promptIdx).toBeGreaterThanOrEqual(0);
       expect(responseIdx).toBeGreaterThan(promptIdx);
@@ -430,7 +437,7 @@ describe('PipelineExecutor contract', () => {
       // Every token for this step must sit between prompt and response.
       const tokenIdxs = events
         .map((e, i) => ({ e, i }))
-        .filter(({ e }) => e.type === 'pipeline.llm.token' && (e.payload as { stepId: string }).stepId === l.id)
+        .filter(({ e }) => e.type === 'pipeline:llm:token' && (e.payload as { stepId: string }).stepId === l.id)
         .map(({ i }) => i);
 
       expect(tokenIdxs.length).toBeGreaterThan(0);
@@ -440,7 +447,7 @@ describe('PipelineExecutor contract', () => {
       }
     });
 
-    test('pipeline.approval.requested precedes pipeline.approval.recorded for the same stepId', async () => {
+    test('pipeline:approval:requested precedes pipeline:approval:recorded for the same stepId', async () => {
       const t = triggerNode();
       const ap = approvalNode();
       const done = actionNode();
@@ -458,13 +465,13 @@ describe('PipelineExecutor contract', () => {
         },
       });
 
-      const requestedIdx = indexOf(events, 'pipeline.approval.requested', ap.id);
-      const recordedIdx = indexOf(events, 'pipeline.approval.recorded', ap.id);
+      const requestedIdx = indexOf(events, 'pipeline:approval:requested', ap.id);
+      const recordedIdx = indexOf(events, 'pipeline:approval:recorded', ap.id);
       expect(requestedIdx).toBeGreaterThanOrEqual(0);
       expect(recordedIdx).toBeGreaterThan(requestedIdx);
     });
 
-    test('pipeline.run.completed / failed / cancelled are terminal — no events after', async () => {
+    test('pipeline:run:completed / failed / cancelled are terminal — no events after', async () => {
       const t = triggerNode();
       const a = actionNode();
       const def = buildPipeline({
@@ -492,16 +499,16 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      expect(indexOf(events, 'pipeline.run.started')).toBeGreaterThanOrEqual(0);
-      expect(indexOf(events, 'pipeline.run.completed')).toBeGreaterThan(
-        indexOf(events, 'pipeline.run.started'),
+      expect(indexOf(events, 'pipeline:run:started')).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:run:completed')).toBeGreaterThan(
+        indexOf(events, 'pipeline:run:started'),
       );
       // Both nodes completed.
-      expect(indexOf(events, 'pipeline.step.completed', t.id)).toBeGreaterThanOrEqual(0);
-      expect(indexOf(events, 'pipeline.step.completed', a.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:completed', t.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:completed', a.id)).toBeGreaterThanOrEqual(0);
     });
 
-    test('marks failed with pipeline.run.failed when a node fails with no error handler', async () => {
+    test('marks failed with pipeline:run:failed when a node fails with no error handler', async () => {
       const t = triggerNode();
       const a = actionNode(undefined, { onError: 'fail-run' });
       const def = buildPipeline({
@@ -511,15 +518,15 @@ describe('PipelineExecutor contract', () => {
 
       const { events } = await collectEvents(def, { failureRateOther: 1 });
 
-      const failedIdx = indexOf(events, 'pipeline.run.failed');
+      const failedIdx = indexOf(events, 'pipeline:run:failed');
       expect(failedIdx).toBeGreaterThanOrEqual(0);
       // There should be a step.failed for the action.
-      expect(indexOf(events, 'pipeline.step.failed', a.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:failed', a.id)).toBeGreaterThanOrEqual(0);
       // And run.failed is the final event.
       expect(failedIdx).toBe(events.length - 1);
     });
 
-    test('cancel emits pipeline.run.cancelled + step.cancelled for in-flight + step.skipped for pending', async () => {
+    test('cancel emits pipeline:run:cancelled + step.cancelled for in-flight + step.skipped for pending', async () => {
       // LLM step streams slowly; cancel mid-run.
       const t = triggerNode();
       const l = llmNode();
@@ -551,19 +558,19 @@ describe('PipelineExecutor contract', () => {
         },
       });
 
-      expect(indexOf(events, 'pipeline.run.cancelled')).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:run:cancelled')).toBeGreaterThanOrEqual(0);
 
       // The in-flight step (LLM) should have a step.cancelled.
-      expect(indexOf(events, 'pipeline.step.cancelled', l.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:cancelled', l.id)).toBeGreaterThanOrEqual(0);
       // The pending tail step should have a step.skipped with reason=run_cancelled.
-      const tailSkipped = eventsOfType(events, 'pipeline.step.skipped').find(
+      const tailSkipped = eventsOfType(events, 'pipeline:step:skipped').find(
         (e) => e.payload.stepId === tail.id,
       );
       expect(tailSkipped).toBeTruthy();
       expect(tailSkipped?.payload.reason).toBe('run_cancelled');
 
       // run.cancelled is terminal.
-      const cancelledIdx = indexOf(events, 'pipeline.run.cancelled');
+      const cancelledIdx = indexOf(events, 'pipeline:run:cancelled');
       expect(cancelledIdx).toBe(events.length - 1);
     });
   });
@@ -584,7 +591,7 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      const starts = eventsOfType(events, 'pipeline.step.started');
+      const starts = eventsOfType(events, 'pipeline:step:started');
       const branchIds = starts.map((e) => e.payload.stepId);
       expect(branchIds).toContain(a1.id);
       expect(branchIds).toContain(a2.id);
@@ -608,15 +615,15 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      const fired = eventsOfType(events, 'pipeline.join.fired').find(
+      const fired = eventsOfType(events, 'pipeline:join:fired').find(
         (e) => e.payload.stepId === j.id,
       );
       expect(fired).toBeTruthy();
       // Join must have been preceded by BOTH branch completions.
-      const a1Completed = indexOf(events, 'pipeline.step.completed', a1.id);
-      const a2Completed = indexOf(events, 'pipeline.step.completed', a2.id);
+      const a1Completed = indexOf(events, 'pipeline:step:completed', a1.id);
+      const a2Completed = indexOf(events, 'pipeline:step:completed', a2.id);
       const firedIdx = events.findIndex(
-        (e) => e.type === 'pipeline.join.fired' && (e.payload as { stepId: string }).stepId === j.id,
+        (e) => e.type === 'pipeline:join:fired' && (e.payload as { stepId: string }).stepId === j.id,
       );
       expect(a1Completed).toBeGreaterThanOrEqual(0);
       expect(a2Completed).toBeGreaterThanOrEqual(0);
@@ -642,10 +649,10 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      const joinWaiting = eventsOfType(events, 'pipeline.join.waiting').filter(
+      const joinWaiting = eventsOfType(events, 'pipeline:join:waiting').filter(
         (e) => e.payload.stepId === j.id,
       );
-      const fired = eventsOfType(events, 'pipeline.join.fired').find(
+      const fired = eventsOfType(events, 'pipeline:join:fired').find(
         (e) => e.payload.stepId === j.id,
       );
       expect(fired).toBeTruthy();
@@ -676,14 +683,14 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      const joinWaiting = eventsOfType(events, 'pipeline.join.waiting').filter(
+      const joinWaiting = eventsOfType(events, 'pipeline:join:waiting').filter(
         (e) => e.payload.stepId === j.id,
       );
       expect(joinWaiting.length).toBeGreaterThanOrEqual(1);
       // Every waiting event should report required=2.
       for (const w of joinWaiting) expect(w.payload.required).toBe(2);
 
-      const fired = eventsOfType(events, 'pipeline.join.fired').find(
+      const fired = eventsOfType(events, 'pipeline:join:fired').find(
         (e) => e.payload.stepId === j.id,
       );
       expect(fired).toBeTruthy();
@@ -709,8 +716,8 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events, executor } = await collectEvents(def);
-      expect(indexOf(events, 'pipeline.join.fired', j.id)).toBeGreaterThanOrEqual(0);
-      expect(indexOf(events, 'pipeline.step.completed', done.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:join:fired', j.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:completed', done.id)).toBeGreaterThanOrEqual(0);
       expect(executor).toBeTruthy();
     });
   });
@@ -735,10 +742,10 @@ describe('PipelineExecutor contract', () => {
       });
 
       // Only the `yes` branch should emit step.started/step.completed.
-      expect(indexOf(events, 'pipeline.step.started', yes.id)).toBeGreaterThanOrEqual(0);
-      expect(indexOf(events, 'pipeline.step.completed', yes.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:started', yes.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:completed', yes.id)).toBeGreaterThanOrEqual(0);
       // The not-taken branch should not emit step.started.
-      expect(indexOf(events, 'pipeline.step.started', no.id)).toBe(-1);
+      expect(indexOf(events, 'pipeline:step:started', no.id)).toBe(-1);
     });
   });
 
@@ -752,11 +759,11 @@ describe('PipelineExecutor contract', () => {
       });
 
       const { events } = await collectEvents(def);
-      const promptIdx = indexOf(events, 'pipeline.llm.prompt', l.id);
-      const responseIdx = indexOf(events, 'pipeline.llm.response', l.id);
+      const promptIdx = indexOf(events, 'pipeline:llm:prompt', l.id);
+      const responseIdx = indexOf(events, 'pipeline:llm:response', l.id);
       expect(promptIdx).toBeGreaterThanOrEqual(0);
       expect(responseIdx).toBeGreaterThan(promptIdx);
-      const tokenCount = eventsOfType(events, 'pipeline.llm.token').filter(
+      const tokenCount = eventsOfType(events, 'pipeline:llm:token').filter(
         (e) => e.payload.stepId === l.id,
       ).length;
       expect(tokenCount).toBeGreaterThan(0);
@@ -775,10 +782,10 @@ describe('PipelineExecutor contract', () => {
         speedMultiplier: 1,
       });
 
-      const tokens = eventsOfType(events, 'pipeline.llm.token')
+      const tokens = eventsOfType(events, 'pipeline:llm:token')
         .filter((e) => e.payload.stepId === l.id)
         .map((e) => e.payload.token);
-      const response = eventsOfType(events, 'pipeline.llm.response').find(
+      const response = eventsOfType(events, 'pipeline:llm:response').find(
         (e) => e.payload.stepId === l.id,
       )?.payload.response;
 
@@ -815,10 +822,10 @@ describe('PipelineExecutor contract', () => {
         },
       });
 
-      expect(indexOf(events, 'pipeline.approval.requested', ap.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:approval:requested', ap.id)).toBeGreaterThanOrEqual(0);
       expect(approvedAt).toBeGreaterThan(0);
       expect(beforeApproveEvents).toBeGreaterThan(0);
-      expect(indexOf(events, 'pipeline.run.completed')).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:run:completed')).toBeGreaterThanOrEqual(0);
     });
 
     test('resolveApproval(approve) routes to the approved handle', async () => {
@@ -843,8 +850,8 @@ describe('PipelineExecutor contract', () => {
         },
       });
 
-      expect(indexOf(events, 'pipeline.step.started', yes.id)).toBeGreaterThanOrEqual(0);
-      expect(indexOf(events, 'pipeline.step.started', no.id)).toBe(-1);
+      expect(indexOf(events, 'pipeline:step:started', yes.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:started', no.id)).toBe(-1);
     });
 
     test('resolveApproval(reject) routes to the rejected handle', async () => {
@@ -869,8 +876,8 @@ describe('PipelineExecutor contract', () => {
         },
       });
 
-      expect(indexOf(events, 'pipeline.step.started', no.id)).toBeGreaterThanOrEqual(0);
-      expect(indexOf(events, 'pipeline.step.started', yes.id)).toBe(-1);
+      expect(indexOf(events, 'pipeline:step:started', no.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:started', yes.id)).toBe(-1);
     });
 
     test('Approval timeout with timeoutAction=reject auto-rejects', async () => {
@@ -890,20 +897,20 @@ describe('PipelineExecutor contract', () => {
       const { events } = await collectEvents(def);
 
       // The system:timeout userId appears in the recorded event.
-      const recorded = eventsOfType(events, 'pipeline.approval.recorded').find(
+      const recorded = eventsOfType(events, 'pipeline:approval:recorded').find(
         (e) => e.payload.stepId === ap.id,
       );
       expect(recorded).toBeTruthy();
       expect(recorded?.payload.userId).toBe('system:timeout');
       expect(recorded?.payload.decision).toBe('reject');
       // Rejection routes to the `no` branch.
-      expect(indexOf(events, 'pipeline.step.started', no.id)).toBeGreaterThanOrEqual(0);
+      expect(indexOf(events, 'pipeline:step:started', no.id)).toBeGreaterThanOrEqual(0);
     });
   });
 
   describe('Retry from step (manual)', () => {
     // Per PIPELINES_PLAN.md §17.6, manual "retry-from-here" emits
-    // `pipeline.run.resumeFromStep`. The executor does not yet expose a
+    // `pipeline:run:resume-from-step`. The executor does not yet expose a
     // `resumeFromStep` method — Phase 1 UI will call it once wired up.
     test.skip('resumeFromStep re-runs the given node and continues forward', async () => {
       // Held until PipelineExecutor grows the resumeFromStep API.

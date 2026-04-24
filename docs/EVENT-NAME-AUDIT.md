@@ -71,24 +71,38 @@ Three other patterns appear and are **non-conforming**:
 
 ### PipelineExecutor (`src/applications/pipeline/PipelineExecutor.ts`)
 
-| Event name | Payload | Conformance | Proposed rename |
-|---|---|---|---|
-| `pipeline.run.started` | `{ runId, pipelineId, at }` | ✗ | `pipeline:run-started` |
-| `pipeline.run.completed` | `{ runId, pipelineId, output, at }` | ✗ | `pipeline:run-completed` |
-| `pipeline.run.failed` | `{ runId, pipelineId, error, at }` | ✗ | `pipeline:run-failed` |
-| `pipeline.run.cancelled` | `{ runId, at }` | ✗ | `pipeline:run-cancelled` |
-| `pipeline.step.started` | `{ runId, stepId, at }` | ✗ | `pipeline:step-started` |
-| `pipeline.step.completed` | `{ runId, stepId, output, at }` | ✗ | `pipeline:step-completed` |
-| `pipeline.step.failed` | `{ runId, stepId, error, at }` | ✗ | `pipeline:step-failed` |
-| `pipeline.step.skipped` | `{ runId, stepId, at }` | ✗ | `pipeline:step-skipped` |
-| `pipeline.step.cancelled` | `{ runId, stepId, at }` | ✗ | `pipeline:step-cancelled` |
-| `pipeline.approval.requested` | `{ runId, stepId, prompt, at }` | ✗ | `pipeline:approval-requested` |
-| `pipeline.approval.recorded` | `{ runId, stepId, approved, at }` | ✗ | `pipeline:approval-recorded` |
-| `pipeline.join.waiting` | `{ runId, stepId, at }` | ✗ | `pipeline:join-waiting` |
-| `pipeline.join.fired` | `{ runId, stepId, inputs, at }` | ✗ | `pipeline:join-fired` |
-| `pipeline.llm.prompt` | `{ runId, stepId, prompt }` | ✗ | `pipeline:llm-prompt` |
-| `pipeline.llm.token` | `{ runId, stepId, token }` | ✗ | `pipeline:llm-token` |
-| `pipeline.llm.response` | `{ runId, stepId, response }` | ✗ | `pipeline:llm-response` |
+> **RENAMED** — All 22 pipeline events have been renamed from dot-separated to
+> colon-separated form. A dual-emit deprecation bridge is active: the executor
+> publishes both the canonical colon form and the deprecated dot form on every
+> emit. The `PipelineEventMap` type in `src/applications/pipeline/types.ts`
+> exposes both key sets with `@deprecated` JSDoc on the old names.
+> Old dot-form names will be removed in a future release.
+> See `test/unit/applications/pipeline/EventRenameDeprecation.test.ts`.
+
+| Old name | New canonical name | Status |
+|---|---|---|
+| `pipeline.run.started` | `pipeline:run:started` | ✓ renamed, deprecated alias active |
+| `pipeline.run.completed` | `pipeline:run:completed` | ✓ renamed, deprecated alias active |
+| `pipeline.run.failed` | `pipeline:run:failed` | ✓ renamed, deprecated alias active |
+| `pipeline.run.cancelled` | `pipeline:run:cancelled` | ✓ renamed, deprecated alias active |
+| `pipeline.run.orphaned` | `pipeline:run:orphaned` | ✓ renamed, deprecated alias active |
+| `pipeline.run.reassigned` | `pipeline:run:reassigned` | ✓ renamed, deprecated alias active |
+| `pipeline.step.started` | `pipeline:step:started` | ✓ renamed, deprecated alias active |
+| `pipeline.step.completed` | `pipeline:step:completed` | ✓ renamed, deprecated alias active |
+| `pipeline.step.failed` | `pipeline:step:failed` | ✓ renamed, deprecated alias active |
+| `pipeline.step.skipped` | `pipeline:step:skipped` | ✓ renamed, deprecated alias active |
+| `pipeline.step.cancelled` | `pipeline:step:cancelled` | ✓ renamed, deprecated alias active |
+| `pipeline.llm.prompt` | `pipeline:llm:prompt` | ✓ renamed, deprecated alias active |
+| `pipeline.llm.token` | `pipeline:llm:token` | ✓ renamed, deprecated alias active |
+| `pipeline.llm.response` | `pipeline:llm:response` | ✓ renamed, deprecated alias active |
+| `pipeline.approval.requested` | `pipeline:approval:requested` | ✓ renamed, deprecated alias active |
+| `pipeline.approval.recorded` | `pipeline:approval:recorded` | ✓ renamed, deprecated alias active |
+| `pipeline.run.paused` | `pipeline:run:paused` | ✓ renamed, deprecated alias active |
+| `pipeline.run.resumed` | `pipeline:run:resumed` | ✓ renamed, deprecated alias active |
+| `pipeline.run.resumeFromStep` | `pipeline:run:resume-from-step` | ✓ renamed, deprecated alias active |
+| `pipeline.run.retry` | `pipeline:run:retry` | ✓ renamed, deprecated alias active |
+| `pipeline.join.waiting` | `pipeline:join:waiting` | ✓ renamed, deprecated alias active |
+| `pipeline.join.fired` | `pipeline:join:fired` | ✓ renamed, deprecated alias active |
 
 ### ClusterManager (`src/cluster/ClusterManager.ts`)
 
@@ -718,13 +732,15 @@ Common adapter events (all adapters follow the same pattern):
 
 ### 2. `pipeline.run.*` / `pipeline.step.*` / `pipeline.llm.*` / `pipeline.join.*` / `pipeline.approval.*` (PipelineExecutor)
 
-**Why non-conforming:** Dot separator instead of colon. Also, `PipelineModule` subscribes to several of these via `EventBus.subscribe`, making them an external API surface.
+> **COMPLETED** — All 22 pipeline events renamed. See the updated table above.
 
-**Proposed renames:** Replace `.` with `:` and flatten the three-segment form into two: `pipeline:run-started`, `pipeline:step-failed`, `pipeline:llm-token`, etc.
+All 22 events renamed from dot-separated to colon-separated form using a three-segment canonical form (`pipeline:run:started`, `pipeline:step:failed`, etc.).
 
-**Breaking-change impact — MEDIUM.** `PipelineModule` has 5 direct `eventBus.subscribe` calls on these names. The `types.ts` `PipelineEventMap` type also hard-codes them.
+**Dual-emit bridge is ACTIVE.** The executor publishes both names simultaneously. `PipelineModule` internal subscribers were migrated to the new names. The `PipelineEventMap` type retains both key sets with `@deprecated` on the old names.
 
-**Migration strategy:** Rename the type map first (type-only change). Then update all emit/subscribe call sites atomically in a single PR. No dual-emit needed since the publisher and the consumer are both internal.
+**Limitation:** The dual-emit bridge only fires from the executor's internal `emit()` helper. External callers that `publish` the old dot-form directly will NOT automatically bridge to the colon form. They must be migrated explicitly.
+
+**Removal:** Old dot-form names will be removed in a future major release. Remove `CANONICAL_TO_DEPRECATED` from `PipelineExecutor.ts` and remove the `@deprecated` entries from `PipelineEventMap` at that time.
 
 ---
 

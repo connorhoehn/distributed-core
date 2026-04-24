@@ -249,18 +249,18 @@ describe('PipelineModule cluster integration', () => {
         const runId = p['runId'] as string | undefined;
         if (!runId) return;
 
-        if (event.type === 'pipeline.run.started') {
+        if (event.type === 'pipeline:run:started') {
           startedRunIds.add(runId);
           startedByRunId.set(runId, (startedByRunId.get(runId) ?? 0) + 1);
         }
         if (
-          event.type === 'pipeline.run.completed' ||
-          event.type === 'pipeline.run.failed' ||
-          event.type === 'pipeline.run.cancelled'
+          event.type === 'pipeline:run:completed' ||
+          event.type === 'pipeline:run:failed' ||
+          event.type === 'pipeline:run:cancelled'
         ) {
           terminalRunIds.add(runId);
         }
-        if (event.type === 'pipeline.run.orphaned') {
+        if (event.type === 'pipeline:run:orphaned') {
           orphanedRunIds.push(runId);
         }
       });
@@ -318,7 +318,7 @@ describe('PipelineModule cluster integration', () => {
     // Then manually emit pipeline.run.orphaned to test the event shape.
     const orphanBus = buses[0];
     const at = new Date().toISOString();
-    await orphanBus.publish('pipeline.run.orphaned', {
+    await orphanBus.publish('pipeline:run:orphaned', {
       runId: 'synthetic-orphan-run',
       previousOwner: cluster.getNode(1).id,
       at,
@@ -430,12 +430,12 @@ describe('PipelineModule Phase-4 API', () => {
         }
         // Must include pipeline.run.started and a terminal event.
         const types = history.map((e) => e.type);
-        expect(types).toContain('pipeline.run.started');
+        expect(types).toContain('pipeline:run:started');
         expect(
           types.some((t) =>
-            t === 'pipeline.run.completed' ||
-            t === 'pipeline.run.failed' ||
-            t === 'pipeline.run.cancelled',
+            t === 'pipeline:run:completed' ||
+            t === 'pipeline:run:failed' ||
+            t === 'pipeline:run:cancelled',
           ),
         ).toBe(true);
       } finally {
@@ -582,7 +582,7 @@ describe('PipelineModule Phase-4 API', () => {
   // pipeline.run.reassigned emitted alongside pipeline.run.orphaned
   // -------------------------------------------------------------------------
 
-  describe('pipeline.run.reassigned', () => {
+  describe('pipeline:run:reassigned', () => {
     it('[scenario 10] emits reassigned alongside orphaned when a member leaves', async () => {
       const { module, clusterNodeId: nodeId, stop } = await makePipelineModule();
 
@@ -591,10 +591,10 @@ describe('PipelineModule Phase-4 API', () => {
 
       // Subscribe to the module's EventBus before any runs are created.
       const bus = module.getEventBus();
-      bus.subscribe('pipeline.run.orphaned', async (event) => {
+      bus.subscribe('pipeline:run:orphaned', async (event) => {
         orphanedEvents.push(event.payload.runId);
       });
-      bus.subscribe('pipeline.run.reassigned', async (event) => {
+      bus.subscribe('pipeline:run:reassigned', async (event) => {
         reassignedEvents.push({
           runId: event.payload.runId,
           from: event.payload.from,

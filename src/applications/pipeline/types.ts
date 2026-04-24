@@ -271,38 +271,48 @@ export interface PipelineRun {
 // ---------------------------------------------------------------------------
 // Event map — the executor contract (Phase 1 mock and Phase 3 distributed
 // implementation both emit this exact shape; see §17)
+//
+// MIGRATION NOTE: All pipeline event names were changed from dot-separated
+// (`pipeline.run.started`) to colon-separated (`pipeline:run:started`) to
+// conform to the project-wide `noun:verb` event convention. Both old and new
+// names are present during the deprecation window. The executor dual-emits on
+// every publish. Old dot-form names will be removed in a future release.
 // ---------------------------------------------------------------------------
 
 export type PipelineEventMap = {
+  // -------------------------------------------------------------------------
+  // Canonical names (colon-separated, noun:verb convention)
+  // -------------------------------------------------------------------------
+
   // Run lifecycle
-  'pipeline.run.started': {
+  'pipeline:run:started': {
     runId: string;
     pipelineId: string;
     triggeredBy: PipelineRunTrigger;
     at: string;
   };
-  'pipeline.run.completed': {
+  'pipeline:run:completed': {
     runId: string;
     durationMs: number;
     at: string;
   };
-  'pipeline.run.failed': {
+  'pipeline:run:failed': {
     runId: string;
     error: PipelineRunError;
     at: string;
   };
-  'pipeline.run.cancelled': {
+  'pipeline:run:cancelled': {
     runId: string;
     at: string;
   };
 
   // Distribution events (from ResourceRouter)
-  'pipeline.run.orphaned': {
+  'pipeline:run:orphaned': {
     runId: string;
     previousOwner: string;
     at: string;
   };
-  'pipeline.run.reassigned': {
+  'pipeline:run:reassigned': {
     runId: string;
     from: string;
     to: string;
@@ -310,52 +320,52 @@ export type PipelineEventMap = {
   };
 
   // Step lifecycle
-  'pipeline.step.started': {
+  'pipeline:step:started': {
     runId: string;
     stepId: string;
     nodeType: NodeType;
     at: string;
   };
-  'pipeline.step.completed': {
+  'pipeline:step:completed': {
     runId: string;
     stepId: string;
     durationMs: number;
     output?: unknown;
     at: string;
   };
-  'pipeline.step.failed': {
+  'pipeline:step:failed': {
     runId: string;
     stepId: string;
     error: string;
     at: string;
   };
-  'pipeline.step.skipped': {
+  'pipeline:step:skipped': {
     runId: string;
     stepId: string;
     reason: string;
     at: string;
   };
-  'pipeline.step.cancelled': {
+  'pipeline:step:cancelled': {
     runId: string;
     stepId: string;
     at: string;
   };
 
   // LLM streaming
-  'pipeline.llm.prompt': {
+  'pipeline:llm:prompt': {
     runId: string;
     stepId: string;
     model: string;
     prompt: string;
     at: string;
   };
-  'pipeline.llm.token': {
+  'pipeline:llm:token': {
     runId: string;
     stepId: string;
     token: string;
     at: string;
   };
-  'pipeline.llm.response': {
+  'pipeline:llm:response': {
     runId: string;
     stepId: string;
     response: string;
@@ -365,13 +375,13 @@ export type PipelineEventMap = {
   };
 
   // Approval
-  'pipeline.approval.requested': {
+  'pipeline:approval:requested': {
     runId: string;
     stepId: string;
     approvers: ApprovalNodeData['approvers'];
     at: string;
   };
-  'pipeline.approval.recorded': {
+  'pipeline:approval:recorded': {
     runId: string;
     stepId: string;
     userId: string;
@@ -380,27 +390,184 @@ export type PipelineEventMap = {
   };
 
   // Pause / resume / retry (Phase 3+)
-  'pipeline.run.paused': {
+  'pipeline:run:paused': {
     runId: string;
     atStepIds: string[];
     at: string;
   };
-  'pipeline.run.resumed': {
+  'pipeline:run:resumed': {
     runId: string;
     at: string;
   };
-  'pipeline.run.resumeFromStep': {
+  'pipeline:run:resume-from-step': {
     runId: string;
     fromNodeId: string;
     at: string;
   };
-  'pipeline.run.retry': {
+  'pipeline:run:retry': {
     newRunId: string;
     previousRunId: string;
     at: string;
   };
 
   // Join bookkeeping (observability / debugging)
+  'pipeline:join:waiting': {
+    runId: string;
+    stepId: string;
+    received: number;
+    required: number;
+    at: string;
+  };
+  'pipeline:join:fired': {
+    runId: string;
+    stepId: string;
+    inputs: string[];
+    at: string;
+  };
+
+  // -------------------------------------------------------------------------
+  // Deprecated names (dot-separated) — dual-emit during transition window.
+  // The executor publishes BOTH the canonical colon form (above) and the
+  // legacy dot form (below) on every event. Consumers can migrate to the
+  // colon form at their own pace. These aliases will be removed in a future
+  // release.
+  // -------------------------------------------------------------------------
+
+  /** @deprecated Use 'pipeline:run:started'. Will be removed in a future release. */
+  'pipeline.run.started': {
+    runId: string;
+    pipelineId: string;
+    triggeredBy: PipelineRunTrigger;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:completed'. Will be removed in a future release. */
+  'pipeline.run.completed': {
+    runId: string;
+    durationMs: number;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:failed'. Will be removed in a future release. */
+  'pipeline.run.failed': {
+    runId: string;
+    error: PipelineRunError;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:cancelled'. Will be removed in a future release. */
+  'pipeline.run.cancelled': {
+    runId: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:orphaned'. Will be removed in a future release. */
+  'pipeline.run.orphaned': {
+    runId: string;
+    previousOwner: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:reassigned'. Will be removed in a future release. */
+  'pipeline.run.reassigned': {
+    runId: string;
+    from: string;
+    to: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:step:started'. Will be removed in a future release. */
+  'pipeline.step.started': {
+    runId: string;
+    stepId: string;
+    nodeType: NodeType;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:step:completed'. Will be removed in a future release. */
+  'pipeline.step.completed': {
+    runId: string;
+    stepId: string;
+    durationMs: number;
+    output?: unknown;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:step:failed'. Will be removed in a future release. */
+  'pipeline.step.failed': {
+    runId: string;
+    stepId: string;
+    error: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:step:skipped'. Will be removed in a future release. */
+  'pipeline.step.skipped': {
+    runId: string;
+    stepId: string;
+    reason: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:step:cancelled'. Will be removed in a future release. */
+  'pipeline.step.cancelled': {
+    runId: string;
+    stepId: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:llm:prompt'. Will be removed in a future release. */
+  'pipeline.llm.prompt': {
+    runId: string;
+    stepId: string;
+    model: string;
+    prompt: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:llm:token'. Will be removed in a future release. */
+  'pipeline.llm.token': {
+    runId: string;
+    stepId: string;
+    token: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:llm:response'. Will be removed in a future release. */
+  'pipeline.llm.response': {
+    runId: string;
+    stepId: string;
+    response: string;
+    tokensIn: number;
+    tokensOut: number;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:approval:requested'. Will be removed in a future release. */
+  'pipeline.approval.requested': {
+    runId: string;
+    stepId: string;
+    approvers: ApprovalNodeData['approvers'];
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:approval:recorded'. Will be removed in a future release. */
+  'pipeline.approval.recorded': {
+    runId: string;
+    stepId: string;
+    userId: string;
+    decision: 'approve' | 'reject';
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:paused'. Will be removed in a future release. */
+  'pipeline.run.paused': {
+    runId: string;
+    atStepIds: string[];
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:resumed'. Will be removed in a future release. */
+  'pipeline.run.resumed': {
+    runId: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:resume-from-step'. Will be removed in a future release. */
+  'pipeline.run.resumeFromStep': {
+    runId: string;
+    fromNodeId: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:run:retry'. Will be removed in a future release. */
+  'pipeline.run.retry': {
+    newRunId: string;
+    previousRunId: string;
+    at: string;
+  };
+  /** @deprecated Use 'pipeline:join:waiting'. Will be removed in a future release. */
   'pipeline.join.waiting': {
     runId: string;
     stepId: string;
@@ -408,6 +575,7 @@ export type PipelineEventMap = {
     required: number;
     at: string;
   };
+  /** @deprecated Use 'pipeline:join:fired'. Will be removed in a future release. */
   'pipeline.join.fired': {
     runId: string;
     stepId: string;

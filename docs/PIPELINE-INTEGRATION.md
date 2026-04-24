@@ -12,12 +12,35 @@ This doc captures the surfaces that cross the module boundary. If something in h
 
 The `EventBus` is WAL-backed (see `src/messaging/EventBus.ts`). Replay from checkpoint is a first-class operation — subscribers can catch up from a specific `version` rather than just receiving live events.
 
+### Event naming — colon convention (current)
+
+All pipeline events now use colon-separated, three-segment names conforming to the project-wide `noun:verb` convention:
+
+```
+pipeline:run:started       pipeline:run:completed      pipeline:run:failed
+pipeline:run:cancelled     pipeline:run:orphaned       pipeline:run:reassigned
+pipeline:step:started      pipeline:step:completed     pipeline:step:failed
+pipeline:step:skipped      pipeline:step:cancelled
+pipeline:llm:prompt        pipeline:llm:token          pipeline:llm:response
+pipeline:approval:requested  pipeline:approval:recorded
+pipeline:join:waiting      pipeline:join:fired
+pipeline:run:paused        pipeline:run:resumed        pipeline:run:resume-from-step
+pipeline:run:retry
+```
+
+**Deprecated dot-form aliases** (`pipeline.run.started`, etc.) are also emitted alongside every canonical event during the transition window. Both names carry identical payloads. Prefer the colon form for all new code. The dot-form aliases will be removed in a future major release.
+
+**Migration note for the gateway bridge team:** Update any subscriptions that use `pipeline.X.Y` topic patterns to `pipeline:X:Y`. Old dot-form subscriptions continue to work during the deprecation window but should be migrated before the next major release.
+
 Typical consumer shape:
 ```ts
 const bus = pipelineModule.getEventBus(runId);  // or shared bus + topic filter
-bus.subscribe<'pipeline.step.started'>('pipeline.step.started', async (event) => {
-  // event.payload: { runId, stepId, seq, ... }
+// Use canonical colon form:
+bus.subscribe('pipeline:step:started', async (event) => {
+  // event.payload: { runId, stepId, nodeType, at }
 });
+// Deprecated dot form also works during transition — prefer colon form:
+bus.subscribe('pipeline.step.started', async (event) => { /* ... */ });
 ```
 
 ## 2. Ownership lookup

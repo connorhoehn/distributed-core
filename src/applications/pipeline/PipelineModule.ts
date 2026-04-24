@@ -291,7 +291,7 @@ export class PipelineModule extends ApplicationModule {
     };
 
     // Subscribe to terminal events to update our metrics and move to completed.
-    const completedSub = this.eventBus.subscribe('pipeline.run.completed', async (event) => {
+    const completedSub = this.eventBus.subscribe('pipeline:run:completed', async (event) => {
       if (event.payload.runId !== runId) return;
       this.metrics.runsCompleted++;
       this.metrics.completedCount++;
@@ -302,7 +302,7 @@ export class PipelineModule extends ApplicationModule {
       this.eventBus.unsubscribe(cancelledSub);
     });
 
-    const failedSub = this.eventBus.subscribe('pipeline.run.failed', async (event) => {
+    const failedSub = this.eventBus.subscribe('pipeline:run:failed', async (event) => {
       if (event.payload.runId !== runId) return;
       this.metrics.runsFailed++;
       this.finaliseRun(runId);
@@ -311,7 +311,7 @@ export class PipelineModule extends ApplicationModule {
       this.eventBus.unsubscribe(cancelledSub);
     });
 
-    const cancelledSub = this.eventBus.subscribe('pipeline.run.cancelled', async (event) => {
+    const cancelledSub = this.eventBus.subscribe('pipeline:run:cancelled', async (event) => {
       if (event.payload.runId !== runId) return;
       this.metrics.runsCancelled++;
       this.finaliseRun(runId);
@@ -321,7 +321,7 @@ export class PipelineModule extends ApplicationModule {
     });
 
     // Track LLM token usage.
-    this.eventBus.subscribe('pipeline.llm.response', async (event) => {
+    this.eventBus.subscribe('pipeline:llm:response', async (event) => {
       if (event.payload.runId !== runId) return;
       this.metrics.llmTokensIn += event.payload.tokensIn;
       this.metrics.llmTokensOut += event.payload.tokensOut;
@@ -374,6 +374,12 @@ export class PipelineModule extends ApplicationModule {
 
     for (const run of this.completedRuns.values()) {
       if (run.ownerNodeId === departedNodeId) {
+        // Dual-emit: canonical colon form + deprecated dot form.
+        await this.eventBus.publish('pipeline:run:orphaned', {
+          runId: run.id,
+          previousOwner: departedNodeId,
+          at,
+        });
         await this.eventBus.publish('pipeline.run.orphaned', {
           runId: run.id,
           previousOwner: departedNodeId,
@@ -381,6 +387,12 @@ export class PipelineModule extends ApplicationModule {
         });
         // Emit a placeholder reassigned event so downstream consumers can wire
         // on this event now. Phase 5 will replace `to` with the real new owner.
+        await this.eventBus.publish('pipeline:run:reassigned', {
+          runId: run.id,
+          from: departedNodeId,
+          to: departedNodeId, // placeholder — Phase 5 sets the actual new owner
+          at,
+        });
         await this.eventBus.publish('pipeline.run.reassigned', {
           runId: run.id,
           from: departedNodeId,
