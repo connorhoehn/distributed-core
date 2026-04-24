@@ -58,6 +58,7 @@ export class ResourceRouterFactory {
   ): ResourceRouter {
     const registry = EntityRegistryFactory.createMemory(nodeId, { enableTestMode: false });
     // Use a late-binding closure so the placement references the final router instance.
+    // eslint-disable-next-line prefer-const
     let router: ResourceRouter;
     const placement = new LeastLoadedPlacement(() => router.getAllResources());
     router = new ResourceRouter(nodeId, registry, cluster, { placement });

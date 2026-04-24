@@ -39,12 +39,12 @@ export interface CallResult<T> {
  */
 export class CircuitBreaker<T = any> extends EventEmitter {
   private state: CircuitState = CircuitState.CLOSED;
-  private failures: number = 0;
-  private successes: number = 0;
-  private totalCalls: number = 0;
+  private failures = 0;
+  private successes = 0;
+  private totalCalls = 0;
   private lastFailureTime?: number;
   private stateChangedAt: number = Date.now();
-  private halfOpenCalls: number = 0;
+  private halfOpenCalls = 0;
   private resetTimer?: NodeJS.Timeout;
   
   private readonly options: Required<CircuitBreakerOptions>;

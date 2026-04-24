@@ -13,8 +13,6 @@ export interface RoutingOptions {
 export class ClusterRouting implements IRequiresContext {
   private context?: IClusterManagerContext;
 
-  constructor() {}
-
   setContext(context: IClusterManagerContext): void {
     this.context = context;
   }
@@ -37,7 +35,7 @@ export class ClusterRouting implements IRequiresContext {
   /**
    * Get replica nodes for key (including primary)
    */
-  getReplicaNodes(key: string, replicaCount: number = 3): string[] {
+  getReplicaNodes(key: string, replicaCount = 3): string[] {
     const context = this.ensureContext();
     return context.hashRing.getNodes(key, replicaCount);
   }
@@ -62,9 +60,10 @@ export class ClusterRouting implements IRequiresContext {
       case 'ROUND_ROBIN':
         return this.getAliveMembers().map(member => member.id);
       
-      case 'RANDOM':
+      case 'RANDOM': {
         const members = this.getAliveMembers().map(member => member.id);
         return this.shuffleArray([...members]).slice(0, opts.replicationFactor);
+      }
       
       case 'LOCALITY_AWARE':
         return this.getLocalityAwareNodes(key, opts);

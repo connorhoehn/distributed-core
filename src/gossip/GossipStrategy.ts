@@ -51,7 +51,7 @@ export class GossipStrategy {
   /**
    * Select random subset of alive nodes for gossip
    */
-  selectGossipTargets(allNodes: MembershipEntry[], count: number = 3): MembershipEntry[] {
+  selectGossipTargets(allNodes: MembershipEntry[], count = 3): MembershipEntry[] {
     const availableNodes = allNodes.filter(node => 
       node.id !== this.localNodeId && 
       node.status === 'ALIVE'

@@ -314,7 +314,7 @@ export class Node {
   /**
    * Get the nodes responsible for a given key
    */
-  getReplicaNodes(key: string, replicationFactor: number = 3): string[] {
+  getReplicaNodes(key: string, replicationFactor = 3): string[] {
     return this.cluster.getReplicaNodes(key, replicationFactor);
   }
 

@@ -79,8 +79,8 @@ export class MessageBatcher extends EventEmitter {
   addMessage(
     destination: string,
     data: Buffer | string,
-    priority: number = 5,
-    urgent: boolean = false,
+    priority = 5,
+    urgent = false,
     metadata?: Record<string, any>
   ): string {
     const messageId = this.generateMessageId();
@@ -280,6 +280,7 @@ export class MessageBatcher extends EventEmitter {
   private compressMessages(messages: BatchedMessage[]): BatchedMessage[] {
     try {
       // Try to load LZ4 compression
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const lz4 = require('lz4');
       
       return messages.map(msg => ({
@@ -293,6 +294,7 @@ export class MessageBatcher extends EventEmitter {
       }));
     } catch (error) {
       // LZ4 not available, try built-in zlib
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
       const zlib = require('zlib');
       
       return messages.map(msg => ({

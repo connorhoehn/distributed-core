@@ -289,7 +289,7 @@ export class Encryption extends EventEmitter {
   /**
    * Remove old keys (keep only recent versions)
    */
-  cleanupOldKeys(keepRecentVersions: number = 3): void {
+  cleanupOldKeys(keepRecentVersions = 3): void {
     const versions = this.getKeyVersions();
     const versionsToRemove = versions.slice(keepRecentVersions);
     

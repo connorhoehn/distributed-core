@@ -55,7 +55,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     localNodeId: string,
     transport: Transport,
     config: BootstrapConfig,
-    virtualNodesPerNode: number = 100,
+    virtualNodesPerNode = 100,
     private nodeMetadata: { region?: string; zone?: string; role?: string; tags?: Record<string, string> } = {},
     lifecycleConfig?: {
       shutdownTimeout?: number;
@@ -310,7 +310,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
 
   // Consistent Hashing API
   getNodeForKey(key: string): string | null { return this.routing.getNodeForKey(key); }
-  getReplicaNodes(key: string, replicaCount: number = 3): string[] { return this.routing.getReplicaNodes(key, replicaCount); }
+  getReplicaNodes(key: string, replicaCount = 3): string[] { return this.routing.getReplicaNodes(key, replicaCount); }
   getNodesForKey(key: string, options: any = { 
     strategy: 'CONSISTENT_HASH', 
     replicationFactor: 3, 
@@ -332,7 +332,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
   // Membership Management
   markNodeSuspect(nodeId: string): boolean { return this.membership.markSuspect(nodeId); }
   markNodeDead(nodeId: string): boolean { return this.membership.markDead(nodeId); }
-  pruneDeadNodes(maxAge: number = 30000): number { return this.membership.pruneDeadNodes(maxAge); }
+  pruneDeadNodes(maxAge = 30000): number { return this.membership.pruneDeadNodes(maxAge); }
   async leave(timeout?: number): Promise<void> { return this.lifecycle.leave(); }
 
   // Cluster Health & Analytics
@@ -344,7 +344,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
   getTransport(): Transport { return this.transport; }
 
   // Advanced Cluster Operations
-  async drainNode(nodeId: string, timeout: number = 30000): Promise<boolean> {
+  async drainNode(nodeId: string, timeout = 30000): Promise<boolean> {
     try {
       await this.lifecycle.drainNode(nodeId);
       return true;

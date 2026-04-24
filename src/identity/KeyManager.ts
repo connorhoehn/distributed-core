@@ -272,14 +272,14 @@ export class KeyManager {
   /**
    * Generate a secure random secret for cluster operations
    */
-  static generateSecret(length: number = 32): string {
+  static generateSecret(length = 32): string {
     return crypto.randomBytes(length).toString('hex');
   }
 
   /**
    * Derive a key from a password using PBKDF2
    */
-  static deriveKey(password: string, salt: string, iterations: number = 100000): string {
+  static deriveKey(password: string, salt: string, iterations = 100000): string {
     return crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256').toString('hex');
   }
 

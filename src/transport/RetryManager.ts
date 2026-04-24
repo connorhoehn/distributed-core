@@ -241,7 +241,7 @@ export class RetryManager extends EventEmitter {
   /**
    * Calculate delay using different policies
    */
-  calculateDelayByPolicy(attempt: number, policy: RetryPolicy, baseDelay: number = 1000): number {
+  calculateDelayByPolicy(attempt: number, policy: RetryPolicy, baseDelay = 1000): number {
     switch (policy) {
       case RetryPolicy.EXPONENTIAL:
         return baseDelay * Math.pow(2, attempt - 1);
@@ -300,8 +300,8 @@ export class RetryManager extends EventEmitter {
   async executeWithPolicy<T>(
     operation: () => Promise<T>,
     policy: RetryPolicy,
-    maxRetries: number = 3,
-    baseDelay: number = 1000,
+    maxRetries = 3,
+    baseDelay = 1000,
     operationId?: string
   ): Promise<T> {
     const customOptions: Partial<RetryOptions> = {
@@ -322,7 +322,7 @@ export class RetryManager extends EventEmitter {
   async executeBatch<T>(
     operations: Array<() => Promise<T>>,
     batchId?: string,
-    concurrency: number = 5
+    concurrency = 5
   ): Promise<Array<RetryResult<T>>> {
     const id = batchId || this.generateOperationId();
     const results: Array<RetryResult<T>> = [];

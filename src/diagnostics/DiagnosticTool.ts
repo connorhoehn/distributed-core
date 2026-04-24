@@ -111,6 +111,7 @@ export class DiagnosticTool extends EventEmitter {
 
   async checkCpuUsage(): Promise<{ percentage: number; loadAverage: number[] }> {
     // Mock implementation - would integrate with system monitoring
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const loadAverage = require('os').loadavg();
     const percentage = Math.random() * 100; // Mock value
 

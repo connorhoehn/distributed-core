@@ -84,9 +84,9 @@ export class BootstrapConfig extends EventEmitter {
 
   constructor(
     seedNodes: (string | Omit<SeedNodeInfo, 'health'>)[] = [],
-    joinTimeout: number = 5000,
-    gossipInterval: number = 1000,
-    enableLogging: boolean = false,
+    joinTimeout = 5000,
+    gossipInterval = 1000,
+    enableLogging = false,
     failureDetector: FailureDetectorOptions = {},
     keyManager: KeyManagerOptions = {},
     lifecycle: LifecycleOptions = {},

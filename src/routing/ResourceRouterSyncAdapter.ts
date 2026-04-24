@@ -48,21 +48,21 @@ export class ResourceRouterSyncAdapter implements LifecycleAware {
     this.topic = config?.topic ?? DEFAULT_TOPIC;
 
     this._onClaimed = (handle: ResourceHandle) => {
-      this.pubsub.publish(this.topic, toEntityUpdate(handle, 'CREATE')).catch(() => {});
+      this.pubsub.publish(this.topic, toEntityUpdate(handle, 'CREATE')).catch(() => undefined);
     };
 
     this._onReleased = (handle: ResourceHandle) => {
-      this.pubsub.publish(this.topic, toEntityUpdate(handle, 'DELETE')).catch(() => {});
+      this.pubsub.publish(this.topic, toEntityUpdate(handle, 'DELETE')).catch(() => undefined);
     };
 
     this._onTransferred = (handle: ResourceHandle) => {
-      this.pubsub.publish(this.topic, toEntityUpdate(handle, 'TRANSFER')).catch(() => {});
+      this.pubsub.publish(this.topic, toEntityUpdate(handle, 'TRANSFER')).catch(() => undefined);
     };
 
     this._onPubSub = (_topic: string, payload: unknown, meta: PubSubMessageMetadata) => {
       if (this.subId === null) return;
       if (meta.publisherNodeId === this.localNodeId) return;
-      this.router.applyRemoteUpdate(payload as EntityUpdate).catch(() => {});
+      this.router.applyRemoteUpdate(payload as EntityUpdate).catch(() => undefined);
     };
   }
 

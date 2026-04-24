@@ -130,7 +130,7 @@ export class YamlSeedConfiguration extends EventEmitter {
   private configPath: string | null = null;
   private currentEnvironment: string;
 
-  constructor(environment: string = 'development') {
+  constructor(environment = 'development') {
     super();
     this.currentEnvironment = environment;
   }
@@ -290,8 +290,8 @@ export class YamlSeedConfiguration extends EventEmitter {
    */
   static fromSeedNodes(
     seedNodes: SeedNodeInfo[], 
-    clusterName: string = 'distributed-cluster',
-    environment: string = 'development'
+    clusterName = 'distributed-cluster',
+    environment = 'development'
   ): YamlSeedConfig {
     return {
       cluster: {

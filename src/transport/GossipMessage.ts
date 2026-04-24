@@ -55,8 +55,8 @@ export class GossipMessage extends EventEmitter {
   public readonly header: MessageHeader;
   public readonly payload: MessagePayload;
   public readonly metrics: MessageMetrics;
-  private _isDelivered: boolean = false;
-  private _isExpired: boolean = false;
+  private _isDelivered = false;
+  private _isExpired = false;
 
   constructor(
     type: MessageType,
@@ -257,6 +257,7 @@ export class GossipMessage extends EventEmitter {
    * Calculate message checksum
    */
   private calculateChecksum(data: any): string {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const crypto = require('crypto');
     const serialized = JSON.stringify(data);
     return crypto.createHash('sha256').update(serialized).digest('hex').substring(0, 16);

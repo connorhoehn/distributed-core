@@ -177,7 +177,7 @@ export class ConnectionManager extends EventEmitter {
     };
   }
 
-  cleanup(maxIdleTime: number = 300000): number { // 5 minutes default
+  cleanup(maxIdleTime = 300000): number { // 5 minutes default
     const now = Date.now();
     const toRemove: string[] = [];
 

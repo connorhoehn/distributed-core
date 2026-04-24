@@ -453,7 +453,7 @@ export class FailureDetector extends EventEmitter {
   /**
    * Manually mark a node as failed (for testing or explicit failures)
    */
-  markNodeFailed(nodeId: string, reason: string = 'Manual failure'): boolean {
+  markNodeFailed(nodeId: string, reason = 'Manual failure'): boolean {
     if (nodeId === this.localNodeId) return false;
     
     return this.markNodeAsDead(nodeId, reason);

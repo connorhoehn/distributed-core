@@ -31,7 +31,7 @@ export interface NonceInfo {
  */
 export class MessageAuth extends EventEmitter {
   private keys = new Map<number, Buffer>();
-  private currentKeyVersion: number = 1;
+  private currentKeyVersion = 1;
   private usedNonces = new Map<string, NonceInfo>();
   private cleanupTimer?: NodeJS.Timeout;
   private readonly options: Required<MessageAuthOptions>;
@@ -323,7 +323,7 @@ export class MessageAuth extends EventEmitter {
   /**
    * Remove old keys
    */
-  removeOldKeys(keepRecentVersions: number = 3): void {
+  removeOldKeys(keepRecentVersions = 3): void {
     const versions = this.getAvailableKeyVersions();
     const versionsToRemove = versions.slice(keepRecentVersions);
     

@@ -10,7 +10,7 @@ export class ConsistentHashRing {
   private ring: VirtualNode[] = [];
   private virtualNodesPerNode: number;
 
-  constructor(virtualNodesPerNode: number = 100) {
+  constructor(virtualNodesPerNode = 100) {
     this.virtualNodesPerNode = virtualNodesPerNode;
   }
 
@@ -134,6 +134,7 @@ export class ConsistentHashRing {
    */
   private hash(key: string): number {
     // Use Node.js crypto for better hash distribution
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const crypto = require('crypto');
     const hash = crypto.createHash('md5').update(key).digest('hex');
     
