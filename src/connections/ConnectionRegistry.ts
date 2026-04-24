@@ -4,6 +4,7 @@ import { EntityUpdate } from '../persistence/wal/types';
 import { EvictionTimer } from '../gateway/eviction/EvictionTimer';
 import { defaultLogger } from '../common/logger';
 import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
+import { LifecycleAware } from '../common/LifecycleAware';
 
 export interface ConnectionHandle {
   connectionId: string;
@@ -28,7 +29,7 @@ function toHandle(record: EntityRecord, ttlMs?: number): ConnectionHandle {
   };
 }
 
-export class ConnectionRegistry extends EventEmitter {
+export class ConnectionRegistry extends EventEmitter implements LifecycleAware {
   private readonly registry: EntityRegistry;
   private readonly localNodeId: string;
   private readonly ttlMs: number | undefined;
@@ -36,6 +37,7 @@ export class ConnectionRegistry extends EventEmitter {
   private readonly metrics: MetricsRegistry | null;
   private readonly onEntityCreated: (record: EntityRecord) => void;
   private readonly onEntityDeleted: (record: EntityRecord) => void;
+  private _started = false;
 
   constructor(
     registry: EntityRegistry,
@@ -60,13 +62,21 @@ export class ConnectionRegistry extends EventEmitter {
     };
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   async start(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
     await this.registry.start();
     this.registry.on('entity:created', this.onEntityCreated);
     this.registry.on('entity:deleted', this.onEntityDeleted);
   }
 
   async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     this.evictionTimer?.cancelAll();
     this.registry.off('entity:created', this.onEntityCreated);
     this.registry.off('entity:deleted', this.onEntityDeleted);

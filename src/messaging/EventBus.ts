@@ -6,6 +6,7 @@ import { WALWriterImpl } from '../persistence/wal/WALWriter';
 import { WALReaderImpl } from '../persistence/wal/WALReader';
 import { ISnapshotVersionStore } from '../persistence/snapshot/types';
 import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
+import { LifecycleAware } from '../common/LifecycleAware';
 
 export interface BusEvent<T = unknown> {
   id: string;
@@ -59,7 +60,7 @@ type TypedHandler<T = unknown> = (event: BusEvent<T>) => Promise<void>;
  * version to its events. On restart with a WAL, the counter is restored
  * from the max version in the log to avoid collisions.
  */
-export class EventBus<EventMap extends Record<string, unknown> = Record<string, unknown>> {
+export class EventBus<EventMap extends Record<string, unknown> = Record<string, unknown>> implements LifecycleAware {
   private readonly pubsub: PubSubManager;
   private readonly localNodeId: string;
   private readonly config: EventBusConfig;
@@ -68,6 +69,7 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
   private _subId: string | null = null;
   private _versionCounter = 0;
   private _subIdCounter = 0;
+  private _started = false;
 
   private readonly _typeHandlers: Map<string, Map<string, TypedHandler<unknown>>> = new Map();
   private readonly _allHandlers: Map<string, TypedHandler<unknown>> = new Map();
@@ -84,7 +86,13 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
     this._onMessage = this._onMessage.bind(this);
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   async start(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
     this._subId = this.pubsub.subscribe(this.config.topic, this._onMessage);
 
     if (this.config.walFilePath) {
@@ -113,6 +121,8 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
   }
 
   async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     if (this._subId !== null) {
       this.pubsub.unsubscribe(this._subId);
       this._subId = null;

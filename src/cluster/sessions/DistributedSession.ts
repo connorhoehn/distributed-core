@@ -5,6 +5,7 @@ import { SharedStateAdapter } from '../../gateway/state/types';
 import { EvictionTimer } from '../../gateway/eviction/EvictionTimer';
 import { ResourceHandle } from '../../routing/types';
 import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface DistributedSessionConfig {
   idleTimeoutMs?: number;
@@ -27,7 +28,7 @@ export interface SessionInfo<S> {
 
 const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
 
-export class DistributedSession<S, U = unknown> extends EventEmitter {
+export class DistributedSession<S, U = unknown> extends EventEmitter implements LifecycleAware {
   private readonly localNodeId: string;
   private readonly router: ResourceRouter;
   private readonly adapter: SharedStateAdapter<S, U>;
@@ -35,6 +36,7 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
   private readonly metrics: MetricsRegistry | null;
   private readonly sessions = new Map<string, S>();
   private readonly eviction: EvictionTimer<string>;
+  private _started = false;
 
   private readonly _onOrphaned: (handle: ResourceHandle) => void;
 
@@ -62,7 +64,13 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
     };
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   async start(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
     this.router.on('resource:orphaned', this._onOrphaned);
     if (this.config.ownsRouter) {
       await this.router.start();
@@ -70,6 +78,8 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     this.eviction.cancelAll();
     const owned = this.router.getOwnedResources();
     for (const handle of owned) {

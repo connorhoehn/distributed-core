@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { ResourceRouter } from './ResourceRouter';
 import { PlacementStrategy, ResourceHandle } from './types';
 import { LocalPlacement } from './PlacementStrategy';
+import { LifecycleAware } from '../common/LifecycleAware';
 
 export interface AutoReclaimPolicyConfig {
   strategy?: PlacementStrategy;
@@ -9,7 +10,7 @@ export interface AutoReclaimPolicyConfig {
   maxClaimAttempts?: number;
 }
 
-export class AutoReclaimPolicy extends EventEmitter {
+export class AutoReclaimPolicy extends EventEmitter implements LifecycleAware {
   private readonly router: ResourceRouter;
   private readonly strategy: PlacementStrategy;
   private readonly jitterMs: number;
@@ -29,24 +30,26 @@ export class AutoReclaimPolicy extends EventEmitter {
     this._onOrphaned = (handle: ResourceHandle) => this._handleOrphaned(handle);
   }
 
-  start(): void {
-    if (this.started) return;
-    this.started = true;
-    this.router.on('resource:orphaned', this._onOrphaned);
+  isStarted(): boolean {
+    return this.started;
   }
 
-  stop(): void {
-    if (!this.started) return;
+  start(): Promise<void> {
+    if (this.started) return Promise.resolve();
+    this.started = true;
+    this.router.on('resource:orphaned', this._onOrphaned);
+    return Promise.resolve();
+  }
+
+  stop(): Promise<void> {
+    if (!this.started) return Promise.resolve();
     this.started = false;
     this.router.off('resource:orphaned', this._onOrphaned);
     for (const timer of this.timers.values()) {
       clearTimeout(timer);
     }
     this.timers.clear();
-  }
-
-  isStarted(): boolean {
-    return this.started;
+    return Promise.resolve();
   }
 
   private _handleOrphaned(handle: ResourceHandle): void {

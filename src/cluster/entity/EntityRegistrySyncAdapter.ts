@@ -2,6 +2,7 @@ import { EntityRegistry, EntityRecord } from './types';
 import { EntityUpdate } from '../../persistence/wal/types';
 import { PubSubManager } from '../../gateway/pubsub/PubSubManager';
 import { PubSubMessageMetadata } from '../../gateway/pubsub/types';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface EntityRegistrySyncAdapterConfig {
   topic: string;
@@ -20,13 +21,14 @@ function toEntityUpdate(record: EntityRecord, operation: 'CREATE' | 'UPDATE' | '
   };
 }
 
-export class EntityRegistrySyncAdapter {
+export class EntityRegistrySyncAdapter implements LifecycleAware {
   private readonly registry: EntityRegistry;
   private readonly pubsub: PubSubManager;
   private readonly localNodeId: string;
   private readonly config: EntityRegistrySyncAdapterConfig;
 
   private subId: string | null = null;
+  private _started = false;
 
   private readonly _onCreated: (record: EntityRecord) => void;
   private readonly _onUpdated: (record: EntityRecord) => void;
@@ -77,15 +79,24 @@ export class EntityRegistrySyncAdapter {
     };
   }
 
-  start(): void {
+  isStarted(): boolean {
+    return this._started;
+  }
+
+  start(): Promise<void> {
+    if (this._started) return Promise.resolve();
+    this._started = true;
     this.subId = this.pubsub.subscribe(this.config.topic, this._onMessage);
     this.registry.on('entity:created', this._onCreated);
     this.registry.on('entity:updated', this._onUpdated);
     this.registry.on('entity:deleted', this._onDeleted);
     this.registry.on('entity:transferred', this._onTransferred);
+    return Promise.resolve();
   }
 
-  stop(): void {
+  stop(): Promise<void> {
+    if (!this._started) return Promise.resolve();
+    this._started = false;
     if (this.subId !== null) {
       this.pubsub.unsubscribe(this.subId);
       this.subId = null;
@@ -94,5 +105,6 @@ export class EntityRegistrySyncAdapter {
     this.registry.off('entity:updated', this._onUpdated);
     this.registry.off('entity:deleted', this._onDeleted);
     this.registry.off('entity:transferred', this._onTransferred);
+    return Promise.resolve();
   }
 }

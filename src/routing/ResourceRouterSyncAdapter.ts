@@ -3,6 +3,7 @@ import { ResourceHandle } from './types';
 import { EntityUpdate } from '../persistence/wal/types';
 import { PubSubManager } from '../gateway/pubsub/PubSubManager';
 import { PubSubMessageMetadata } from '../gateway/pubsub/types';
+import { LifecycleAware } from '../common/LifecycleAware';
 
 export interface ResourceRouterSyncAdapterConfig {
   topic?: string;
@@ -21,13 +22,14 @@ function toEntityUpdate(handle: ResourceHandle, operation: 'CREATE' | 'DELETE' |
   };
 }
 
-export class ResourceRouterSyncAdapter {
+export class ResourceRouterSyncAdapter implements LifecycleAware {
   private readonly router: ResourceRouter;
   private readonly pubsub: PubSubManager;
   private readonly localNodeId: string;
   private readonly topic: string;
 
   private subId: string | null = null;
+  private _started = false;
 
   private readonly _onClaimed: (handle: ResourceHandle) => void;
   private readonly _onReleased: (handle: ResourceHandle) => void;
@@ -64,14 +66,23 @@ export class ResourceRouterSyncAdapter {
     };
   }
 
-  start(): void {
+  isStarted(): boolean {
+    return this._started;
+  }
+
+  start(): Promise<void> {
+    if (this._started) return Promise.resolve();
+    this._started = true;
     this.subId = this.pubsub.subscribe(this.topic, this._onPubSub);
     this.router.on('resource:claimed', this._onClaimed);
     this.router.on('resource:released', this._onReleased);
     this.router.on('resource:transferred', this._onTransferred);
+    return Promise.resolve();
   }
 
-  stop(): void {
+  stop(): Promise<void> {
+    if (!this._started) return Promise.resolve();
+    this._started = false;
     if (this.subId !== null) {
       this.pubsub.unsubscribe(this.subId);
       this.subId = null;
@@ -79,5 +90,6 @@ export class ResourceRouterSyncAdapter {
     this.router.off('resource:claimed', this._onClaimed);
     this.router.off('resource:released', this._onReleased);
     this.router.off('resource:transferred', this._onTransferred);
+    return Promise.resolve();
   }
 }

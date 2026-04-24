@@ -3,14 +3,16 @@ import { LeaderElection, LeaderElectionConfig } from './LeaderElection';
 import { DistributedLock } from './DistributedLock';
 import { ResourceRouter } from '../../routing/ResourceRouter';
 import { RouteTarget } from '../../routing/types';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface ClusterLeaderElectionConfig extends LeaderElectionConfig {}
 
-export class ClusterLeaderElection extends EventEmitter {
+export class ClusterLeaderElection extends EventEmitter implements LifecycleAware {
   private readonly groupId: string;
   private readonly nodeId: string;
   private readonly router: ResourceRouter;
   private readonly _election: LeaderElection;
+  private _started = false;
 
   constructor(
     groupId: string,
@@ -38,12 +40,20 @@ export class ClusterLeaderElection extends EventEmitter {
     });
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   async start(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
     await this.router.start();
     await this._election.start();
   }
 
   async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     await this._election.stop();
     await this.router.release(`election:${this.groupId}`).catch(() => {});
     await this.router.stop();

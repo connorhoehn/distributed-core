@@ -11,6 +11,7 @@ import {
   RouteTarget,
 } from './types';
 import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
+import { LifecycleAware } from '../common/LifecycleAware';
 
 const DEFAULTS: Omit<Required<ResourceRouterConfig>, 'metrics'> = {
   placement: new LocalPlacement(),
@@ -45,12 +46,13 @@ const DEFAULTS: Omit<Required<ResourceRouterConfig>, 'metrics'> = {
  *  resource:transferred  — ownership moved (local or remote)
  *  resource:orphaned     — the owning node left the cluster; handle re-assignment
  */
-export class ResourceRouter extends EventEmitter {
+export class ResourceRouter extends EventEmitter implements LifecycleAware {
   private readonly localNodeId: string;
   private readonly registry: EntityRegistry;
   private readonly cluster: ClusterManager;
   private readonly config: Omit<Required<ResourceRouterConfig>, 'metrics'>;
   private readonly metrics: MetricsRegistry | null;
+  private _started = false;
 
   // Stored so they can be removed in stop()
   private readonly _onEntityCreated: (record: EntityRecord) => void;
@@ -90,11 +92,17 @@ export class ResourceRouter extends EventEmitter {
     this.cluster.on('member-left', this._onMemberLeft);
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   /**
    * Start the router: starts the underlying registry.
    * Call this before any claim/release/route operations.
    */
   async start(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
     await this.registry.start();
   }
 
@@ -103,6 +111,8 @@ export class ResourceRouter extends EventEmitter {
    * Always call this when the router is no longer needed to prevent listener leaks.
    */
   async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     this.registry.off('entity:created', this._onEntityCreated);
     this.registry.off('entity:transferred', this._onEntityTransferred);
     this.registry.off('entity:deleted', this._onEntityDeleted);

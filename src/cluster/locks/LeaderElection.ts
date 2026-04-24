@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { DistributedLock, LockHandle } from './DistributedLock';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface LeaderElectionConfig {
   leaseDurationMs?: number;
@@ -9,7 +10,7 @@ export interface LeaderElectionConfig {
 const DEFAULT_LEASE_DURATION_MS = 15_000;
 const DEFAULT_RENEW_INTERVAL_MS = 5_000;
 
-export class LeaderElection extends EventEmitter {
+export class LeaderElection extends EventEmitter implements LifecycleAware {
   private readonly groupId: string;
   private readonly nodeId: string;
   private readonly lock: DistributedLock;
@@ -29,7 +30,12 @@ export class LeaderElection extends EventEmitter {
     };
   }
 
+  isStarted(): boolean {
+    return this.isRunning;
+  }
+
   async start(): Promise<void> {
+    if (this.isRunning) return;
     this.isRunning = true;
     await this._cycle();
     this.renewTimer = setInterval(() => this._cycle(), this.config.renewIntervalMs);
@@ -37,6 +43,7 @@ export class LeaderElection extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    if (!this.isRunning) return;
     this.isRunning = false;
     if (this.renewTimer !== null) {
       clearInterval(this.renewTimer);

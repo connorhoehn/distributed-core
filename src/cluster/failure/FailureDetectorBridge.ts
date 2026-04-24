@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { FailureDetector } from '../../monitoring/FailureDetector';
 import { ResourceRouter } from '../../routing/ResourceRouter';
 import { ConnectionRegistry } from '../../connections/ConnectionRegistry';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface FailureDetectorBridgeTargets {
   router?: ResourceRouter;
@@ -12,7 +13,7 @@ export interface FailureDetectorBridgeConfig {
   handleSuspected?: boolean;
 }
 
-export class FailureDetectorBridge extends EventEmitter {
+export class FailureDetectorBridge extends EventEmitter implements LifecycleAware {
   private readonly detector: FailureDetector;
   private readonly targets: FailureDetectorBridgeTargets;
   private readonly config: Required<FailureDetectorBridgeConfig>;
@@ -39,20 +40,22 @@ export class FailureDetectorBridge extends EventEmitter {
     };
   }
 
-  start(): void {
-    if (this.started) return;
+  start(): Promise<void> {
+    if (this.started) return Promise.resolve();
     this.started = true;
     this.detector.on('node-failed', this.onNodeFailed);
     if (this.config.handleSuspected) {
       this.detector.on('node-suspected', this.onNodeSuspected);
     }
+    return Promise.resolve();
   }
 
-  stop(): void {
-    if (!this.started) return;
+  stop(): Promise<void> {
+    if (!this.started) return Promise.resolve();
     this.started = false;
     this.detector.off('node-failed', this.onNodeFailed);
     this.detector.off('node-suspected', this.onNodeSuspected);
+    return Promise.resolve();
   }
 
   isStarted(): boolean {

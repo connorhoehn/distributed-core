@@ -9,6 +9,7 @@ import {
   SnapshotType,
   StoreSnapshotOptions,
 } from './types';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface CompactionOptions {
   maxEntriesPerKey?: number;
@@ -51,16 +52,33 @@ function entryFromMetadata<T>(meta: SnapshotMetadata, timestamp: number): Snapsh
   };
 }
 
-export class WALSnapshotVersionStore<T> implements ISnapshotVersionStore<T> {
+export class WALSnapshotVersionStore<T> implements ISnapshotVersionStore<T>, LifecycleAware {
   private readonly filePath: string;
   private writer!: WALWriterImpl;
   private reader!: WALReaderImpl;
+  private _started = false;
 
   constructor(filePath: string) {
     this.filePath = filePath;
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
+  async start(): Promise<void> {
+    if (this._started) return;
+    await this.initialize();
+  }
+
+  async stop(): Promise<void> {
+    if (!this._started) return;
+    await this.close();
+  }
+
   async initialize(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
     this.writer = new WALWriterImpl({ filePath: this.filePath, syncInterval: 0 });
     this.reader = new WALReaderImpl(this.filePath);
     await this.writer.initialize();
@@ -68,6 +86,8 @@ export class WALSnapshotVersionStore<T> implements ISnapshotVersionStore<T> {
   }
 
   async close(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     await this.writer.close();
     await this.reader.close();
   }

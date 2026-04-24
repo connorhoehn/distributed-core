@@ -4,6 +4,7 @@ import { PubSubManager } from '../../gateway/pubsub/PubSubManager';
 import { PubSubMessageMetadata } from '../../gateway/pubsub/types';
 import { ClusterManager } from '../ClusterManager';
 import { LockHandle } from './DistributedLock';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface QuorumDistributedLockConfig {
   topic?: string;
@@ -33,7 +34,7 @@ const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 5_000;
 const DEFAULT_ACK_TIMEOUT_MS = 2_000;
 
-export class QuorumDistributedLock extends EventEmitter {
+export class QuorumDistributedLock extends EventEmitter implements LifecycleAware {
   private readonly localNodeId: string;
   private readonly pubsub: PubSubManager;
   private readonly cluster: ClusterManager;
@@ -48,6 +49,7 @@ export class QuorumDistributedLock extends EventEmitter {
   private readonly ttlTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   private subscriptionId: string | null = null;
+  private _started = false;
 
   constructor(
     localNodeId: string,
@@ -64,11 +66,19 @@ export class QuorumDistributedLock extends EventEmitter {
     this.ackTimeoutMs = config?.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS;
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   async start(): Promise<void> {
+    if (this._started) return;
+    this._started = true;
     this.subscriptionId = this.pubsub.subscribe(this.topic, this._onMessage.bind(this));
   }
 
   async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     if (this.subscriptionId !== null) {
       this.pubsub.unsubscribe(this.subscriptionId);
       this.subscriptionId = null;

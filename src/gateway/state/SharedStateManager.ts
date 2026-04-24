@@ -4,6 +4,7 @@ import { PubSubManager } from '../pubsub/PubSubManager';
 import { ISnapshotVersionStore } from '../../persistence/snapshot/types';
 import { SharedStateAdapter, SharedStateManagerStats } from './types';
 import { PubSubMessageMetadata } from '../pubsub/types';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 const DEFAULT_TOPIC_PREFIX = 'shared-state';
 const DEFAULT_SNAPSHOT_DEBOUNCE_MS = 5_000;
@@ -12,7 +13,7 @@ interface CrossNodePayload<U> {
   update: U;
 }
 
-export class SharedStateManager<S, U = unknown> extends EventEmitter {
+export class SharedStateManager<S, U = unknown> extends EventEmitter implements LifecycleAware {
   private readonly session: DistributedSession<S, U>;
   private readonly pubsub: PubSubManager;
   private readonly adapter: SharedStateAdapter<S, U>;
@@ -47,17 +48,22 @@ export class SharedStateManager<S, U = unknown> extends EventEmitter {
     this.snapshotDebounceMs = options?.snapshotDebounceMs ?? DEFAULT_SNAPSHOT_DEBOUNCE_MS;
   }
 
+  isStarted(): boolean {
+    return this._started;
+  }
+
   async start(): Promise<void> {
-    if (!this._started) {
-      await this.session.start();
-      this._started = true;
-    }
+    if (this._started) return;
+    await this.session.start();
+    this._started = true;
     this.session.on('session:evicted', (sessionId: string) => {
       void this._onSessionEvicted(sessionId);
     });
   }
 
   async stop(): Promise<void> {
+    if (!this._started) return;
+    this._started = false;
     this._clearAllSnapshotTimers();
     if (this.snapshotStore !== undefined) {
       const localSessions = this.session.getLocalSessions();

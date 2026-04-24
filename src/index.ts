@@ -94,6 +94,8 @@ export * from './common/Node';
 export * from './common/utils';
 export { RateLimiter } from './common/RateLimiter';
 export type { RateLimiterConfig, RateLimitResult } from './common/RateLimiter';
+export type { LifecycleAware } from './common/LifecycleAware';
+export { CoreError, NotStartedError, AlreadyStartedError, ConflictError, TimeoutError as CoreTimeoutError } from './common/errors';
 
 // Messaging modules
 export * from './messaging';

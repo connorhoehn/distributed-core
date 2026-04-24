@@ -1,5 +1,6 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
 import { ResourceRouter } from './ResourceRouter';
+import { LifecycleAware } from '../common/LifecycleAware';
 
 export interface ForwardingServerConfig {
   port: number;
@@ -13,7 +14,7 @@ export type ForwardingHandler = (
   payload: unknown
 ) => Promise<unknown>;
 
-export class ForwardingServer {
+export class ForwardingServer implements LifecycleAware {
   private readonly router: ResourceRouter;
   private readonly handler: ForwardingHandler;
   private readonly port: number;

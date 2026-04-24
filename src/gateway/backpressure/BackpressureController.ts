@@ -1,5 +1,6 @@
 import { RateLimiter } from '../../common/RateLimiter';
 import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
+import { LifecycleAware } from '../../common/LifecycleAware';
 
 export type DropStrategy = 'drop-oldest' | 'drop-newest' | 'reject';
 
@@ -24,7 +25,7 @@ export interface BackpressureStats {
   queueDepths: Record<string, number>;
 }
 
-export class BackpressureController<T> {
+export class BackpressureController<T> implements LifecycleAware {
   private readonly queues: Map<string, T[]> = new Map();
   private readonly onFlush: (key: string, items: T[]) => Promise<void>;
   private readonly config: BackpressureConfig<T>;
@@ -33,6 +34,7 @@ export class BackpressureController<T> {
   private totalEnqueued = 0;
   private totalFlushed = 0;
   private totalDropped = 0;
+  private _started = false;
 
   constructor(
     onFlush: (key: string, items: T[]) => Promise<void>,
@@ -147,18 +149,28 @@ export class BackpressureController<T> {
     };
   }
 
-  start(): void {
-    if (this.config.flushIntervalMs == null) return;
-    if (this.timer !== null) return;
-    const t = setInterval(() => this.flushAll(), this.config.flushIntervalMs);
-    t.unref();
-    this.timer = t;
+  isStarted(): boolean {
+    return this._started;
   }
 
-  stop(): void {
+  start(): Promise<void> {
+    if (this._started) return Promise.resolve();
+    this._started = true;
+    if (this.config.flushIntervalMs != null && this.timer === null) {
+      const t = setInterval(() => this.flushAll(), this.config.flushIntervalMs);
+      t.unref();
+      this.timer = t;
+    }
+    return Promise.resolve();
+  }
+
+  stop(): Promise<void> {
+    if (!this._started) return Promise.resolve();
+    this._started = false;
     if (this.timer !== null) {
       clearInterval(this.timer);
       this.timer = null;
     }
+    return Promise.resolve();
   }
 }
