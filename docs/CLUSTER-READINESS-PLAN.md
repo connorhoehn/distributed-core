@@ -1,5 +1,8 @@
 # Cluster-Readiness Plan
 
+> **Status: ✅ Complete.** All 13 workstreams shipped across phases 1, 2a, 2b, and 3. Post-plan additions (`ConfigManager`, `ServiceRegistry`, README, ARCHITECTURE, `examples/cluster-collab/`) also landed. Suite: **107 unit suites, 1779 tests + 12 integration suites, 77 tests**. See `CHANGELOG.md` for deferred follow-ups.
+
+
 ## Context
 
 Over recent sessions we built twelve primitives — `ResourceRouter`, `DistributedLock`, `ClusterLeaderElection`, `DistributedSession`, `ConnectionRegistry`, `EventBus`, `MetricsRegistry`, `BackpressureController`, `RateLimiter`, `WALSnapshotVersionStore`, `SharedStateManager`, plus CRDT/WAL entity registries. Unit tests pass (1615 tests, 94 suites). A recent audit identified 13 gaps separating the current code from a production-usable cluster-coordination kernel.

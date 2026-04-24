@@ -152,5 +152,11 @@ export type { DistributedSessionConfig, SessionInfo } from './cluster/sessions';
 export { FailureDetectorBridge } from './cluster/failure';
 export type { FailureDetectorBridgeTargets, FailureDetectorBridgeConfig } from './cluster/failure';
 
+// Distributed configuration and service discovery
+export { ConfigManager, ConfigValidationError, UnknownConfigKeyError } from './cluster/config';
+export type { ConfigValidator, ConfigKeyDefinition, ConfigChangeEvent, ConfigManagerConfig } from './cluster/config';
+export { ServiceRegistry, UnknownServiceError } from './cluster/discovery';
+export type { ServiceEndpoint, SelectionStrategy, ServiceRegistryConfig } from './cluster/discovery';
+
 // Gateway domain — PubSub, Presence, Channel, Queue, MessageRouter
 export * from './gateway';

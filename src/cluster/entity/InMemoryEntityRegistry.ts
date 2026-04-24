@@ -166,10 +166,11 @@ export class InMemoryEntityRegistry extends EventEmitter implements EntityRegist
               metadata: update.metadata || {}
             };
             this.entities.set(entityId, record);
+            this.emit('entity:created', record);
           }
           break;
 
-        case 'UPDATE':
+        case 'UPDATE': {
           const existing = this.entities.get(entityId);
           if (existing && update.version > existing.version) {
             const updated: EntityRecord = {
@@ -179,14 +180,21 @@ export class InMemoryEntityRegistry extends EventEmitter implements EntityRegist
               metadata: { ...existing.metadata, ...update.metadata }
             };
             this.entities.set(entityId, updated);
+            this.emit('entity:updated', updated);
           }
           break;
+        }
 
-        case 'DELETE':
+        case 'DELETE': {
+          const deleted = this.entities.get(entityId);
           this.entities.delete(entityId);
+          if (deleted) {
+            this.emit('entity:deleted', deleted);
+          }
           break;
+        }
 
-        case 'TRANSFER':
+        case 'TRANSFER': {
           const entity = this.entities.get(entityId);
           if (entity && update.version > entity.version) {
             const transferred: EntityRecord = {
@@ -196,8 +204,10 @@ export class InMemoryEntityRegistry extends EventEmitter implements EntityRegist
               lastUpdated: update.timestamp
             };
             this.entities.set(entityId, transferred);
+            this.emit('entity:transferred', transferred);
           }
           break;
+        }
       }
 
       this.globalVersion = Math.max(this.globalVersion, update.version);
