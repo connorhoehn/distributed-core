@@ -15,6 +15,14 @@ function makeRegistry(ttlMs?: number): ConnectionRegistry {
   return new ConnectionRegistry(entityRegistry, LOCAL_NODE, ttlMs !== undefined ? { ttlMs } : undefined);
 }
 
+function makeReconnectRegistry(ttlMs?: number): ConnectionRegistry {
+  const entityRegistry = EntityRegistryFactory.createMemory(LOCAL_NODE, { enableTestMode: true });
+  return new ConnectionRegistry(entityRegistry, LOCAL_NODE, {
+    ...(ttlMs !== undefined ? { ttlMs } : {}),
+    allowReconnect: true,
+  });
+}
+
 function makeRemoteUpdate(overrides: Partial<EntityUpdate> & Pick<EntityUpdate, 'entityId' | 'operation'>): EntityUpdate {
   return {
     ownerNodeId: REMOTE_NODE,
@@ -335,6 +343,108 @@ describe('ConnectionRegistry', () => {
       expect(stats2.local).toBe(1);
       expect(stats2.total).toBe(2);
       expect(stats2.pendingExpiry).toBe(1);
+    });
+  });
+
+  describe('allowReconnect', () => {
+    // 1. Default behavior unchanged: duplicate register throws.
+    it('default (allowReconnect: false) — duplicate register still throws', async () => {
+      registry = makeRegistry();
+      await registry.start();
+
+      await registry.register('conn-dup-default');
+      await expect(registry.register('conn-dup-default')).rejects.toThrow();
+    });
+
+    // 2. allowReconnect: true — second register returns existing handle with reset TTL.
+    it('allowReconnect: true — second register returns existing handle with reset TTL', async () => {
+      registry = makeReconnectRegistry(TTL_MS);
+      await registry.start();
+
+      const first = await registry.register('conn-rc', { initial: true });
+      expect(first.connectionId).toBe('conn-rc');
+
+      const second = await registry.register('conn-rc', {});
+      expect(second.connectionId).toBe('conn-rc');
+      expect(second.nodeId).toBe(LOCAL_NODE);
+      // expiresAt should be reset relative to the reconnect call, not the original registration.
+      expect(second.expiresAt).toBeGreaterThanOrEqual(first.expiresAt!);
+    });
+
+    // 3. allowReconnect: true — metadata from second register merges with first (new values win).
+    it('allowReconnect: true — metadata is merged, new values win', async () => {
+      registry = makeReconnectRegistry();
+      await registry.start();
+
+      await registry.register('conn-meta', { a: 1, b: 'old' });
+      const second = await registry.register('conn-meta', { b: 'new', c: 3 });
+
+      expect(second.metadata).toEqual({ a: 1, b: 'new', c: 3 });
+    });
+
+    // 4. allowReconnect: true — 'connection:reconnected' fires instead of 'connection:registered'.
+    it("allowReconnect: true — emits 'connection:reconnected' on duplicate, not 'connection:registered'", async () => {
+      registry = makeReconnectRegistry();
+      await registry.start();
+
+      const registeredHandler = jest.fn();
+      const reconnectedHandler = jest.fn();
+      registry.on('connection:registered', registeredHandler);
+      registry.on('connection:reconnected', reconnectedHandler);
+
+      await registry.register('conn-ev-rc');
+      // First register: emits 'connection:registered' via the entity:created event, not reconnected.
+      expect(registeredHandler).toHaveBeenCalledTimes(1);
+      expect(reconnectedHandler).toHaveBeenCalledTimes(0);
+
+      await registry.register('conn-ev-rc', { tag: 'reconnect' });
+      // Second register: emits 'connection:reconnected', NOT another 'connection:registered'.
+      expect(reconnectedHandler).toHaveBeenCalledTimes(1);
+      const handle: ConnectionHandle = reconnectedHandler.mock.calls[0][0];
+      expect(handle.connectionId).toBe('conn-ev-rc');
+      expect(handle.metadata).toMatchObject({ tag: 'reconnect' });
+      // No additional 'connection:registered' fired.
+      expect(registeredHandler).toHaveBeenCalledTimes(1);
+    });
+
+    // 5. allowReconnect: true + remote-owned connection: throws.
+    it('allowReconnect: true — throws when trying to reconnect a remote-owned connection', async () => {
+      registry = makeReconnectRegistry();
+      await registry.start();
+
+      // Inject a remote-owned connection via applyRemoteUpdate.
+      const remoteUpdate = makeRemoteUpdate({ entityId: 'conn-remote-rc', operation: 'CREATE' });
+      await registry.applyRemoteUpdate(remoteUpdate);
+
+      await expect(registry.register('conn-remote-rc')).rejects.toThrow(
+        /Cannot reconnect.*owned by remote node/,
+      );
+    });
+
+    // 6. After reconnect, TTL timer is rescheduled correctly.
+    it('allowReconnect: true — TTL timer is rescheduled after reconnect', async () => {
+      registry = makeReconnectRegistry(TTL_MS);
+      await registry.start();
+
+      const expiredHandler = jest.fn();
+      registry.on('connection:expired', expiredHandler);
+
+      await registry.register('conn-ttl-rc');
+
+      // Advance almost to the original TTL boundary.
+      await jest.advanceTimersByTimeAsync(TTL_MS - 100);
+      expect(expiredHandler).not.toHaveBeenCalled();
+
+      // Reconnect — timer should be reset from this point.
+      await registry.register('conn-ttl-rc', { reconnected: true });
+
+      // Advance past where the OLD timer would have fired (100 ms more) — should NOT fire yet.
+      await jest.advanceTimersByTimeAsync(200);
+      expect(expiredHandler).not.toHaveBeenCalled();
+
+      // Advance the remaining TTL from the reconnect point — should fire now.
+      await jest.advanceTimersByTimeAsync(TTL_MS - 200);
+      expect(expiredHandler).toHaveBeenCalledWith('conn-ttl-rc');
     });
   });
 });

@@ -26,6 +26,22 @@ export interface ServiceRegistryConfig {
   localNodeId: string;
   entityPrefix?: string;
   aliveNodeIds?: () => Set<string>;
+
+  /**
+   * Optional per-endpoint health check. Runs on `healthCheckIntervalMs`
+   * for every LOCAL endpoint and marks unhealthy endpoints as filtered
+   * out of find()/selectOne() until the next successful check.
+   * Caller is responsible for TCP probes, HTTP pings, or whatever
+   * liveness semantic applies.
+   * Default: undefined (no health checks — all endpoints are healthy).
+   */
+  healthCheck?: (endpoint: ServiceEndpoint) => Promise<boolean>;
+
+  /**
+   * How often to run health checks. Default: 30_000 (30s). Only used
+   * when `healthCheck` is provided.
+   */
+  healthCheckIntervalMs?: number;
 }
 
 function toEndpoint(record: EntityRecord): ServiceEndpoint {
@@ -46,6 +62,16 @@ function toEndpoint(record: EntityRecord): ServiceEndpoint {
   };
 }
 
+/**
+ * Manages service endpoint discovery within a distributed cluster.
+ *
+ * Events:
+ *   'service:registered'         (endpoint: ServiceEndpoint) — new endpoint registered
+ *   'service:unregistered'       (endpointId: string, serviceName: string) — endpoint removed
+ *   'service:unhealthy'          (endpointId: string, serviceName: string) — endpoint first fails health check
+ *   'service:healthy'            (endpointId: string, serviceName: string) — endpoint recovers after failure
+ *   'service:healthcheck-error'  (endpointId: string, serviceName: string, error: unknown) — health check threw
+ */
 export class ServiceRegistry extends EventEmitter implements LifecycleAware {
   private readonly registry: EntityRegistry;
   private readonly localNodeId: string;
@@ -53,6 +79,12 @@ export class ServiceRegistry extends EventEmitter implements LifecycleAware {
   private readonly aliveNodeIds: (() => Set<string>) | undefined;
   private readonly rrIndices: Map<string, number> = new Map();
   private _started = false;
+
+  private readonly healthCheck: ((endpoint: ServiceEndpoint) => Promise<boolean>) | undefined;
+  private readonly healthCheckIntervalMs: number;
+  private healthCheckTimer: ReturnType<typeof setInterval> | undefined;
+  /** endpointIds currently known to be unhealthy */
+  private readonly unhealthyEndpoints: Map<string, boolean> = new Map();
 
   private readonly onEntityCreated: (record: EntityRecord) => void;
   private readonly onEntityDeleted: (record: EntityRecord) => void;
@@ -63,6 +95,8 @@ export class ServiceRegistry extends EventEmitter implements LifecycleAware {
     this.localNodeId = config.localNodeId;
     this.prefix = config.entityPrefix ?? 'service:';
     this.aliveNodeIds = config.aliveNodeIds;
+    this.healthCheck = config.healthCheck;
+    this.healthCheckIntervalMs = config.healthCheckIntervalMs ?? 30_000;
 
     this.onEntityCreated = (record: EntityRecord) => {
       if (!record.entityId.startsWith(this.prefix)) return;
@@ -85,6 +119,14 @@ export class ServiceRegistry extends EventEmitter implements LifecycleAware {
     this._started = true;
     this.registry.on('entity:created', this.onEntityCreated);
     this.registry.on('entity:deleted', this.onEntityDeleted);
+
+    if (this.healthCheck !== undefined) {
+      const timer = setInterval(() => {
+        void this.runHealthChecks();
+      }, this.healthCheckIntervalMs);
+      timer.unref();
+      this.healthCheckTimer = timer;
+    }
   }
 
   async stop(): Promise<void> {
@@ -92,6 +134,40 @@ export class ServiceRegistry extends EventEmitter implements LifecycleAware {
     this._started = false;
     this.registry.off('entity:created', this.onEntityCreated);
     this.registry.off('entity:deleted', this.onEntityDeleted);
+
+    if (this.healthCheckTimer !== undefined) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = undefined;
+    }
+  }
+
+  private async runHealthChecks(): Promise<void> {
+    const localEndpoints = this.getLocalEndpoints();
+    await Promise.all(
+      localEndpoints.map(async (endpoint) => {
+        const { endpointId, serviceName } = endpoint;
+        let healthy: boolean;
+        try {
+          healthy = await this.healthCheck!(endpoint);
+        } catch (err) {
+          this.emit('service:healthcheck-error', endpointId, serviceName, err);
+          healthy = false;
+        }
+
+        const wasUnhealthy = this.unhealthyEndpoints.has(endpointId);
+        if (!healthy) {
+          if (!wasUnhealthy) {
+            this.unhealthyEndpoints.set(endpointId, true);
+            this.emit('service:unhealthy', endpointId, serviceName);
+          }
+        } else {
+          if (wasUnhealthy) {
+            this.unhealthyEndpoints.delete(endpointId);
+            this.emit('service:healthy', endpointId, serviceName);
+          }
+        }
+      }),
+    );
   }
 
   async register(
@@ -150,6 +226,7 @@ export class ServiceRegistry extends EventEmitter implements LifecycleAware {
         if (alive === undefined) return true;
         return alive.has(r.ownerNodeId);
       })
+      .filter((r) => !this.unhealthyEndpoints.has(r.entityId))
       .map(toEndpoint);
   }
 

@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
 import { unlink } from 'fs/promises';
 import { PubSubManager } from '../gateway/pubsub/PubSubManager';
@@ -23,6 +24,20 @@ export interface EventBusConfig {
   walSyncIntervalMs?: number;  // Default: 1000. Set to 0 for manual sync.
   deadLetterHandler?: (event: BusEvent, error: Error) => void;
   metrics?: MetricsRegistry;
+
+  /**
+   * If set, the bus runs compact() on this interval. Pairs well with
+   * `compactOptions.keepLastNPerType` to bound WAL growth without manual
+   * intervention. Only active when walFilePath is also configured.
+   * Default: undefined (manual compaction only).
+   */
+  autoCompactIntervalMs?: number;
+
+  /**
+   * Options passed to compact() when auto-compaction fires.
+   * Default: { keepLastNPerType: 100 }
+   */
+  autoCompactOptions?: EventBusCompactionOptions;
 }
 
 export interface DurableSubscriptionOptions<S = unknown> {
@@ -60,7 +75,7 @@ type TypedHandler<T = unknown> = (event: BusEvent<T>) => Promise<void>;
  * version to its events. On restart with a WAL, the counter is restored
  * from the max version in the log to avoid collisions.
  */
-export class EventBus<EventMap extends Record<string, unknown> = Record<string, unknown>> implements LifecycleAware {
+export class EventBus<EventMap extends Record<string, unknown> = Record<string, unknown>> extends EventEmitter implements LifecycleAware {
   private readonly pubsub: PubSubManager;
   private readonly localNodeId: string;
   private readonly config: EventBusConfig;
@@ -76,9 +91,13 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
 
   private _walWriter: WALWriterImpl | null = null;
 
+  private _autoCompactTimer: ReturnType<typeof setInterval> | null = null;
+  private _inflightCompaction: Promise<unknown> | null = null;
+
   private readonly _stats = { published: 0, received: 0, subscriptions: 0 };
 
   constructor(pubsub: PubSubManager, localNodeId: string, config: EventBusConfig) {
+    super();
     this.pubsub = pubsub;
     this.localNodeId = localNodeId;
     this.config = config;
@@ -118,11 +137,44 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
         await reader.close();
       }
     }
+
+    if (
+      this.config.autoCompactIntervalMs !== undefined &&
+      this.config.autoCompactIntervalMs > 0 &&
+      this.config.walFilePath
+    ) {
+      const opts: EventBusCompactionOptions = this.config.autoCompactOptions ?? { keepLastNPerType: 100 };
+      const timer = setInterval(() => {
+        const promise = this.compact(opts).then((result) => {
+          this.emit('compact:completed', result);
+        }).catch((err) => {
+          this.emit('compact:error', err);
+        }).finally(() => {
+          if (this._inflightCompaction === promise) {
+            this._inflightCompaction = null;
+          }
+        });
+        this._inflightCompaction = promise;
+      }, this.config.autoCompactIntervalMs);
+      timer.unref();
+      this._autoCompactTimer = timer;
+    }
   }
 
   async stop(): Promise<void> {
     if (!this._started) return;
     this._started = false;
+
+    if (this._autoCompactTimer !== null) {
+      clearInterval(this._autoCompactTimer);
+      this._autoCompactTimer = null;
+    }
+
+    if (this._inflightCompaction !== null) {
+      await this._inflightCompaction.catch(() => { /* already emitted compact:error */ });
+      this._inflightCompaction = null;
+    }
+
     if (this._subId !== null) {
       this.pubsub.unsubscribe(this._subId);
       this._subId = null;

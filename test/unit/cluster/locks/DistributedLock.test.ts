@@ -233,4 +233,69 @@ describe('DistributedLock', () => {
     await lock.release(h2!);
     expect(lock.getHeldLocks()).toHaveLength(0);
   });
+
+  // -------------------------------------------------------------------------
+  // handleRemoteNodeFailure
+  // -------------------------------------------------------------------------
+
+  describe('handleRemoteNodeFailure', () => {
+    it('removes registry entries owned by the failed node', async () => {
+      // Inject a lock entry owned by a remote node
+      await registry.applyRemoteUpdate({
+        entityId: 'remote-lock-1', ownerNodeId: 'node-dead', version: 1,
+        timestamp: Date.now(), operation: 'CREATE', metadata: {},
+      });
+
+      expect(lock.isHeldByAny('remote-lock-1')).toBe(true);
+
+      lock.handleRemoteNodeFailure('node-dead');
+
+      // Flush microtask queue so the void applyRemoteUpdate promise settles
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(lock.isHeldByAny('remote-lock-1')).toBe(false);
+    });
+
+    it('returns the correct count of cleaned-up locks', async () => {
+      await registry.applyRemoteUpdate({
+        entityId: 'dead-lock-a', ownerNodeId: 'node-dead', version: 1,
+        timestamp: Date.now(), operation: 'CREATE', metadata: {},
+      });
+      await registry.applyRemoteUpdate({
+        entityId: 'dead-lock-b', ownerNodeId: 'node-dead', version: 2,
+        timestamp: Date.now(), operation: 'CREATE', metadata: {},
+      });
+
+      const count = lock.handleRemoteNodeFailure('node-dead');
+
+      expect(count).toBe(2);
+    });
+
+    it('does not affect locks owned by other (alive) nodes', async () => {
+      await registry.applyRemoteUpdate({
+        entityId: 'alive-lock', ownerNodeId: 'node-alive', version: 1,
+        timestamp: Date.now(), operation: 'CREATE', metadata: {},
+      });
+      await registry.applyRemoteUpdate({
+        entityId: 'dead-lock', ownerNodeId: 'node-dead', version: 1,
+        timestamp: Date.now(), operation: 'CREATE', metadata: {},
+      });
+
+      const count = lock.handleRemoteNodeFailure('node-dead');
+      expect(count).toBe(1);
+
+      // Flush microtask queue
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(lock.isHeldByAny('alive-lock')).toBe(true);
+      expect(lock.isHeldByAny('dead-lock')).toBe(false);
+    });
+
+    it('returns 0 when the node held no locks', async () => {
+      const count = lock.handleRemoteNodeFailure('node-with-no-locks');
+      expect(count).toBe(0);
+    });
+  });
 });

@@ -17,6 +17,15 @@ export interface ConnectionHandle {
 export interface ConnectionRegistryConfig {
   ttlMs?: number;
   metrics?: MetricsRegistry;
+  /**
+   * If true and a connectionId is registered that was previously
+   * registered-and-not-expired on this node, revive the existing entry
+   * instead of throwing or creating a new one. Metadata is merged
+   * (new values win), expiresAt is reset to now + ttlMs.
+   * Emits 'connection:reconnected' instead of 'connection:registered'.
+   * Default: false (existing behavior — throw on duplicate registration).
+   */
+  allowReconnect?: boolean;
 }
 
 function toHandle(record: EntityRecord, ttlMs?: number): ConnectionHandle {
@@ -29,10 +38,24 @@ function toHandle(record: EntityRecord, ttlMs?: number): ConnectionHandle {
   };
 }
 
+/**
+ * Tracks live connections across a distributed cluster.
+ *
+ * Default behaviour: each `register()` call creates a fresh entry. A client
+ * that drops and reconnects will appear as a brand-new connection and any
+ * duplicate `register()` call for the same id throws.
+ *
+ * Set `allowReconnect: true` in the config if you want same-id reconnection
+ * to revive the existing entry instead: metadata is merged (new values win)
+ * and the TTL is reset. In that case `register()` emits
+ * `'connection:reconnected'` rather than `'connection:registered'` for the
+ * duplicate call.
+ */
 export class ConnectionRegistry extends EventEmitter implements LifecycleAware {
   private readonly registry: EntityRegistry;
   private readonly localNodeId: string;
   private readonly ttlMs: number | undefined;
+  private readonly allowReconnect: boolean;
   private readonly evictionTimer: EvictionTimer<string> | null;
   private readonly metrics: MetricsRegistry | null;
   private readonly onEntityCreated: (record: EntityRecord) => void;
@@ -48,6 +71,7 @@ export class ConnectionRegistry extends EventEmitter implements LifecycleAware {
     this.registry = registry;
     this.localNodeId = localNodeId;
     this.ttlMs = config?.ttlMs;
+    this.allowReconnect = config?.allowReconnect ?? false;
     this.metrics = config?.metrics ?? null;
     this.evictionTimer = this.ttlMs !== undefined ? new EvictionTimer<string>(this.ttlMs) : null;
 
@@ -84,6 +108,37 @@ export class ConnectionRegistry extends EventEmitter implements LifecycleAware {
   }
 
   async register(connectionId: string, metadata: Record<string, unknown> = {}): Promise<ConnectionHandle> {
+    // Reconnect path: check whether the entity already exists before proposing.
+    if (this.allowReconnect) {
+      const existing = this.registry.getEntity(connectionId);
+      if (existing !== null) {
+        if (existing.ownerNodeId !== this.localNodeId) {
+          throw new Error(
+            `[ConnectionRegistry] Cannot reconnect '${connectionId}': owned by remote node '${existing.ownerNodeId}'.`,
+          );
+        }
+        // Merge metadata (new values win) and reset the TTL timer.
+        const mergedMetadata = { ...((existing.metadata as Record<string, unknown>) ?? {}), ...metadata };
+        const record = await this.registry.updateEntity(connectionId, mergedMetadata);
+        if (this.evictionTimer !== null) {
+          this.evictionTimer.cancel(connectionId);
+          this.evictionTimer.schedule(connectionId, async (id) => {
+            await this.unregister(id);
+            this.metrics?.counter('connection.expired.count').inc();
+            this.metrics?.gauge('connection.active.gauge').set(this.getLocalConnections().length);
+            this.emit('connection:expired', id);
+          });
+        }
+        const reconnectedAt = Date.now();
+        const handle: ConnectionHandle = {
+          ...toHandle(record, this.ttlMs),
+          expiresAt: this.ttlMs !== undefined ? reconnectedAt + this.ttlMs : undefined,
+        };
+        this.emit('connection:reconnected', handle);
+        return handle;
+      }
+    }
+
     const record = await this.registry.proposeEntity(connectionId, metadata);
     if (this.evictionTimer !== null) {
       this.evictionTimer.schedule(connectionId, async (id) => {

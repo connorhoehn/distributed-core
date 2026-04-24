@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { FailureDetectorBridge } from '../../../../src/cluster/failure/FailureDetectorBridge';
 import { ResourceRouter } from '../../../../src/routing/ResourceRouter';
 import { ConnectionRegistry } from '../../../../src/connections/ConnectionRegistry';
+import { DistributedLock } from '../../../../src/cluster/locks/DistributedLock';
 import { EntityRegistryFactory } from '../../../../src/cluster/entity/EntityRegistryFactory';
 import { MembershipEntry } from '../../../../src/cluster/types';
 import { FailureDetector } from '../../../../src/monitoring/FailureDetector';
@@ -62,6 +63,17 @@ async function makeConnectionRegistry(localNodeId: string) {
   return { connRegistry, entityRegistry };
 }
 
+async function makeLock(localNodeId: string) {
+  const entityRegistry = EntityRegistryFactory.createMemory(localNodeId, { enableTestMode: true });
+  await entityRegistry.start();
+  const lock = new DistributedLock(entityRegistry, localNodeId, {
+    defaultTtlMs: 30_000,
+    acquireTimeoutMs: 500,
+    retryIntervalMs: 100,
+  });
+  return { lock, entityRegistry };
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -69,10 +81,12 @@ async function makeConnectionRegistry(localNodeId: string) {
 describe('FailureDetectorBridge', () => {
   const routers: ResourceRouter[] = [];
   const connRegistries: ConnectionRegistry[] = [];
+  const lockRegistries: Array<{ stop(): Promise<void> }> = [];
 
   afterEach(async () => {
     for (const r of routers.splice(0)) await r.stop();
     for (const c of connRegistries.splice(0)) await c.stop();
+    for (const lr of lockRegistries.splice(0)) await lr.stop();
   });
 
   // -------------------------------------------------------------------------
@@ -315,10 +329,121 @@ describe('FailureDetectorBridge', () => {
     await new Promise(r => setImmediate(r));
 
     expect(cleanupSpy).toHaveBeenCalledTimes(1);
-    expect(cleanupSpy).toHaveBeenCalledWith('some-node', { orphanedResources: 0, expiredConnections: 0 });
+    expect(cleanupSpy).toHaveBeenCalledWith('some-node', { orphanedResources: 0, expiredConnections: 0, releasedLocks: 0 });
     expect(errorSpy).not.toHaveBeenCalled();
 
     expect(() => bridge.stop()).not.toThrow();
     expect(bridge.isStarted()).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // 9. lock.handleRemoteNodeFailure is called on node-failed
+  // -------------------------------------------------------------------------
+
+  it('calls lock.handleRemoteNodeFailure for the failed node when targets.lock is set', async () => {
+    const detector = makeMockDetector();
+    const { lock, entityRegistry } = await makeLock('node-local');
+    lockRegistries.push(entityRegistry);
+
+    // Simulate a lock held by the remote node by injecting a registry entry
+    await entityRegistry.applyRemoteUpdate({
+      entityId: 'lock-remote', ownerNodeId: 'node-dead', version: 1,
+      timestamp: Date.now(), operation: 'CREATE', metadata: {},
+    });
+
+    expect(lock.isHeldByAny('lock-remote')).toBe(true);
+
+    const bridge = new FailureDetectorBridge(detector, { lock });
+    bridge.start();
+
+    (detector as unknown as EventEmitter).emit('node-failed', 'node-dead', 'timeout');
+
+    await new Promise(r => setImmediate(r));
+
+    expect(lock.isHeldByAny('lock-remote')).toBe(false);
+
+    bridge.stop();
+  });
+
+  // -------------------------------------------------------------------------
+  // 10. cleanup:triggered summary includes releasedLocks
+  // -------------------------------------------------------------------------
+
+  it('emits cleanup:triggered with releasedLocks count when targets.lock is set', async () => {
+    const detector = makeMockDetector();
+    const { lock, entityRegistry } = await makeLock('node-local');
+    lockRegistries.push(entityRegistry);
+
+    await entityRegistry.applyRemoteUpdate({
+      entityId: 'lock-a', ownerNodeId: 'node-dead', version: 1,
+      timestamp: Date.now(), operation: 'CREATE', metadata: {},
+    });
+    await entityRegistry.applyRemoteUpdate({
+      entityId: 'lock-b', ownerNodeId: 'node-dead', version: 1,
+      timestamp: Date.now(), operation: 'CREATE', metadata: {},
+    });
+
+    const summaries: Array<Record<string, number>> = [];
+    const bridge = new FailureDetectorBridge(detector, { lock });
+    bridge.on('cleanup:triggered', (_nodeId: string, summary: any) => summaries.push(summary));
+    bridge.start();
+
+    (detector as unknown as EventEmitter).emit('node-failed', 'node-dead', 'timeout');
+
+    await new Promise(r => setImmediate(r));
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0].releasedLocks).toBe(2);
+    expect(summaries[0].orphanedResources).toBe(0);
+    expect(summaries[0].expiredConnections).toBe(0);
+
+    bridge.stop();
+  });
+
+  // -------------------------------------------------------------------------
+  // 11. Session orphan via router:  FailureDetectorBridge → router.handleNodeLeft
+  //      → router emits resource:orphaned → DistributedSession emits session:orphaned
+  // -------------------------------------------------------------------------
+
+  it('session:orphaned is emitted via the router when a node fails (end-to-end)', async () => {
+    const detector = makeMockDetector();
+    // We need a real router + session to verify the event chain end-to-end.
+    // Import DistributedSession inline to avoid polluting the top-level imports.
+    const { DistributedSession } = await import('../../../../src/cluster/sessions/DistributedSession');
+
+    const { router, registry } = await makeRouter('node-local', ['node-dead']);
+    routers.push(router);
+
+    // Register a session owned by the remote node
+    await (router as any).registry.applyRemoteUpdate({
+      entityId: 'sess-owned-by-dead', ownerNodeId: 'node-dead', version: 1,
+      timestamp: Date.now(), operation: 'CREATE', metadata: {},
+    });
+
+    const stateAdapter = {
+      createState: () => ({}),
+      applyUpdate: (s: any, u: any) => ({ ...s, ...u }),
+      serialize: (s: any) => JSON.stringify(s),
+      deserialize: (raw: any) => JSON.parse(raw as string),
+    };
+
+    const session = new DistributedSession('node-local', router, stateAdapter, { ownsRouter: false });
+    await session.start();
+
+    const orphanedIds: string[] = [];
+    session.on('session:orphaned', (id: string) => orphanedIds.push(id));
+
+    // Bridge only needs the router target for this path
+    const bridge = new FailureDetectorBridge(detector, { router });
+    bridge.start();
+
+    (detector as unknown as EventEmitter).emit('node-failed', 'node-dead', 'timeout');
+
+    await new Promise(r => setImmediate(r));
+
+    expect(orphanedIds).toContain('sess-owned-by-dead');
+
+    await session.stop();
+    bridge.stop();
   });
 });

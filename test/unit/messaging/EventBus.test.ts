@@ -737,3 +737,199 @@ describe('compact()', () => {
     });
   });
 });
+
+describe('autoCompactIntervalMs', () => {
+  const walPaths: string[] = [];
+
+  function freshWal(): string {
+    const p = tempWalPath();
+    walPaths.push(p);
+    return p;
+  }
+
+  afterEach(async () => {
+    jest.useRealTimers();
+    for (const p of walPaths.splice(0)) {
+      try { fs.unlinkSync(p); } catch { /* ignore */ }
+    }
+  });
+
+  it('schedules periodic compact() calls when autoCompactIntervalMs is set', async () => {
+    jest.useFakeTimers();
+    const walPath = freshWal();
+    const pubsub = makePubSub();
+    const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+      walSyncIntervalMs: 0,
+      autoCompactIntervalMs: 5000,
+      autoCompactOptions: { keepLastNPerType: 100 },
+    });
+    await bus.start();
+
+    await bus.publish('user.created', { userId: 'u1' });
+    await bus.publish('user.created', { userId: 'u2' });
+
+    const completedResults: unknown[] = [];
+    const firstDone = new Promise<void>((resolve) => {
+      bus.once('compact:completed', (result) => {
+        completedResults.push(result);
+        resolve();
+      });
+    });
+
+    // Advance past the first interval tick, then await the real async work
+    await jest.advanceTimersByTimeAsync(5001);
+    await firstDone;
+
+    expect(completedResults).toHaveLength(1);
+    expect(completedResults[0]).toMatchObject({
+      entriesBefore: 2,
+      entriesKept: 2,
+      entriesRemoved: 0,
+    });
+
+    // Advance past a second tick
+    const secondDone = new Promise<void>((resolve) => {
+      bus.once('compact:completed', (result) => {
+        completedResults.push(result);
+        resolve();
+      });
+    });
+    await jest.advanceTimersByTimeAsync(5000);
+    await secondDone;
+    expect(completedResults).toHaveLength(2);
+
+    await bus.stop();
+  });
+
+  it('does NOT schedule auto-compact when walFilePath is not set', async () => {
+    jest.useFakeTimers();
+    const pubsub = makePubSub();
+    const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      autoCompactIntervalMs: 1000,
+    });
+    await bus.start();
+
+    const completedResults: unknown[] = [];
+    const errors: unknown[] = [];
+    bus.on('compact:completed', (r) => { completedResults.push(r); });
+    bus.on('compact:error', (e) => { errors.push(e); });
+
+    await jest.advanceTimersByTimeAsync(5000);
+
+    expect(completedResults).toHaveLength(0);
+    expect(errors).toHaveLength(0);
+
+    await bus.stop();
+  });
+
+  it('stop() clears the interval — no further compactions fire after stop', async () => {
+    jest.useFakeTimers();
+    const walPath = freshWal();
+    const pubsub = makePubSub();
+    const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+      walSyncIntervalMs: 0,
+      autoCompactIntervalMs: 1000,
+    });
+    await bus.start();
+
+    await bus.publish('user.created', { userId: 'u1' });
+
+    const completedResults: unknown[] = [];
+    const firstDone = new Promise<void>((resolve) => {
+      bus.once('compact:completed', (r) => {
+        completedResults.push(r);
+        resolve();
+      });
+    });
+
+    // Fire one compaction
+    await jest.advanceTimersByTimeAsync(1001);
+    await firstDone;
+    expect(completedResults).toHaveLength(1);
+
+    // Stop the bus
+    await bus.stop();
+
+    // Advance time further — no more compactions should fire
+    await jest.advanceTimersByTimeAsync(5000);
+    expect(completedResults).toHaveLength(1);
+  });
+
+  it('compact:error is emitted and the bus does not crash when compact fails', async () => {
+    jest.useFakeTimers();
+    const walPath = freshWal();
+    const pubsub = makePubSub();
+    const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+      walSyncIntervalMs: 0,
+      autoCompactIntervalMs: 1000,
+    });
+    await bus.start();
+
+    // Make compact() reject by replacing the walFilePath config after start
+    // The simplest approach: spy on compact and force it to reject
+    const compactSpy = jest.spyOn(bus, 'compact').mockRejectedValueOnce(new Error('disk full'));
+
+    const errors: Error[] = [];
+    const completed: unknown[] = [];
+    bus.on('compact:error', (e) => { errors.push(e as Error); });
+    bus.on('compact:completed', (r) => { completed.push(r); });
+
+    await jest.advanceTimersByTimeAsync(1001);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe('disk full');
+    expect(completed).toHaveLength(0);
+
+    // Bus should still be alive — publish should work
+    compactSpy.mockRestore();
+    expect(() => bus.publish('user.created', { userId: 'u1' })).not.toThrow();
+
+    await bus.stop();
+  });
+
+  it('compact:completed fires after a successful auto-compact with a result object', async () => {
+    jest.useFakeTimers();
+    const walPath = freshWal();
+    const pubsub = makePubSub();
+    const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+      walSyncIntervalMs: 0,
+      autoCompactIntervalMs: 2000,
+      autoCompactOptions: { keepLastNPerType: 1 },
+    });
+    await bus.start();
+
+    await bus.publish('user.created', { userId: 'u1' });
+    await bus.publish('user.created', { userId: 'u2' });
+    await bus.publish('order.placed', { orderId: 'o1' });
+    await bus.publish('order.placed', { orderId: 'o2' });
+
+    const results: unknown[] = [];
+    const done = new Promise<void>((resolve) => {
+      bus.once('compact:completed', (result) => {
+        results.push(result);
+        resolve();
+      });
+    });
+
+    await jest.advanceTimersByTimeAsync(2001);
+    await done;
+
+    expect(results).toHaveLength(1);
+    const result = results[0] as { entriesBefore: number; entriesKept: number; entriesRemoved: number; typesVisited: number };
+    expect(result.entriesBefore).toBe(4);
+    expect(result.entriesKept).toBe(2);   // keepLastNPerType: 1, two types
+    expect(result.entriesRemoved).toBe(2);
+    expect(result.typesVisited).toBe(2);
+
+    await bus.stop();
+  });
+});

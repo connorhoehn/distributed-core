@@ -312,4 +312,213 @@ describe('ServiceRegistry', () => {
     expect(stats.endpoints).toBe(3);
     expect(stats.localEndpoints).toBe(3);
   });
+
+  // ── Health check tests ────────────────────────────────────────────────────
+
+  describe('health checks', () => {
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    // Helper: build a registry with a controllable health-check function
+    function makeHealthRegistry(
+      healthCheck: (ep: any) => Promise<boolean>,
+      intervalMs = 100,
+    ) {
+      const reg = new ServiceRegistry(entityRegistry as any, {
+        localNodeId: 'node-1',
+        healthCheck,
+        healthCheckIntervalMs: intervalMs,
+      });
+      return reg;
+    }
+
+    // 1. No healthCheck configured — all endpoints remain findable
+    it('without healthCheck all endpoints are findable (unchanged behavior)', async () => {
+      await sr.register('svc', '10.0.0.1', 1111);
+      await sr.register('svc', '10.0.0.2', 2222);
+      expect(sr.find('svc')).toHaveLength(2);
+    });
+
+    // 2. healthCheck returning false excludes the endpoint from find() and selectOne()
+    it('healthCheck returning false excludes endpoint from find() and selectOne()', async () => {
+      const check = jest.fn().mockResolvedValue(false);
+      const srHC = makeHealthRegistry(check);
+      await srHC.start();
+
+      const ep = await srHC.register('svc', '10.0.0.1', 1111);
+      await srHC.register('svc', '10.0.0.2', 2222);
+
+      // Manually trigger a health-check cycle
+      await (srHC as any).runHealthChecks();
+
+      const found = srHC.find('svc');
+      expect(found).toHaveLength(0);
+      expect(() => srHC.selectOne('svc')).toThrow(UnknownServiceError);
+
+      await srHC.stop();
+      void ep;
+    });
+
+    // 3. healthCheck returning true re-includes a previously unhealthy endpoint
+    it('healthCheck returning true re-includes endpoint after transient failure', async () => {
+      let shouldFail = true;
+      const check = jest.fn().mockImplementation(async () => !shouldFail);
+      const srHC = makeHealthRegistry(check);
+      await srHC.start();
+
+      await srHC.register('svc', '10.0.0.1', 1111);
+
+      // First run: mark unhealthy
+      await (srHC as any).runHealthChecks();
+      expect(srHC.find('svc')).toHaveLength(0);
+
+      // Second run: endpoint recovers
+      shouldFail = false;
+      await (srHC as any).runHealthChecks();
+      expect(srHC.find('svc')).toHaveLength(1);
+
+      await srHC.stop();
+    });
+
+    // 4. 'service:unhealthy' emitted when an endpoint first fails
+    it("emits 'service:unhealthy' when an endpoint first fails health check", async () => {
+      const check = jest.fn().mockResolvedValue(false);
+      const srHC = makeHealthRegistry(check);
+      await srHC.start();
+
+      const ep = await srHC.register('svc', '10.0.0.1', 1111);
+
+      const unhealthyEvents: Array<[string, string]> = [];
+      srHC.on('service:unhealthy', (endpointId, serviceName) => {
+        unhealthyEvents.push([endpointId, serviceName]);
+      });
+
+      await (srHC as any).runHealthChecks();
+      expect(unhealthyEvents).toHaveLength(1);
+      expect(unhealthyEvents[0]).toEqual([ep.endpointId, 'svc']);
+
+      // Second run — already unhealthy, should NOT emit again
+      await (srHC as any).runHealthChecks();
+      expect(unhealthyEvents).toHaveLength(1);
+
+      await srHC.stop();
+    });
+
+    // 5. 'service:healthy' emitted when an endpoint recovers
+    it("emits 'service:healthy' when an endpoint recovers", async () => {
+      let shouldFail = true;
+      const check = jest.fn().mockImplementation(async () => !shouldFail);
+      const srHC = makeHealthRegistry(check);
+      await srHC.start();
+
+      await srHC.register('svc', '10.0.0.1', 1111);
+
+      const healthyEvents: Array<[string, string]> = [];
+      srHC.on('service:healthy', (endpointId, serviceName) => {
+        healthyEvents.push([endpointId, serviceName]);
+      });
+
+      // First run: become unhealthy
+      await (srHC as any).runHealthChecks();
+      expect(healthyEvents).toHaveLength(0);
+
+      // Second run: recover
+      shouldFail = false;
+      await (srHC as any).runHealthChecks();
+      expect(healthyEvents).toHaveLength(1);
+      expect(healthyEvents[0][1]).toBe('svc');
+
+      // Third run: still healthy — should NOT emit again
+      await (srHC as any).runHealthChecks();
+      expect(healthyEvents).toHaveLength(1);
+
+      await srHC.stop();
+    });
+
+    // 6. healthCheck throwing → endpoint excluded, 'service:healthcheck-error' fires, bus doesn't crash
+    it("healthCheck throwing excludes endpoint and emits 'service:healthcheck-error'", async () => {
+      const boom = new Error('TCP refused');
+      const check = jest.fn().mockRejectedValue(boom);
+      const srHC = makeHealthRegistry(check);
+      await srHC.start();
+
+      const ep = await srHC.register('svc', '10.0.0.1', 1111);
+
+      const errors: Array<[string, string, unknown]> = [];
+      srHC.on('service:healthcheck-error', (endpointId, serviceName, err) => {
+        errors.push([endpointId, serviceName, err]);
+      });
+
+      // Should not throw
+      await expect((srHC as any).runHealthChecks()).resolves.toBeUndefined();
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0][0]).toBe(ep.endpointId);
+      expect(errors[0][1]).toBe('svc');
+      expect(errors[0][2]).toBe(boom);
+
+      // Endpoint must be excluded from find()
+      expect(srHC.find('svc')).toHaveLength(0);
+
+      await srHC.stop();
+    });
+
+    // 7. stop() clears the interval — no further checks fire
+    it("stop() clears the interval so no further health checks fire", async () => {
+      jest.useFakeTimers();
+      const check = jest.fn().mockResolvedValue(true);
+      const srHC = makeHealthRegistry(check, 100);
+      await srHC.start();
+
+      await srHC.register('svc', '10.0.0.1', 1111);
+
+      // Advance time to trigger one check
+      jest.advanceTimersByTime(100);
+      // Flush any pending microtasks
+      await Promise.resolve();
+
+      const callsAfterFirstTick = check.mock.calls.length;
+      expect(callsAfterFirstTick).toBeGreaterThanOrEqual(1);
+
+      await srHC.stop();
+
+      // Advance time further — interval should be cleared, no new calls
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+      expect(check.mock.calls.length).toBe(callsAfterFirstTick);
+
+      jest.useRealTimers();
+    });
+
+    // 8. Remote endpoints (not owned by this node) are NOT health-checked
+    it('does not health-check remote endpoints — only locals', async () => {
+      const check = jest.fn().mockResolvedValue(false);
+      const srHC = makeHealthRegistry(check);
+      await srHC.start();
+
+      // Inject a remote endpoint from node-2
+      await entityRegistry.applyRemoteUpdate({
+        entityId: 'service:node-2-svc-remote-hc',
+        ownerNodeId: 'node-2',
+        version: 1,
+        timestamp: Date.now(),
+        operation: 'CREATE',
+        metadata: { serviceName: 'svc', address: '10.0.0.99', port: 9999, userMetadata: {} },
+      });
+
+      // Run health checks — should only target local endpoints (none here)
+      await (srHC as any).runHealthChecks();
+
+      // check() must not have been called (no local endpoints)
+      expect(check).not.toHaveBeenCalled();
+
+      // Remote endpoint must still be findable (not marked unhealthy)
+      const found = srHC.find('svc');
+      expect(found).toHaveLength(1);
+      expect(found[0].nodeId).toBe('node-2');
+
+      await srHC.stop();
+    });
+  });
 });

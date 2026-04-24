@@ -114,6 +114,36 @@ export class DistributedLock {
     return Array.from(this.heldLocks.values());
   }
 
+  /**
+   * Externally triggered cleanup when a remote node is detected as failed.
+   * Iterates all known registry entities owned by `nodeId`, applies a DELETE
+   * remote update so local state converges, and removes any locally-tracked
+   * lock handles for that node.
+   * Returns the count of locks cleaned up.
+   */
+  handleRemoteNodeFailure(nodeId: string): number {
+    const victims = this.registry
+      .getAllKnownEntities()
+      .filter((e) => e.ownerNodeId === nodeId);
+
+    for (const entity of victims) {
+      void this.registry.applyRemoteUpdate({
+        entityId: entity.entityId,
+        ownerNodeId: entity.ownerNodeId,
+        version: Date.now(),
+        timestamp: Date.now(),
+        operation: 'DELETE',
+        metadata: {},
+      });
+      // Clear any locally-tracked handle for this lockId (defensive — normally
+      // only local-node locks are in heldLocks, but guards against edge cases).
+      this._clearTimer(entity.entityId);
+      this.heldLocks.delete(entity.entityId);
+    }
+
+    return victims.length;
+  }
+
   private _scheduleTtl(lockId: string, ttlMs: number): void {
     this._clearTimer(lockId);
     const timer = setTimeout(() => this._onExpired(lockId), ttlMs);

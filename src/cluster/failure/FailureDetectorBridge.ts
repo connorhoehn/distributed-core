@@ -2,11 +2,13 @@ import { EventEmitter } from 'events';
 import { FailureDetector } from '../../monitoring/FailureDetector';
 import { ResourceRouter } from '../../routing/ResourceRouter';
 import { ConnectionRegistry } from '../../connections/ConnectionRegistry';
+import { DistributedLock } from '../locks/DistributedLock';
 import { LifecycleAware } from '../../common/LifecycleAware';
 
 export interface FailureDetectorBridgeTargets {
   router?: ResourceRouter;
   connectionRegistry?: ConnectionRegistry;
+  lock?: DistributedLock;
 }
 
 export interface FailureDetectorBridgeConfig {
@@ -66,6 +68,7 @@ export class FailureDetectorBridge extends EventEmitter implements LifecycleAwar
     try {
       let orphanedResources = 0;
       let expiredConnections = 0;
+      let releasedLocks = 0;
 
       if (this.targets.router) {
         const before = this.targets.router.getAllResources().filter(r => r.ownerNodeId === nodeId).length;
@@ -77,7 +80,11 @@ export class FailureDetectorBridge extends EventEmitter implements LifecycleAwar
         expiredConnections = await this.targets.connectionRegistry.handleRemoteNodeFailure(nodeId);
       }
 
-      this.emit('cleanup:triggered', nodeId, { orphanedResources, expiredConnections });
+      if (this.targets.lock) {
+        releasedLocks = this.targets.lock.handleRemoteNodeFailure(nodeId);
+      }
+
+      this.emit('cleanup:triggered', nodeId, { orphanedResources, expiredConnections, releasedLocks });
     } catch (err) {
       this.emit('cleanup:error', nodeId, err instanceof Error ? err : new Error(String(err)));
     }
