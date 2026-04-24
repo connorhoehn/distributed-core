@@ -137,18 +137,36 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     this.routing = new ClusterRouting();
     this.routing.setContext(this);
     
-        // Connect membership events
-    this.membership.on('member-joined', (nodeInfo: NodeInfo) => this.emit('member-joined', nodeInfo));
-    this.membership.on('member-left', (nodeId: string) => this.emit('member-left', nodeId));
-    this.membership.on('member-updated', (nodeInfo: NodeInfo) => this.emit('member-updated', nodeInfo));
-    this.membership.on('membership-updated', (membership: Map<string, MembershipEntry>) => {
+        // Connect membership events — forward both new canonical names and legacy names.
+    // MembershipTable already dual-emits; we listen on the new name and re-emit under
+    // both names so ClusterManager subscribers on either name receive the event.
+    this.membership.on('member:joined', (nodeInfo: NodeInfo) => {
+      this.emitRenamed('member-joined', 'member:joined', nodeInfo);
+    });
+    this.membership.on('member:left', (nodeId: string) => {
+      this.emitRenamed('member-left', 'member:left', nodeId);
+    });
+    this.membership.on('member:updated', (nodeInfo: NodeInfo) => {
+      this.emitRenamed('member-updated', 'member:updated', nodeInfo);
+    });
+    this.membership.on('membership:updated', (membership: Map<string, MembershipEntry>) => {
       this.hashRing.rebuild(Array.from(membership.values()).filter(entry => entry.status === 'ALIVE'));
-      this.emit('membership-updated', membership);
+      this.emitRenamed('membership-updated', 'membership:updated', membership);
     });
   }
 
   isStarted(): boolean {
     return this._started;
+  }
+
+  /**
+   * Emit both legacy and canonical event names during the deprecation window.
+   * Callers should migrate to the new name; old name support will be removed in
+   * a future release.
+   */
+  private emitRenamed(oldName: string, newName: string, ...args: unknown[]): void {
+    this.emit(newName, ...args);
+    this.emit(oldName, ...args);
   }
 
   async start(): Promise<void> {
@@ -172,7 +190,7 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     }
 
     this._started = true;
-    this.emit('started');
+    this.emitRenamed('started', 'lifecycle:started');
   }
 
   async stop(): Promise<void> {
@@ -194,11 +212,11 @@ export class ClusterManager extends EventEmitter implements IClusterManagerConte
     // Use lifecycle module for shutdown
     await this.lifecycle.stop();
 
+    this._started = false;
+    this.emitRenamed('stopped', 'lifecycle:stopped');
+
     // Remove all event listeners to prevent memory leaks
     this.removeAllListeners();
-
-    this._started = false;
-    this.emit('stopped');
   }
 
   /**

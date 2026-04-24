@@ -5,7 +5,7 @@ import { NodeInfo } from '../types';
 
 /**
  * ClusterLifecycle manages cluster node lifecycle operations
- * 
+ *
  * Responsibilities:
  * - Cluster startup and initialization
  * - Graceful shutdown and cleanup
@@ -21,7 +21,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
 
   constructor(config?: Partial<LifecycleConfig>) {
     super();
-    
+
     this.config = {
       shutdownTimeout: 10000,
       drainTimeout: 30000,
@@ -31,6 +31,20 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       maxShutdownWait: 5000,
       ...config
     };
+  }
+
+  /**
+   * Emit both legacy and canonical event names during the deprecation window.
+   * Callers should migrate to the new name; old name support will be removed in
+   * a future release.
+   *
+   * NOTE: `error` is deliberately excluded from dual-emit. Node's EventEmitter
+   * throws on unhandled `error` events; renaming to `lifecycle:error` while
+   * keeping a silent `error` alias would suppress that safety mechanism.
+   */
+  private emitRenamed(oldName: string, newName: string, ...args: unknown[]): void {
+    this.emit(newName, ...args);
+    this.emit(oldName, ...args);
   }
 
   /**
@@ -73,7 +87,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       this.context.failureDetector.start();
 
       this.isStarted = true;
-      this.emit('started', { nodeId: this.context.localNodeId, timestamp: Date.now() });
+      this.emitRenamed('started', 'lifecycle:started', { nodeId: this.context.localNodeId, timestamp: Date.now() });
     } catch (error) {
       this.emit('error', { error: error as Error, operation: 'start' });
       throw error;
@@ -107,7 +121,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
       this.context.hashRing.rebuild([]);
 
       this.isStarted = false;
-      this.emit('stopped', { nodeId: this.context.localNodeId, timestamp: Date.now() });
+      this.emitRenamed('stopped', 'lifecycle:stopped', { nodeId: this.context.localNodeId, timestamp: Date.now() });
     } catch (error) {
       this.emit('error', { error: error as Error, operation: 'stop' });
       throw error;
@@ -166,7 +180,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
     }
 
     const targetNodeId = nodeId || this.context.localNodeId;
-    
+
     try {
       this.isDraining = true;
 
@@ -227,7 +241,7 @@ export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle,
 
     try {
       const members = this.context.membership.getAliveMembers();
-      
+
       if (members.length < 2) {
         return; // Cannot rebalance with less than 2 nodes
       }

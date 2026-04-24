@@ -23,6 +23,16 @@ export class PubSubManager extends EventEmitter {
   private readonly cluster: ClusterManager;
   private readonly config: Required<PubSubConfig>;
 
+  /**
+   * Emit both legacy and canonical event names during the deprecation window.
+   * Callers should migrate to the new name; old name support will be removed in
+   * a future release.
+   */
+  private emitRenamed(oldName: string, newName: string, ...args: unknown[]): void {
+    this.emit(newName, ...args);
+    this.emit(oldName, ...args);
+  }
+
   /** topic -> (subscriptionId -> Subscription) */
   private readonly subscriptions: Map<string, Map<string, Subscription>> = new Map();
 
@@ -68,7 +78,7 @@ export class PubSubManager extends EventEmitter {
 
     // Forward cluster member-left events
     this.cluster.on('member-left', (nodeId: string) => {
-      this.emit('member-left', nodeId);
+      this.emitRenamed('member-left', 'member:left', nodeId);
     });
 
     // Periodic dedup cache cleanup

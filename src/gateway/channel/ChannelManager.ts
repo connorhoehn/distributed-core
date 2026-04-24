@@ -21,6 +21,16 @@ export class ChannelManager extends EventEmitter {
   private readonly cluster: ClusterManager;
   private readonly config: Required<ChannelManagerConfig>;
 
+  /**
+   * Emit both legacy and canonical event names during the deprecation window.
+   * Callers should migrate to the new name; old name support will be removed in
+   * a future release.
+   */
+  private emitRenamed(oldName: string, newName: string, ...args: unknown[]): void {
+    this.emit(newName, ...args);
+    this.emit(oldName, ...args);
+  }
+
   private readonly channels: Map<string, ChannelInfo> = new Map();
   private cleanupTimer: NodeJS.Timeout | null = null;
   private readonly messageListener: (message: Message) => void;
@@ -129,7 +139,7 @@ export class ChannelManager extends EventEmitter {
       });
     }
 
-    this.emit('member-joined', { channelId, clientId });
+    this.emitRenamed('member-joined', 'member:joined', { channelId, clientId });
   }
 
   leaveChannel(channelId: string, clientId: string): void {
@@ -149,7 +159,7 @@ export class ChannelManager extends EventEmitter {
       });
     }
 
-    this.emit('member-left', { channelId, clientId });
+    this.emitRenamed('member-left', 'member:left', { channelId, clientId });
 
     // Mark for cleanup if empty and not persistent
     // (actual cleanup handled by the cleanup timer)
@@ -287,7 +297,7 @@ export class ChannelManager extends EventEmitter {
         if (channel.members.size < maxMembers) {
           channel.members.add(clientId);
           channel.lastActivity = Date.now();
-          this.emit('member-joined', { channelId, clientId });
+          this.emitRenamed('member-joined', 'member:joined', { channelId, clientId });
         }
         break;
       }
@@ -297,7 +307,7 @@ export class ChannelManager extends EventEmitter {
         if (channel) {
           channel.members.delete(clientId);
           channel.lastActivity = Date.now();
-          this.emit('member-left', { channelId, clientId });
+          this.emitRenamed('member-left', 'member:left', { channelId, clientId });
         }
         break;
       }

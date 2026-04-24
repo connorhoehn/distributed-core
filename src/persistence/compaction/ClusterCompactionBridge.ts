@@ -46,12 +46,17 @@ export class ClusterCompactionBridge {
     this.attached = true;
 
     if (this.config.triggerOnMemberJoin) {
+      // Listen on both canonical and legacy names — the real ClusterManager
+      // dual-emits both, and test harnesses may emit only the legacy name.
+      this.cluster.on('member:joined', this.onMemberJoined);
       this.cluster.on('member-joined', this.onMemberJoined);
     }
     if (this.config.triggerOnMemberLeave) {
+      this.cluster.on('member:left', this.onMemberLeft);
       this.cluster.on('member-left', this.onMemberLeft);
     }
     if (this.config.triggerOnMembershipUpdate) {
+      this.cluster.on('membership:updated', this.onMembershipUpdated);
       this.cluster.on('membership-updated', this.onMembershipUpdated);
     }
   }
@@ -60,8 +65,11 @@ export class ClusterCompactionBridge {
     if (!this.attached) return;
     this.attached = false;
 
+    this.cluster.removeListener('member:joined', this.onMemberJoined);
     this.cluster.removeListener('member-joined', this.onMemberJoined);
+    this.cluster.removeListener('member:left', this.onMemberLeft);
     this.cluster.removeListener('member-left', this.onMemberLeft);
+    this.cluster.removeListener('membership:updated', this.onMembershipUpdated);
     this.cluster.removeListener('membership-updated', this.onMembershipUpdated);
 
     if (this.debounceTimer) {

@@ -35,4 +35,8 @@ export {
 } from './HttpForwardingTransport';
 export type { HttpForwardingTransportConfig } from './HttpForwardingTransport';
 export { ForwardingServer } from './ForwardingServer';
-export type { ForwardingServerConfig, ForwardingHandler } from './ForwardingServer';
+export type { ForwardingServerConfig, ForwardingHandler, FormatPrometheusOptions } from './ForwardingServer';
+export { HttpsForwardingTransport } from './HttpsForwardingTransport';
+export type { HttpsForwardingTransportConfig } from './HttpsForwardingTransport';
+export { HttpsForwardingServer } from './HttpsForwardingServer';
+export type { HttpsForwardingServerConfig } from './HttpsForwardingServer';

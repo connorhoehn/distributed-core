@@ -10,6 +10,16 @@ export class MembershipTable extends EventEmitter {
   }
 
   /**
+   * Emit both legacy and canonical event names during the deprecation window.
+   * Callers should migrate to the new name; old name support will be removed in
+   * a future release.
+   */
+  private emitRenamed(oldName: string, newName: string, ...args: unknown[]): void {
+    this.emit(newName, ...args);
+    this.emit(oldName, ...args);
+  }
+
+  /**
    * Update membership using version/incarnation rules
    */
   updateNode(nodeInfo: NodeInfo): boolean {
@@ -29,8 +39,8 @@ export class MembershipTable extends EventEmitter {
       };
       this.members.set(nodeInfo.id, entry);
       this.version++;
-      this.emit('member-joined', nodeInfo);
-      this.emit('membership-updated', new Map(this.members));
+      this.emitRenamed('member-joined', 'member:joined', nodeInfo);
+      this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
       return true;
     }
 
@@ -43,8 +53,8 @@ export class MembershipTable extends EventEmitter {
       };
       this.members.set(nodeInfo.id, entry);
       this.version++;
-      this.emit('member-updated', nodeInfo);
-      this.emit('membership-updated', new Map(this.members));
+      this.emitRenamed('member-updated', 'member:updated', nodeInfo);
+      this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
       return true;
     } else if (nodeInfo.version === existing.version) {
       // Same version - update if newer timestamp
@@ -56,8 +66,8 @@ export class MembershipTable extends EventEmitter {
         };
         this.members.set(nodeInfo.id, entry);
         this.version++;
-        this.emit('member-updated', nodeInfo);
-        this.emit('membership-updated', new Map(this.members));
+        this.emitRenamed('member-updated', 'member:updated', nodeInfo);
+        this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
         return true;
       }
     }
@@ -88,8 +98,8 @@ export class MembershipTable extends EventEmitter {
     };
     this.members.set(nodeInfo.id, entry);
     this.version++;
-    this.emit('member-joined', nodeInfo);
-    this.emit('membership-updated', new Map(this.members));
+    this.emitRenamed('member-joined', 'member:joined', nodeInfo);
+    this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
   }
 
   /**
@@ -103,8 +113,8 @@ export class MembershipTable extends EventEmitter {
     };
     this.members.set(nodeInfo.id, entry);
     this.version++;
-    this.emit('member-joined', nodeInfo);
-    this.emit('membership-updated', new Map(this.members));
+    this.emitRenamed('member-joined', 'member:joined', nodeInfo);
+    this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
   }
 
   /**
@@ -137,8 +147,8 @@ export class MembershipTable extends EventEmitter {
     if (existed) {
       this.members.delete(nodeId);
       this.version++;
-      this.emit('member-left', nodeId);
-      this.emit('membership-updated', new Map(this.members));
+      this.emitRenamed('member-left', 'member:left', nodeId);
+      this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
     }
     return existed;
   }
@@ -169,9 +179,9 @@ export class MembershipTable extends EventEmitter {
     member.status = 'DEAD';
     member.lastUpdated = Date.now();
     this.version++;
-    
-    this.emit('member-updated', member);
-    this.emit('membership-updated', new Map(this.members));
+
+    this.emitRenamed('member-updated', 'member:updated', member);
+    this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
     return true;
   }
 
@@ -188,9 +198,9 @@ export class MembershipTable extends EventEmitter {
     member.suspectTimeout = Date.now() + timeout;
     member.lastUpdated = Date.now();
     this.version++;
-    
-    this.emit('member-updated', member);
-    this.emit('membership-updated', new Map(this.members));
+
+    this.emitRenamed('member-updated', 'member:updated', member);
+    this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
     return true;
   }
 
@@ -206,9 +216,9 @@ export class MembershipTable extends EventEmitter {
     member.status = 'DEAD';
     member.lastUpdated = Date.now();
     this.version++;
-    
-    this.emit('member-left', nodeId);
-    this.emit('membership-updated', new Map(this.members));
+
+    this.emitRenamed('member-left', 'member:left', nodeId);
+    this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
     return true;
   }
 
@@ -228,7 +238,7 @@ export class MembershipTable extends EventEmitter {
 
     if (pruned > 0) {
       this.version++;
-      this.emit('membership-updated', new Map(this.members));
+      this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
     }
 
     return pruned;
@@ -254,6 +264,6 @@ export class MembershipTable extends EventEmitter {
   clear(): void {
     this.members.clear();
     this.version = 0;
-    this.emit('membership-updated', new Map(this.members));
+    this.emitRenamed('membership-updated', 'membership:updated', new Map(this.members));
   }
 }

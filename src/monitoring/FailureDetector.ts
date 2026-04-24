@@ -78,7 +78,7 @@ export class FailureDetector extends EventEmitter implements LifecycleAware {
     this.membership.on('member-joined', (nodeInfo: NodeInfo) => {
       this.startMonitoring(nodeInfo.id);
     });
-    
+
     this.membership.on('member-left', (nodeId: string) => {
       this.stopMonitoring(nodeId);
     });

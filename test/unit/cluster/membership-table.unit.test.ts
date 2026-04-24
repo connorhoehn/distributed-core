@@ -77,7 +77,83 @@ describe('MembershipTable', () => {
   it('should clear all members', () => {
     membershipTable.addMember(nodeInfo);
     membershipTable.clear();
-    
+
     expect(membershipTable.size()).toBe(0);
+  });
+});
+
+describe('MembershipTable — dual-emit deprecation bridge', () => {
+  let membershipTable: MembershipTable;
+  const peer: NodeInfo = {
+    id: 'peer-1',
+    metadata: { address: '127.0.0.1', port: 3001 },
+    lastSeen: Date.now(),
+    status: 'ALIVE',
+    version: 1
+  };
+
+  beforeEach(() => {
+    membershipTable = new MembershipTable('local-node');
+  });
+
+  it('member:joined — new name receives event when node is added', () => {
+    const spy = jest.fn();
+    membershipTable.on('member:joined', spy);
+    membershipTable.addMember(peer);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('member-joined — legacy name still receives event (compat)', () => {
+    const spy = jest.fn();
+    membershipTable.on('member-joined', spy);
+    membershipTable.addMember(peer);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('member:joined / member-joined — payload is identical', () => {
+    let newPayload: unknown;
+    let oldPayload: unknown;
+    membershipTable.on('member:joined', (p: unknown) => { newPayload = p; });
+    membershipTable.on('member-joined', (p: unknown) => { oldPayload = p; });
+    membershipTable.addMember(peer);
+    expect(newPayload).toEqual(oldPayload);
+  });
+
+  it('member:joined fires before member-joined in the same synchronous emission', () => {
+    const order: string[] = [];
+    membershipTable.on('member:joined', () => order.push('new'));
+    membershipTable.on('member-joined', () => order.push('old'));
+    membershipTable.addMember(peer);
+    expect(order).toEqual(['new', 'old']);
+  });
+
+  it('member:left — new name receives event when node is marked dead', () => {
+    membershipTable.addMember(peer);
+    const spy = jest.fn();
+    membershipTable.on('member:left', spy);
+    membershipTable.markDead('peer-1');
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('member-left — legacy name still receives event (compat)', () => {
+    membershipTable.addMember(peer);
+    const spy = jest.fn();
+    membershipTable.on('member-left', spy);
+    membershipTable.markDead('peer-1');
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('membership:updated — new name fires on every state-changing operation', () => {
+    const spy = jest.fn();
+    membershipTable.on('membership:updated', spy);
+    membershipTable.addMember(peer);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('membership-updated — legacy name fires on every state-changing operation (compat)', () => {
+    const spy = jest.fn();
+    membershipTable.on('membership-updated', spy);
+    membershipTable.addMember(peer);
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });

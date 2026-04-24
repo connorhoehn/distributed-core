@@ -1,78 +1,63 @@
-import { createServer, IncomingMessage, Server, ServerResponse } from 'http';
+import {
+  createServer as createHttpsServer,
+  type ServerOptions,
+  type Server as HttpsServer,
+} from 'https';
+import type { IncomingMessage, ServerResponse } from 'http';
 import { ResourceRouter } from './ResourceRouter';
 import { LifecycleAware } from '../common/LifecycleAware';
-import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
-import { formatPrometheus, FormatPrometheusOptions } from '../monitoring/metrics/PrometheusExporter';
+import type { ForwardingHandler } from './ForwardingServer';
 
-export type { FormatPrometheusOptions };
+export type { ForwardingHandler };
 
-const PROMETHEUS_CONTENT_TYPE = 'text/plain; version=0.0.4; charset=utf-8';
-
-export interface ForwardingServerConfig {
+export interface HttpsForwardingServerConfig {
   port: number;
   host?: string;
-  /** Path prefix for forwarding routes. Default: '/forward'. */
   pathPrefix?: string;
-
-  /**
-   * When set, the server responds to GET {metricsPath} (default '/metrics')
-   * with a Prometheus-formatted snapshot of this registry. Ignored if null.
-   */
-  metricsRegistry?: MetricsRegistry;
-
-  /** Path for the metrics endpoint. Default: '/metrics'. */
-  metricsPath?: string;
-
-  /**
-   * Options passed to formatPrometheus() when rendering the snapshot.
-   * Default: undefined (library defaults).
-   */
-  metricsFormatOptions?: FormatPrometheusOptions;
+  /** Required TLS server credentials (key, cert, and optional ca). */
+  tlsOptions: ServerOptions;
 }
 
-export type ForwardingHandler = (
-  resourceId: string,
-  path: string,
-  payload: unknown
-) => Promise<unknown>;
-
-export class ForwardingServer implements LifecycleAware {
+/**
+ * TLS-enabled counterpart to ForwardingServer.
+ *
+ * Wire protocol is identical (POST {pathPrefix}/{resourceId}{remainder},
+ * 200 / 421 / 404 / 405 / 400 / 500 responses) — only the transport
+ * layer changes from plain HTTP to HTTPS.
+ */
+export class HttpsForwardingServer implements LifecycleAware {
   private readonly router: ResourceRouter;
   private readonly handler: ForwardingHandler;
-  private readonly port: number;
+  private readonly _port: number;
   private readonly host: string;
   private readonly pathPrefix: string;
-  private readonly metricsRegistry: MetricsRegistry | undefined;
-  private readonly metricsPath: string;
-  private readonly metricsFormatOptions: FormatPrometheusOptions | undefined;
-  private server: Server | null = null;
+  private readonly tlsOptions: ServerOptions;
+  private server: HttpsServer | null = null;
 
   constructor(
     router: ResourceRouter,
     handler: ForwardingHandler,
-    config: ForwardingServerConfig
+    config: HttpsForwardingServerConfig
   ) {
     this.router = router;
     this.handler = handler;
-    this.port = config.port;
+    this._port = config.port;
     this.host = config.host ?? '0.0.0.0';
     this.pathPrefix = config.pathPrefix ?? '/forward';
-    this.metricsRegistry = config.metricsRegistry;
-    this.metricsPath = config.metricsPath ?? '/metrics';
-    this.metricsFormatOptions = config.metricsFormatOptions;
+    this.tlsOptions = config.tlsOptions;
   }
 
   async start(): Promise<void> {
     if (this.server !== null) return;
 
-    this.server = createServer((req, res) => {
+    this.server = createHttpsServer(this.tlsOptions, (req, res) => {
       this._handleRequest(req, res).catch((err) => {
         this._send(res, 500, { error: err instanceof Error ? err.message : String(err) });
       });
     });
 
     await new Promise<void>((resolve, reject) => {
-      this.server!.listen(this.port, this.host, () => resolve());
+      this.server!.listen(this._port, this.host, () => resolve());
       this.server!.once('error', reject);
     });
   }
@@ -90,6 +75,10 @@ export class ForwardingServer implements LifecycleAware {
     return this.server !== null;
   }
 
+  get port(): number {
+    return this._port;
+  }
+
   getAddress(): { address: string; port: number } | null {
     if (this.server === null) return null;
     const addr = this.server.address();
@@ -98,35 +87,12 @@ export class ForwardingServer implements LifecycleAware {
   }
 
   private async _handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const url = req.url ?? '';
-    // Strip query string for path comparison.
-    const pathname = url.split('?')[0];
-
-    // Metrics route — handle before the POST-only forwarding logic.
-    if (pathname === this.metricsPath) {
-      if (req.method !== 'GET') {
-        this._send(res, 405, { error: 'Method Not Allowed' });
-        return;
-      }
-      if (!this.metricsRegistry) {
-        this._send(res, 404, { error: 'Not Found' });
-        return;
-      }
-      const snapshot = this.metricsRegistry.getSnapshot();
-      const body = formatPrometheus(snapshot, this.metricsFormatOptions ?? {});
-      res.writeHead(200, {
-        'Content-Type': PROMETHEUS_CONTENT_TYPE,
-        'Content-Length': Buffer.byteLength(body),
-      });
-      res.end(body);
-      return;
-    }
-
     if (req.method !== 'POST') {
       this._send(res, 405, { error: 'Method Not Allowed' });
       return;
     }
 
+    const url = req.url ?? '';
     if (!url.startsWith(this.pathPrefix)) {
       this._send(res, 404, { error: 'Not Found' });
       return;

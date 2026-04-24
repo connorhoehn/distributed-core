@@ -154,7 +154,7 @@ describe('ClusterLifecycle', () => {
       expect(mockContext.membership.addLocalNode).toHaveBeenCalled();
       expect(mockContext.transport.start).toHaveBeenCalled();
       expect(mockContext.failureDetector.start).toHaveBeenCalled();
-      
+
       expect(startedSpy).toHaveBeenCalledWith({
         nodeId: 'test-node-1',
         timestamp: expect.any(Number)
@@ -162,6 +162,41 @@ describe('ClusterLifecycle', () => {
 
       const status = lifecycle.getStatus();
       expect(status.isStarted).toBe(true);
+    });
+
+    it('dual-emit: lifecycle:started fires on start() (new name)', async () => {
+      const newNameSpy = jest.fn();
+      lifecycle.on('lifecycle:started', newNameSpy);
+      await lifecycle.start();
+      expect(newNameSpy).toHaveBeenCalledTimes(1);
+      expect(newNameSpy).toHaveBeenCalledWith({
+        nodeId: 'test-node-1',
+        timestamp: expect.any(Number)
+      });
+    });
+
+    it('dual-emit: started fires on start() — legacy compat', async () => {
+      const oldNameSpy = jest.fn();
+      lifecycle.on('started', oldNameSpy);
+      await lifecycle.start();
+      expect(oldNameSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('dual-emit: lifecycle:started and started carry identical payload', async () => {
+      let newPayload: unknown;
+      let oldPayload: unknown;
+      lifecycle.on('lifecycle:started', (p: unknown) => { newPayload = p; });
+      lifecycle.on('started', (p: unknown) => { oldPayload = p; });
+      await lifecycle.start();
+      expect(newPayload).toEqual(oldPayload);
+    });
+
+    it('dual-emit: lifecycle:started fires before started in same emission', async () => {
+      const order: string[] = [];
+      lifecycle.on('lifecycle:started', () => order.push('new'));
+      lifecycle.on('started', () => order.push('old'));
+      await lifecycle.start();
+      expect(order).toEqual(['new', 'old']);
     });
 
     it('should not start twice', async () => {
@@ -214,6 +249,32 @@ describe('ClusterLifecycle', () => {
       await lifecycle.stop(); // Second call
 
       expect(mockContext.transport.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('dual-emit: lifecycle:stopped fires on stop() (new name)', async () => {
+      const newNameSpy = jest.fn();
+      lifecycle.on('lifecycle:stopped', newNameSpy);
+      await lifecycle.stop();
+      expect(newNameSpy).toHaveBeenCalledTimes(1);
+      expect(newNameSpy).toHaveBeenCalledWith({
+        nodeId: 'test-node-1',
+        timestamp: expect.any(Number)
+      });
+    });
+
+    it('dual-emit: stopped fires on stop() — legacy compat', async () => {
+      const oldNameSpy = jest.fn();
+      lifecycle.on('stopped', oldNameSpy);
+      await lifecycle.stop();
+      expect(oldNameSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('dual-emit: lifecycle:stopped fires before stopped in same emission', async () => {
+      const order: string[] = [];
+      lifecycle.on('lifecycle:stopped', () => order.push('new'));
+      lifecycle.on('stopped', () => order.push('old'));
+      await lifecycle.stop();
+      expect(order).toEqual(['new', 'old']);
     });
   });
 

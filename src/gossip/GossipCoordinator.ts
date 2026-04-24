@@ -254,7 +254,7 @@ export class GossipCoordinator extends EventEmitter implements IClusterCoordinat
     this.clusterManager.on('member-left', (nodeId: string) => {
       console.log(`📤 Node left cluster: ${nodeId}`);
       this.emit('node-left', nodeId);
-      
+
       // Check if we need to take over any ranges from the departed node
       this.handleNodeDeparture(nodeId);
     });

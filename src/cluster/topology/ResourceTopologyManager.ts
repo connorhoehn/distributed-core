@@ -399,7 +399,7 @@ export class ResourceTopologyManager extends EventEmitter {
     this.clusterManager.on('member-joined', (nodeInfo: NodeInfo) => {
       this.handleNodeJoined(nodeInfo);
     });
-    
+
     this.clusterManager.on('member-left', (nodeId: string) => {
       this.handleNodeLeft(nodeId);
     });

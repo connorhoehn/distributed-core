@@ -209,6 +209,20 @@ export class ClusterTopologyManager extends EventEmitter {
   private cluster: ClusterManager;
   private stateAggregator: StateAggregator;
   private metricsTracker: MetricsTracker;
+
+  /**
+   * Emit both legacy and canonical event names during the deprecation window.
+   * Callers should migrate to the new name; old name support will be removed in
+   * a future release.
+   *
+   * NOTE: `error` is deliberately excluded from dual-emit. Node's EventEmitter
+   * throws on unhandled `error` events; renaming to `lifecycle:error` while
+   * keeping a silent `error` alias would suppress that safety mechanism.
+   */
+  private emitRenamed(oldName: string, newName: string, ...args: unknown[]): void {
+    this.emit(newName, ...args);
+    this.emit(oldName, ...args);
+  }
   
   // State tracking
   private nodeCapacities = new Map<string, NodeCapacity>();
@@ -267,7 +281,7 @@ export class ClusterTopologyManager extends EventEmitter {
     this.cluster.on('member-left', this.handleNodeLeft.bind(this));
     this.cluster.on('member-updated', this.handleNodeUpdated.bind(this));
     
-    this.emit('started');
+    this.emitRenamed('started', 'lifecycle:started');
   }
 
   /**
@@ -278,13 +292,13 @@ export class ClusterTopologyManager extends EventEmitter {
       clearInterval(this.topologyUpdateInterval);
       this.topologyUpdateInterval = undefined;
     }
-    
+
     // Remove event listeners to prevent memory leaks
     this.cluster.removeListener('member-joined', this.handleNodeJoined.bind(this));
     this.cluster.removeListener('member-left', this.handleNodeLeft.bind(this));
     this.cluster.removeListener('member-updated', this.handleNodeUpdated.bind(this));
-    
-    this.emit('stopped');
+
+    this.emitRenamed('stopped', 'lifecycle:stopped');
   }
 
   /**

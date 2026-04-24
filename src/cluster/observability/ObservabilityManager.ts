@@ -146,6 +146,20 @@ export class ObservabilityManager extends EventEmitter {
   private dashboardUpdateInterval?: NodeJS.Timeout;
   private lastDashboard?: ClusterDashboard;
 
+  /**
+   * Emit both legacy and canonical event names during the deprecation window.
+   * Callers should migrate to the new name; old name support will be removed in
+   * a future release.
+   *
+   * NOTE: `error` is deliberately excluded from dual-emit. Node's EventEmitter
+   * throws on unhandled `error` events; renaming to `lifecycle:error` while
+   * keeping a silent `error` alias would suppress that safety mechanism.
+   */
+  private emitRenamed(oldName: string, newName: string, ...args: unknown[]): void {
+    this.emit(newName, ...args);
+    this.emit(oldName, ...args);
+  }
+
   // Historical data for trend analysis
   private historicalTopologies: ResourceClusterTopology[] = [];
   private maxHistorySize = 100;
@@ -192,7 +206,7 @@ export class ObservabilityManager extends EventEmitter {
     // Unref the interval so it doesn't keep the process alive
     this.dashboardUpdateInterval.unref();
 
-    this.emit('started');
+    this.emitRenamed('started', 'lifecycle:started');
   }
 
   /**
@@ -208,7 +222,7 @@ export class ObservabilityManager extends EventEmitter {
     // Stop topology manager
     await this.topologyManager.stop();
 
-    this.emit('stopped');
+    this.emitRenamed('stopped', 'lifecycle:stopped');
   }
 
   /**

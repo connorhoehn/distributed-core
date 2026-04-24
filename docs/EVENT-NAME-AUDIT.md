@@ -94,12 +94,12 @@ Three other patterns appear and are **non-conforming**:
 
 | Event name | Payload | Conformance | Proposed rename |
 |---|---|---|---|
-| `member-joined` | `NodeInfo` | ✗ | `member:joined` |
-| `member-left` | `nodeId: string` | ✗ | `member:left` |
-| `member-updated` | `NodeInfo` | ✗ | `member:updated` |
-| `membership-updated` | `Map<string, MembershipEntry>` | ✗ | `membership:updated` |
-| `started` | — | ✗ | `cluster:started` |
-| `stopped` | — | ✗ | `cluster:stopped` |
+| `member-joined` | `NodeInfo` | ✗ | `member:joined` ✓ Renamed (dual-emit active) |
+| `member-left` | `nodeId: string` | ✗ | `member:left` ✓ Renamed (dual-emit active) |
+| `member-updated` | `NodeInfo` | ✗ | `member:updated` ✓ Renamed (dual-emit active) |
+| `membership-updated` | `Map<string, MembershipEntry>` | ✗ | `membership:updated` ✓ Renamed (dual-emit active) |
+| `started` | — | ✗ | `lifecycle:started` ✓ Renamed (dual-emit active) |
+| `stopped` | — | ✗ | `lifecycle:stopped` ✓ Renamed (dual-emit active) |
 
 ### StateAggregator (`src/cluster/aggregation/StateAggregator.ts`)
 
@@ -139,12 +139,12 @@ Three other patterns appear and are **non-conforming**:
 
 | Event name | Payload | Conformance | Proposed rename |
 |---|---|---|---|
-| `started` | `{ nodeId, timestamp }` | ✗ | `cluster:started` |
-| `stopped` | `{ nodeId, timestamp }` | ✗ | `cluster:stopped` |
+| `started` | `{ nodeId, timestamp }` | ✗ | `lifecycle:started` ✓ Renamed (dual-emit active) |
+| `stopped` | `{ nodeId, timestamp }` | ✗ | `lifecycle:stopped` ✓ Renamed (dual-emit active) |
 | `left` | `{ nodeId, timestamp }` | ✗ | `cluster:left` |
 | `drained` | `{ nodeId, timestamp }` | ✗ | `cluster:drained` |
 | `rebalanced` | `{ … }` | ✗ | `cluster:rebalanced` |
-| `error` | `{ error, operation }` | ✗ | `cluster:error` |
+| `error` | `{ error, operation }` | ✗ | `lifecycle:error` — intentionally NOT dual-emitted; Node.js `error` semantics preserved |
 
 ### DeltaSyncEngine (`src/cluster/delta-sync/DeltaSync.ts`)
 
@@ -216,23 +216,23 @@ Three other patterns appear and are **non-conforming**:
 
 | Event name | Payload | Conformance | Proposed rename |
 |---|---|---|---|
-| `member-joined` | `NodeInfo` | ✗ | `member:joined` |
-| `member-left` | `nodeId` | ✗ | `member:left` |
-| `member-updated` | `NodeInfo` | ✗ | `member:updated` |
-| `membership-updated` | `Map<string, MembershipEntry>` | ✗ | `membership:updated` |
+| `member-joined` | `NodeInfo` | ✗ | `member:joined` ✓ Renamed (dual-emit active) |
+| `member-left` | `nodeId` | ✗ | `member:left` ✓ Renamed (dual-emit active) |
+| `member-updated` | `NodeInfo` | ✗ | `member:updated` ✓ Renamed (dual-emit active) |
+| `membership-updated` | `Map<string, MembershipEntry>` | ✗ | `membership:updated` ✓ Renamed (dual-emit active) |
 
 ### ObservabilityManager (`src/cluster/observability/ObservabilityManager.ts`)
 
 | Event name | Payload | Conformance | Proposed rename |
 |---|---|---|---|
-| `started` | — | ✗ | `observability:started` |
-| `stopped` | — | ✗ | `observability:stopped` |
+| `started` | — | ✗ | `lifecycle:started` ✓ Renamed (dual-emit active) |
+| `stopped` | — | ✗ | `lifecycle:stopped` ✓ Renamed (dual-emit active) |
 | `resource-metrics-updated` | `{ resourceId, metrics }` | ✗ | `resource-metrics:updated` |
 | `node-capacity-registered` | `capacity` | ✗ | `node-capacity:registered` |
 | `topology-changed` | `topology` | ✗ | `topology:changed` |
 | `health-alert` | `{ … }` | ✗ | `health:alert` |
 | `dashboard-updated` | `dashboard` | ✗ | `dashboard:updated` |
-| `error` | `error` | ✗ | `observability:error` |
+| `error` | `error` | ✗ | `lifecycle:error` — intentionally NOT dual-emitted; Node.js `error` semantics preserved |
 
 ### StateReconciler (`src/cluster/reconciliation/StateReconciler.ts`)
 
@@ -294,12 +294,12 @@ Three other patterns appear and are **non-conforming**:
 
 | Event name | Payload | Conformance | Proposed rename |
 |---|---|---|---|
-| `started` | — | ✗ | `topology:started` |
-| `stopped` | — | ✗ | `topology:stopped` |
+| `started` | — | ✗ | `lifecycle:started` ✓ Renamed (dual-emit active) |
+| `stopped` | — | ✗ | `lifecycle:stopped` ✓ Renamed (dual-emit active) |
 | `topology-updated` | `topology` | ✗ | `topology:updated` |
 | `room-scaling-needed` | `{ … }` | ✗ | `room-scaling:needed` |
 | `node-capacity-updated` | `capacity` | ✗ | `node-capacity:updated` |
-| `error` | `error` | ✗ | `topology:error` |
+| `error` | `error` | ✗ | `lifecycle:error` — intentionally NOT dual-emitted; Node.js `error` semantics preserved |
 
 ### ResourceTopologyManager (`src/cluster/topology/ResourceTopologyManager.ts`)
 
@@ -432,8 +432,8 @@ Three other patterns appear and are **non-conforming**:
 | `channel-created` | `info` | ✗ | `channel:created` |
 | `channel-destroyed` | `{ channelId }` | ✗ | `channel:destroyed` |
 | `channel-broadcast` | `{ channelId, payload, excludeClientId }` | ✗ | `channel:broadcast` |
-| `member-joined` | `{ channelId, clientId }` | ✗ | `member:joined` |
-| `member-left` | `{ channelId, clientId }` | ✗ | `member:left` |
+| `member-joined` | `{ channelId, clientId }` | ✗ | `member:joined` ✓ Renamed (dual-emit active) |
+| `member-left` | `{ channelId, clientId }` | ✗ | `member:left` ✓ Renamed (dual-emit active) |
 | `ownership-gained` | `{ channelId, previousOwner }` | ✗ | `ownership:gained` |
 | `ownership-lost` | `{ channelId, newOwner }` | ✗ | `ownership:lost` |
 
@@ -462,7 +462,7 @@ Three other patterns appear and are **non-conforming**:
 
 | Event name | Payload | Conformance | Proposed rename |
 |---|---|---|---|
-| `member-left` | `nodeId` | ✗ | `member:left` |
+| `member-left` | `nodeId` | ✗ | `member:left` ✓ Renamed (dual-emit active) |
 | `subscription-added` | `{ id, topic }` | ✗ | `subscription:added` |
 | `subscription-removed` | `{ id, topic }` | ✗ | `subscription:removed` |
 | `message-published` | `{ topic, messageId }` | ✗ | `message:published` |

@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Deprecated
+
+- Event names `member-joined`, `member-left`, `member-updated`,
+  `membership-updated` are deprecated in favor of `member:joined`,
+  `member:left`, `member:updated`, `membership:updated`. Both names
+  fire simultaneously via a dual-emit bridge. Old names will be removed in
+  a future release. Affected classes: `MembershipTable`, `ClusterManager`,
+  `ChannelManager`, `PubSubManager`.
+- Bare `started`, `stopped` events on `ClusterManager`, `ClusterLifecycle`
+  (both `src/cluster/lifecycle/` and `src/cluster/core/lifecycle/`),
+  `ObservabilityManager`, and `ClusterTopologyManager` are deprecated in
+  favor of `lifecycle:started` and `lifecycle:stopped`. Same dual-emit
+  strategy applies — old names continue to fire.
+- The bare `error` event on `ClusterLifecycle`, `ObservabilityManager`, and
+  `ClusterTopologyManager` is intentionally **not** dual-emitted. Node's
+  `EventEmitter` treats unhandled `error` events specially (throws if no
+  listener); adding a silent alias would suppress that safety mechanism.
+  Those classes will adopt `lifecycle:error` in a future breaking release.
+
 ### Added — primitives and modules
 
 - `LifecycleAware` interface in `src/common/LifecycleAware.ts`. All primitives
