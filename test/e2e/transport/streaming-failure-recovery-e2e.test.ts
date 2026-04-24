@@ -145,18 +145,19 @@ describe('Streaming Failure Recovery E2E Tests', () => {
       const streamId = 'test-stream-ownership';
       const ownershipEvents: any[] = [];
 
-      // Setup ownership tracking
-      [coordinatorRegistry, processor1Registry, processor2Registry, processor3Registry, egressRegistry].forEach(registry => {
-        registry.on('entity:created', (entity: EntityRecord) => {
-          if (entity.metadata?.type === 'stream_connection') {
-            ownershipEvents.push({
-              type: 'ownership_established',
-              streamId: entity.metadata.streamId,
-              ownerNodeId: entity.ownerNodeId,
-              entityId: entity.entityId
-            });
-          }
-        });
+      // Ownership is established by the originating registry — listen only
+      // on the proposer. Remote registries now emit entity:created as well
+      // when applyRemoteUpdate propagates the ownership, but for this test
+      // we only care about the original ownership event.
+      processor1Registry.on('entity:created', (entity: EntityRecord) => {
+        if (entity.metadata?.type === 'stream_connection') {
+          ownershipEvents.push({
+            type: 'ownership_established',
+            streamId: entity.metadata.streamId,
+            ownerNodeId: entity.ownerNodeId,
+            entityId: entity.entityId
+          });
+        }
       });
 
       // Processor 1 takes ownership of stream
