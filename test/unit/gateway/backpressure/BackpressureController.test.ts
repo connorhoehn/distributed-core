@@ -220,6 +220,41 @@ describe('BackpressureController', () => {
     expect(ctrl.getQueueDepth('k')).toBe(2);
   });
 
+  it('drain() retries after onFlush errors to ensure emptiness', async () => {
+    let callCount = 0;
+    const onFlush = jest.fn(async (_key: string, _items: string[]) => {
+      callCount++;
+      if (callCount === 1) throw new Error('first call fails');
+      // Second call succeeds
+    });
+    const bp = new BackpressureController<string>(onFlush, {
+      maxQueueSize: 10,
+      strategy: 'reject',
+    });
+    bp.enqueue('k', 'a');
+    bp.enqueue('k', 'b');
+
+    await bp.drain();
+
+    expect(bp.getQueueDepth('k')).toBe(0);
+    expect(onFlush).toHaveBeenCalledTimes(2);
+  });
+
+  it('drain() stops after maxIterations if onFlush keeps failing', async () => {
+    const onFlush = jest.fn(async () => { throw new Error('always fails'); });
+    const bp = new BackpressureController<string>(onFlush, {
+      maxQueueSize: 10,
+      strategy: 'reject',
+    });
+    bp.enqueue('k', 'a');
+
+    await bp.drain();
+
+    // After max iterations, queue may still have items but drain doesn't hang
+    expect(onFlush.mock.calls.length).toBeGreaterThanOrEqual(10);
+    expect(onFlush.mock.calls.length).toBeLessThanOrEqual(11);
+  });
+
   it('onFlush error causes items to be re-queued', async () => {
     let callCount = 0;
     const onFlush = jest.fn().mockImplementation(async () => {

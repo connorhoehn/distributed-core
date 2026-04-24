@@ -190,3 +190,63 @@ describe('MetricsRegistry — type conflict', () => {
     expect(() => registry.histogram('metric_name')).toThrow();
   });
 });
+
+describe('Histogram — bounded ring buffer', () => {
+  it('default maxObservations is 1000: observe 1500, getCount() returns 1000', () => {
+    const h = new Histogram();
+    for (let i = 0; i < 1500; i++) h.observe(i);
+    expect(h.getCount()).toBe(1000);
+  });
+
+  it('maxObservations=5: after 10 observations getCount is 5 and snapshot reflects last 5', () => {
+    const h = new Histogram(5);
+    for (let i = 1; i <= 10; i++) h.observe(i);
+    expect(h.getCount()).toBe(5);
+    const snap = h.getSnapshot();
+    expect(snap.count).toBe(5);
+    expect(snap.min).toBe(6);
+    expect(snap.max).toBe(10);
+  });
+
+  it('min/max reflect CURRENT buffer, not lifetime values', () => {
+    const h = new Histogram(5);
+    h.observe(100); // will be overwritten
+    h.observe(1);
+    h.observe(2);
+    h.observe(3);
+    h.observe(4);
+    h.observe(5); // overwrites the 100
+    const snap = h.getSnapshot();
+    expect(snap.min).toBe(1);
+    expect(snap.max).toBe(5);
+  });
+
+  it('sum is maintained correctly across overwrites', () => {
+    const h = new Histogram(3);
+    h.observe(10);
+    h.observe(20);
+    h.observe(30);
+    h.observe(40); // overwrites 10
+    h.observe(50); // overwrites 20
+    const snap = h.getSnapshot();
+    expect(snap.sum).toBe(30 + 40 + 50);
+  });
+
+  it('reset() clears the buffer; subsequent observe(42) gives getCount=1 and mean=42', () => {
+    const h = new Histogram(5);
+    h.observe(1);
+    h.observe(2);
+    h.reset();
+    h.observe(42);
+    expect(h.getCount()).toBe(1);
+    const snap = h.getSnapshot();
+    expect(snap.mean).toBe(42);
+  });
+
+  it('MetricsRegistry.histogram(name, labels, 100) creates a histogram with maxObservations=100', () => {
+    const registry = new MetricsRegistry('node-1');
+    const h = registry.histogram('latency', {}, 100);
+    for (let i = 0; i < 200; i++) h.observe(i);
+    expect(h.getCount()).toBe(100);
+  });
+});

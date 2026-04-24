@@ -276,5 +276,24 @@ describe('WALSnapshotVersionStore', () => {
         await store2.close();
       }
     });
+
+    it('propagates unlink errors other than ENOENT', async () => {
+      const tempPath = path.join(os.tmpdir(), randomUUID());
+      const store = new WALSnapshotVersionStore<{ n: number }>(tempPath);
+      await store.initialize();
+      await store.store('k', { n: 1 });
+
+      const unlinkSpy = jest.spyOn(fs, 'unlink').mockRejectedValueOnce(
+        Object.assign(new Error('denied'), { code: 'EACCES' }),
+      );
+
+      try {
+        await expect(store.compact()).rejects.toThrow();
+      } finally {
+        unlinkSpy.mockRestore();
+        await store.close().catch(() => {});
+        await fs.unlink(tempPath).catch(() => {});
+      }
+    });
   });
 });

@@ -272,6 +272,51 @@ describe('EventBus', () => {
     await bus.stop();
   });
 
+  it('WAL: version counter is restored from WAL on restart', async () => {
+    const walPath = tempWalPath();
+    const pubsub1 = makePubSub();
+    const bus1 = new EventBus<TestEvents>(pubsub1 as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+    });
+    await bus1.start();
+
+    await bus1.publish('user.created', { userId: 'u1' });
+    await bus1.publish('user.created', { userId: 'u2' });
+    const e3 = await bus1.publish('user.created', { userId: 'u3' });
+    expect(e3.version).toBe(3);
+
+    await bus1.stop();
+
+    // Start a second bus on the same WAL — it should resume from version 4, not 1.
+    const pubsub2 = makePubSub();
+    const bus2 = new EventBus<TestEvents>(pubsub2 as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+    });
+    await bus2.start();
+
+    const e4 = await bus2.publish('user.created', { userId: 'u4' });
+    expect(e4.version).toBe(4);
+
+    await bus2.stop();
+  });
+
+  it('walSyncIntervalMs config is accepted without throwing', async () => {
+    const walPath = tempWalPath();
+    const pubsub = makePubSub();
+    const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+      walSyncIntervalMs: 500,
+    });
+
+    // Should start and stop without errors.
+    await expect(bus.start()).resolves.toBeUndefined();
+    await bus.publish('user.created', { userId: 'u1' });
+    await expect(bus.stop()).resolves.toBeUndefined();
+  });
+
   it('event from remote node is still delivered to subscribers', async () => {
     const pubsub = makePubSub('node-1');
     const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', { topic: 'events:test' });

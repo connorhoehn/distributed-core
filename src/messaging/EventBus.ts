@@ -16,11 +16,28 @@ export interface BusEvent<T = unknown> {
 export interface EventBusConfig {
   topic: string;
   walFilePath?: string;
+  walSyncIntervalMs?: number;  // Default: 1000. Set to 0 for manual sync.
   deadLetterHandler?: (event: BusEvent, error: Error) => void;
 }
 
 type TypedHandler<T = unknown> = (event: BusEvent<T>) => Promise<void>;
 
+/**
+ * Typed cluster-wide event bus over PubSubManager.
+ *
+ * Delivery semantics: events are delivered to ALL subscribers, including
+ * subscribers on the publishing node. If you need to skip self-published
+ * events, check `event.sourceNodeId !== localNodeId` in your handler.
+ *
+ * Durability: when `walFilePath` is set, events are persisted before being
+ * published. A background sync flushes the WAL every `walSyncIntervalMs`
+ * (default 1000ms). Process crash between append and sync may lose events
+ * within that window.
+ *
+ * Versioning: each EventBus instance assigns a monotonically increasing
+ * version to its events. On restart with a WAL, the counter is restored
+ * from the max version in the log to avoid collisions.
+ */
 export class EventBus<EventMap extends Record<string, unknown> = Record<string, unknown>> {
   private readonly pubsub: PubSubManager;
   private readonly localNodeId: string;
@@ -48,8 +65,27 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
     this._subId = this.pubsub.subscribe(this.config.topic, this._onMessage);
 
     if (this.config.walFilePath) {
-      this._walWriter = new WALWriterImpl({ filePath: this.config.walFilePath, syncInterval: 0 });
+      this._walWriter = new WALWriterImpl({
+        filePath: this.config.walFilePath,
+        syncInterval: this.config.walSyncIntervalMs ?? 1000,
+      });
       await this._walWriter.initialize();
+
+      // Restore version counter from existing WAL entries to avoid collisions on restart.
+      const reader = new WALReaderImpl(this.config.walFilePath);
+      await reader.initialize();
+      try {
+        const entries = await reader.readAll();
+        let maxVersion = 0;
+        for (const entry of entries) {
+          if (entry.data.metadata?._eventBus === true && entry.data.version > maxVersion) {
+            maxVersion = entry.data.version;
+          }
+        }
+        this._versionCounter = maxVersion;
+      } finally {
+        await reader.close();
+      }
     }
   }
 

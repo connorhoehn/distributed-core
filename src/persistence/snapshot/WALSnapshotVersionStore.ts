@@ -230,7 +230,12 @@ export class WALSnapshotVersionStore<T> implements ISnapshotVersionStore<T> {
     await this.writer.close();
     await this.reader.close();
 
-    await unlink(this.filePath).catch(() => {});
+    try {
+      await unlink(this.filePath);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== 'ENOENT') throw err;
+    }
 
     const freshWriter = new WALWriterImpl({ filePath: this.filePath, syncInterval: 0 });
     await freshWriter.initialize();

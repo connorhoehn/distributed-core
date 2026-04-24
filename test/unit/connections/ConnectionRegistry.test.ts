@@ -82,6 +82,32 @@ describe('ConnectionRegistry', () => {
 
       await expect(registry.unregister('not-registered')).resolves.toBeUndefined();
     });
+
+    it('logs a warning when releaseEntity throws unexpectedly', async () => {
+      const entityRegistry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+      const connReg = new ConnectionRegistry(entityRegistry, 'node-1');
+      registry = connReg;
+      await connReg.start();
+
+      await connReg.register('conn-1');
+
+      // Force releaseEntity to throw
+      const origRelease = entityRegistry.releaseEntity.bind(entityRegistry);
+      (entityRegistry as any).releaseEntity = jest.fn().mockRejectedValue(new Error('boom'));
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Should NOT throw despite inner error
+      await expect(connReg.unregister('conn-1')).resolves.toBeUndefined();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('releaseEntity(conn-1)'),
+        expect.any(Error)
+      );
+
+      warnSpy.mockRestore();
+      (entityRegistry as any).releaseEntity = origRelease;
+    });
   });
 
   describe('locate()', () => {

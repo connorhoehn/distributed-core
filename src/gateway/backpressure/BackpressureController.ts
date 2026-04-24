@@ -103,7 +103,18 @@ export class BackpressureController<T> {
   }
 
   async drain(): Promise<void> {
-    await this.flushAll();
+    let iterations = 0;
+    const maxIterations = 10;
+    while (iterations < maxIterations) {
+      try {
+        await this.flushAll();
+      } catch {
+        // swallow — items will be re-queued by flush()
+      }
+      const hasPending = Array.from(this.queues.values()).some(q => q.length > 0);
+      if (!hasPending) return;
+      iterations++;
+    }
   }
 
   getQueueDepth(key: string): number {

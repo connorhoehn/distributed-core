@@ -79,20 +79,35 @@ export class Gauge {
 }
 
 export class Histogram {
-  private observations: number[] = [];
+  private readonly observations: number[];
+  private readonly maxObservations: number;
+  private writeIdx = 0;
+  private _count = 0;
+  private _stored = 0;
   private _sum = 0;
-  private _min = Infinity;
-  private _max = -Infinity;
+
+  constructor(maxObservations = 1000) {
+    this.maxObservations = maxObservations;
+    this.observations = new Array(maxObservations);
+  }
 
   observe(value: number): void {
-    this.observations.push(value);
-    this._sum += value;
-    if (value < this._min) this._min = value;
-    if (value > this._max) this._max = value;
+    if (this._stored < this.maxObservations) {
+      this.observations[this.writeIdx] = value;
+      this.writeIdx = (this.writeIdx + 1) % this.maxObservations;
+      this._stored++;
+      this._sum += value;
+    } else {
+      const overwritten = this.observations[this.writeIdx];
+      this.observations[this.writeIdx] = value;
+      this.writeIdx = (this.writeIdx + 1) % this.maxObservations;
+      this._sum = this._sum - overwritten + value;
+    }
+    this._count++;
   }
 
   getCount(): number {
-    return this.observations.length;
+    return this._stored;
   }
 
   getSum(): number {
@@ -100,17 +115,17 @@ export class Histogram {
   }
 
   getSnapshot(): HistogramSnapshot {
-    const count = this.observations.length;
-    if (count === 0) {
+    if (this._stored === 0) {
       return { count: 0, sum: 0, min: 0, max: 0, mean: 0, p50: 0, p90: 0, p99: 0 };
     }
-    const sorted = [...this.observations].sort((a, b) => a - b);
+    const current = this.observations.slice(0, this._stored);
+    const sorted = [...current].sort((a, b) => a - b);
     return {
-      count,
+      count: this._stored,
       sum: this._sum,
-      min: this._min,
-      max: this._max,
-      mean: this._sum / count,
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      mean: this._sum / this._stored,
       p50: percentile(sorted, 50),
       p90: percentile(sorted, 90),
       p99: percentile(sorted, 99),
@@ -118,10 +133,10 @@ export class Histogram {
   }
 
   reset(): void {
-    this.observations = [];
+    this.writeIdx = 0;
+    this._count = 0;
+    this._stored = 0;
     this._sum = 0;
-    this._min = Infinity;
-    this._max = -Infinity;
   }
 }
 
@@ -170,7 +185,7 @@ export class MetricsRegistry {
     return instance;
   }
 
-  histogram(name: string, labels?: MetricLabels): Histogram {
+  histogram(name: string, labels?: MetricLabels, maxObservations?: number): Histogram {
     const key = buildKey(name, labels);
     const existing = this.store.get(key);
     if (existing) {
@@ -179,7 +194,7 @@ export class MetricsRegistry {
       }
       return existing.instance as Histogram;
     }
-    const instance = new Histogram();
+    const instance = new Histogram(maxObservations);
     this.store.set(key, { type: 'histogram', name, labels: labels ?? {}, instance });
     return instance;
   }

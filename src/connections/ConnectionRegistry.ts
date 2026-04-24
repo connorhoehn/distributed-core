@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import { EntityRegistry, EntityRecord } from '../cluster/entity/types';
 import { EntityUpdate } from '../persistence/wal/types';
 import { EvictionTimer } from '../gateway/eviction/EvictionTimer';
+import { defaultLogger } from '../common/logger';
 
 export interface ConnectionHandle {
   connectionId: string;
@@ -87,7 +88,8 @@ export class ConnectionRegistry extends EventEmitter {
     }
     try {
       await this.registry.releaseEntity(connectionId);
-    } catch {
+    } catch (err) {
+      defaultLogger.warn(`[ConnectionRegistry] releaseEntity(${connectionId}) failed`, err);
     }
   }
 

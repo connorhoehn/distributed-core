@@ -288,4 +288,96 @@ describe('DistributedSession', () => {
     expect(created[0][0]).toBe('sess-emit');
     expect(created[0][1]).toEqual({ count: 0 });
   });
+
+  // ownsRouter: false — session.start() does not call router.start()
+  it('ownsRouter: false does not call router.start() in session.start()', async () => {
+    const cluster = makeCluster('node-1');
+    const registry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+    const router = new ResourceRouter('node-1', registry, cluster as any, {
+      placement: new LocalPlacement(),
+    });
+    // Start the router externally so it is usable
+    await router.start();
+
+    const startSpy = jest.spyOn(router, 'start');
+
+    const session = new DistributedSession<TestState, TestUpdate>('node-1', router, adapter, {
+      ownsRouter: false,
+    });
+    activeSessions.push(session);
+    await session.start();
+
+    expect(startSpy).not.toHaveBeenCalled();
+
+    startSpy.mockRestore();
+    await router.stop();
+  });
+
+  // ownsRouter: false — session.stop() does not call router.stop()
+  it('ownsRouter: false does not call router.stop() in session.stop()', async () => {
+    const cluster = makeCluster('node-1');
+    const registry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+    const router = new ResourceRouter('node-1', registry, cluster as any, {
+      placement: new LocalPlacement(),
+    });
+    await router.start();
+
+    const stopSpy = jest.spyOn(router, 'stop');
+
+    const session = new DistributedSession<TestState, TestUpdate>('node-1', router, adapter, {
+      ownsRouter: false,
+    });
+    await session.start();
+    await session.stop();
+
+    expect(stopSpy).not.toHaveBeenCalled();
+
+    stopSpy.mockRestore();
+    await router.stop();
+  });
+
+  // Default behavior (ownsRouter: true) starts the router on session.start()
+  it('default ownsRouter: true calls router.start() on session.start()', async () => {
+    const cluster = makeCluster('node-1');
+    const registry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+    const router = new ResourceRouter('node-1', registry, cluster as any, {
+      placement: new LocalPlacement(),
+    });
+
+    const startSpy = jest.spyOn(router, 'start');
+
+    const session = new DistributedSession<TestState, TestUpdate>('node-1', router, adapter);
+    activeSessions.push(session);
+    await session.start();
+
+    expect(startSpy).toHaveBeenCalledTimes(1);
+    startSpy.mockRestore();
+  });
+
+  // resource:orphaned listener is attached in start(), not constructor
+  it('resource:orphaned listener is added in start() not constructor', async () => {
+    const cluster = makeCluster('node-1');
+    const registry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+    const router = new ResourceRouter('node-1', registry, cluster as any, {
+      placement: new LocalPlacement(),
+    });
+    await router.start();
+
+    const session = new DistributedSession<TestState, TestUpdate>('node-1', router, adapter, {
+      ownsRouter: false,
+    });
+
+    // After construction, before start(), no listener should be attached
+    expect(router.listenerCount('resource:orphaned')).toBe(0);
+
+    await session.start();
+    // After start(), the listener should be attached
+    expect(router.listenerCount('resource:orphaned')).toBe(1);
+
+    await session.stop();
+    // After stop(), the listener should be removed
+    expect(router.listenerCount('resource:orphaned')).toBe(0);
+
+    await router.stop();
+  });
 });

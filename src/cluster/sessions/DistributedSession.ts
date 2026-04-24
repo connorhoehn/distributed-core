@@ -8,6 +8,12 @@ import { ResourceHandle } from '../../routing/types';
 export interface DistributedSessionConfig {
   idleTimeoutMs?: number;
   placement?: PlacementStrategy;
+  /**
+   * If true (default), start()/stop() will also start/stop the router.
+   * Set to false when the router is shared with other primitives so callers
+   * can manage the router's lifecycle externally.
+   */
+  ownsRouter?: boolean;
 }
 
 export interface SessionInfo<S> {
@@ -42,18 +48,20 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
     this.config = {
       idleTimeoutMs: config?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
       placement: config?.placement ?? { selectNode: (_rid, local) => local },
+      ownsRouter: config?.ownsRouter ?? true,
     };
     this.eviction = new EvictionTimer<string>(this.config.idleTimeoutMs);
 
     this._onOrphaned = (handle: ResourceHandle) => {
       this.emit('session:orphaned', handle.resourceId);
     };
-
-    this.router.on('resource:orphaned', this._onOrphaned);
   }
 
   async start(): Promise<void> {
-    await this.router.start();
+    this.router.on('resource:orphaned', this._onOrphaned);
+    if (this.config.ownsRouter) {
+      await this.router.start();
+    }
   }
 
   async stop(): Promise<void> {
@@ -64,7 +72,9 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
       await this.router.release(handle.resourceId);
     }
     this.router.off('resource:orphaned', this._onOrphaned);
-    await this.router.stop();
+    if (this.config.ownsRouter) {
+      await this.router.stop();
+    }
   }
 
   async join(sessionId: string): Promise<SessionInfo<S>> {
