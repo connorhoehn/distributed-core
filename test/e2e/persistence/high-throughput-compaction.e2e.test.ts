@@ -29,9 +29,24 @@ describe('High-Throughput Storage with Compaction E2E', () => {
     }
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Clean up any .wal files left over from previous tests so each test
+    // runs with an isolated view of the filesystem (real compaction scans
+    // the directory for all .wal files, so leaked files would pollute
+    // assertions).
+    try {
+      const leftover = await fs.readdir(testDir);
+      await Promise.all(
+        leftover.filter(f => f.endsWith('.wal')).map(f =>
+          fs.unlink(path.join(testDir, f)).catch(() => undefined)
+        )
+      );
+    } catch {
+      // directory may not exist yet
+    }
+
     walCoordinator = new WALCoordinatorImpl();
-    
+
     // Configure compaction with aggressive settings for testing
     compactionCoordinator = new CompactionCoordinator({
       strategy: new TimeBasedCompactionStrategy({
