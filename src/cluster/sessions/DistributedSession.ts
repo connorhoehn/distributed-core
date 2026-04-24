@@ -165,6 +165,22 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
     this.metrics?.gauge('session.active.gauge').set(this.sessions.size);
   }
 
+  get nodeId(): string {
+    return this.localNodeId;
+  }
+
+  /**
+   * Overwrite the state of a locally-owned session. Used by external hydration
+   * (e.g., loading from a snapshot store after join()). Throws if the session is
+   * not owned by this node.
+   */
+  hydrate(sessionId: string, state: S): void {
+    if (!this.router.isLocal(sessionId)) {
+      throw new Error(`session ${sessionId} is not local`);
+    }
+    this.sessions.set(sessionId, state);
+  }
+
   isLocal(sessionId: string): boolean {
     return this.router.isLocal(sessionId);
   }

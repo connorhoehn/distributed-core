@@ -132,6 +132,28 @@ export class ConnectionRegistry extends EventEmitter {
     return this.registry.getAllKnownEntities().map((r) => toHandle(r, this.ttlMs));
   }
 
+  /**
+   * Externally triggered cleanup when a remote node is detected as failed.
+   * Iterates all known connections owned by `nodeId`, removes them from local
+   * tracking, and emits 'connection:expired' for each.
+   * Returns the count of connections cleaned up.
+   */
+  async handleRemoteNodeFailure(nodeId: string): Promise<number> {
+    const victims = this.getAllConnections().filter(c => c.nodeId === nodeId);
+    for (const victim of victims) {
+      await this.applyRemoteUpdate({
+        entityId: victim.connectionId,
+        ownerNodeId: victim.nodeId,
+        version: Date.now(),
+        timestamp: Date.now(),
+        operation: 'DELETE',
+        metadata: {},
+      });
+      this.emit('connection:expired', victim.connectionId);
+    }
+    return victims.length;
+  }
+
   getStats(): { local: number; total: number; pendingExpiry: number } {
     return {
       local: this.registry.getLocalEntities().length,

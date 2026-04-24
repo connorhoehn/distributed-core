@@ -1,3 +1,5 @@
+export { AutoReclaimPolicy } from './AutoReclaimPolicy';
+export type { AutoReclaimPolicyConfig } from './AutoReclaimPolicy';
 export { ClusterRouting } from './ClusterRouting';
 export { ConsistentHashRing } from './ConsistentHashRing';
 export { ResourceRouter } from './ResourceRouter';

@@ -1,307 +1,215 @@
-import { EvictionTimer } from '../eviction/EvictionTimer';
-import { UpdateCoalescer } from '../coalescing/UpdateCoalescer';
-import { ISnapshotVersionStore } from '../../persistence/snapshot/types';
-import { ChannelManager } from '../channel/ChannelManager';
-import { PresenceManager } from '../presence/PresenceManager';
+import { EventEmitter } from 'events';
+import { DistributedSession } from '../../cluster/sessions/DistributedSession';
 import { PubSubManager } from '../pubsub/PubSubManager';
-import {
-  SharedStateAdapter,
-  SharedStateManagerConfig,
-  SharedStateManagerStats,
-  SharedStateSession,
-} from './types';
+import { ISnapshotVersionStore } from '../../persistence/snapshot/types';
+import { SharedStateAdapter, SharedStateManagerStats } from './types';
+import { PubSubMessageMetadata } from '../pubsub/types';
 
-const DEFAULTS: Required<SharedStateManagerConfig> = {
-  idleEvictionMs: 600_000,
-  coalescingWindowMs: 50,
-  operationsBeforeCheckpoint: 50,
-  snapshotDebounceMs: 5_000,
-};
+const DEFAULT_TOPIC_PREFIX = 'shared-state';
+const DEFAULT_SNAPSHOT_DEBOUNCE_MS = 5_000;
 
-const PUBSUB_PREFIX = 'shared-state:';
+interface CrossNodePayload<U> {
+  update: U;
+}
 
-export class SharedStateManager<S, U = unknown> {
+export class SharedStateManager<S, U = unknown> extends EventEmitter {
+  private readonly session: DistributedSession<S, U>;
+  private readonly pubsub: PubSubManager;
   private readonly adapter: SharedStateAdapter<S, U>;
-  private readonly config: Required<SharedStateManagerConfig>;
+  private readonly topicPrefix: string;
+  private readonly snapshotStore?: ISnapshotVersionStore<S>;
+  private readonly snapshotDebounceMs: number;
 
-  private readonly sessions = new Map<string, SharedStateSession<S>>();
-  // clientId → channels this client is subscribed to (for disconnect cleanup)
   private readonly clientChannels = new Map<string, Set<string>>();
-  // channelId → debounce timer for periodic snapshotting
-  private readonly snapshotTimers = new Map<string, NodeJS.Timeout>();
-  // channelId → PubSub subscription ID for cross-node updates
+  private readonly channelSubscriberCount = new Map<string, number>();
   private readonly crossNodeSubs = new Map<string, string>();
+  private readonly snapshotTimers = new Map<string, NodeJS.Timeout>();
+  private readonly _followerStates = new Map<string, S>();
 
-  private readonly eviction: EvictionTimer<string>;
-  private readonly coalescer: UpdateCoalescer<U>;
-
-  private readonly channels?: ChannelManager;
-  private readonly presence?: PresenceManager;
-  private readonly pubsub?: PubSubManager;
-  private readonly snapshots?: ISnapshotVersionStore<Uint8Array | string>;
+  private _started = false;
 
   constructor(
+    session: DistributedSession<S, U>,
+    pubsub: PubSubManager,
     adapter: SharedStateAdapter<S, U>,
-    config?: SharedStateManagerConfig,
-    deps?: {
-      channels?: ChannelManager;
-      presence?: PresenceManager;
-      pubsub?: PubSubManager;
-      snapshots?: ISnapshotVersionStore<Uint8Array | string>;
+    options?: {
+      topicPrefix?: string;
+      snapshotStore?: ISnapshotVersionStore<S>;
+      snapshotDebounceMs?: number;
     }
   ) {
+    super();
+    this.session = session;
+    this.pubsub = pubsub;
     this.adapter = adapter;
-    this.config = { ...DEFAULTS, ...config };
-    this.channels = deps?.channels;
-    this.presence = deps?.presence;
-    this.pubsub = deps?.pubsub;
-    this.snapshots = deps?.snapshots;
+    this.topicPrefix = options?.topicPrefix ?? DEFAULT_TOPIC_PREFIX;
+    this.snapshotStore = options?.snapshotStore;
+    this.snapshotDebounceMs = options?.snapshotDebounceMs ?? DEFAULT_SNAPSHOT_DEBOUNCE_MS;
+  }
 
-    this.eviction = new EvictionTimer<string>(this.config.idleEvictionMs);
-
-    this.coalescer = new UpdateCoalescer<U>({
-      windowMs: this.config.coalescingWindowMs,
-      onFlush: (channelId, updates) => this._broadcastCoalesced(channelId, updates),
-      merge: adapter.mergeUpdates?.bind(adapter),
+  async start(): Promise<void> {
+    if (!this._started) {
+      await this.session.start();
+      this._started = true;
+    }
+    this.session.on('session:evicted', (sessionId: string) => {
+      void this._onSessionEvicted(sessionId);
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
+  async stop(): Promise<void> {
+    this._clearAllSnapshotTimers();
+    if (this.snapshotStore !== undefined) {
+      const localSessions = this.session.getLocalSessions();
+      await Promise.all(
+        localSessions.map(({ sessionId, state }) =>
+          this.snapshotStore!.store(sessionId, state, { type: 'checkpoint' })
+        )
+      );
+    }
+    for (const subId of this.crossNodeSubs.values()) {
+      this.pubsub.unsubscribe(subId);
+    }
+    this.crossNodeSubs.clear();
+    this.channelSubscriberCount.clear();
+    this.clientChannels.clear();
+    this._followerStates.clear();
+  }
 
-  /**
-   * Subscribe a client to a channel session. Returns the current state so
-   * the caller can deliver it as an initial snapshot to the new subscriber.
-   *
-   * If no session is active for the channel it is hydrated from the snapshot
-   * store (if available) or initialized with adapter.createState().
-   */
   async subscribe(clientId: string, channelId: string): Promise<S> {
-    this.eviction.cancel(channelId);
-
-    let session = this.sessions.get(channelId);
-    if (session === undefined) {
-      session = await this._openSession(channelId);
+    const topic = `${this.topicPrefix}:${channelId}`;
+    if (!this.crossNodeSubs.has(channelId)) {
+      const subId = this.pubsub.subscribe(
+        topic,
+        (t, payload, meta) => this._onCrossNodeMessage(channelId, payload as CrossNodePayload<U>, meta)
+      );
+      this.crossNodeSubs.set(channelId, subId);
     }
 
-    session.subscriberCount++;
-    session.lastActivity = Date.now();
+    const info = await this.session.join(channelId);
 
-    // Track client → channel reverse index
+    const prevCount = this.channelSubscriberCount.get(channelId) ?? 0;
+    this.channelSubscriberCount.set(channelId, prevCount + 1);
+
     let chans = this.clientChannels.get(clientId);
     if (chans === undefined) {
       chans = new Set();
       this.clientChannels.set(clientId, chans);
-      this.presence?.trackClient(clientId, {});
     }
     chans.add(channelId);
 
-    this.channels?.joinChannel(channelId, clientId);
+    if (info.isLocal) {
+      if (prevCount === 0 && this.snapshotStore !== undefined) {
+        const persisted = await this.snapshotStore.getLatest(channelId);
+        if (persisted !== null) {
+          this.session.hydrate(channelId, persisted.data);
+        }
+      }
+      return this.session.getState(channelId) ?? this.adapter.createState();
+    }
 
-    return session.state;
+    return this._followerStates.get(channelId) ?? this.adapter.createState();
   }
 
-  /**
-   * Apply an update produced by a local client.
-   * Updates state, coalesces for broadcast, publishes cross-node, and
-   * triggers periodic checkpointing.
-   */
   async applyUpdate(channelId: string, update: U, _sourceClientId?: string): Promise<void> {
-    const session = this.sessions.get(channelId);
-    if (session === undefined) {
-      throw new Error(`SharedStateManager: no active session for channel "${channelId}"`);
+    if (!this.session.isLocal(channelId)) {
+      throw new Error('channel is not owned by this node');
     }
+    await this.session.apply(channelId, update);
+    await this.pubsub.publish(`${this.topicPrefix}:${channelId}`, { update } as CrossNodePayload<U>);
 
-    session.state = this.adapter.applyUpdate(session.state, update);
-    session.operationCount++;
-    session.lastActivity = Date.now();
-
-    // Coalesce for broadcast to local channel subscribers
-    this.coalescer.buffer(channelId, update);
-
-    // Cross-node propagation — other nodes apply via _applyRemote (no re-publish)
-    await this.pubsub?.publish(`${PUBSUB_PREFIX}${channelId}`, update);
-
-    if (session.operationCount % this.config.operationsBeforeCheckpoint === 0) {
-      await this._writeSnapshot(channelId, session, 'auto');
-    } else {
-      this._scheduleSnapshot(channelId, session);
-    }
+    this._scheduleSnapshot(channelId);
   }
 
-  /**
-   * Return the current state for a channel without joining the session.
-   * Falls back to the snapshot store for inactive sessions.
-   */
   async getSnapshot(channelId: string): Promise<S | null> {
-    const session = this.sessions.get(channelId);
-    if (session !== undefined) return session.state;
-
-    const stored = this.snapshots ? await this.snapshots.getLatest(channelId) : null;
-    if (stored === null) return null;
-    return this.adapter.deserialize(stored.data);
+    if (this.session.isLocal(channelId)) {
+      return this.session.getState(channelId);
+    }
+    return this._followerStates.get(channelId) ?? null;
   }
 
-  /**
-   * Unsubscribe a client from a channel. When the last subscriber leaves,
-   * a checkpoint is taken and idle eviction is scheduled.
-   */
   async unsubscribe(clientId: string, channelId: string): Promise<void> {
-    // Update reverse index
     const chans = this.clientChannels.get(clientId);
     if (chans !== undefined) {
       chans.delete(channelId);
       if (chans.size === 0) {
         this.clientChannels.delete(clientId);
-        this.presence?.untrackClient(clientId);
       }
     }
 
-    this.channels?.leaveChannel(channelId, clientId);
+    const count = this.channelSubscriberCount.get(channelId);
+    if (count === undefined || count === 0) return;
 
-    const session = this.sessions.get(channelId);
-    if (session === undefined) return;
+    const newCount = count - 1;
+    this.channelSubscriberCount.set(channelId, newCount);
 
-    session.subscriberCount = Math.max(0, session.subscriberCount - 1);
-    session.lastActivity = Date.now();
-
-    if (session.subscriberCount === 0) {
-      // Flush any coalesced updates immediately
-      this.coalescer.flush(channelId);
-      this._clearSnapshotTimer(channelId);
-
-      // Checkpoint before idle eviction
-      await this._writeSnapshot(channelId, session, 'checkpoint');
-
-      // Unsubscribe cross-node listener
+    if (newCount === 0) {
+      this.channelSubscriberCount.delete(channelId);
       const subId = this.crossNodeSubs.get(channelId);
       if (subId !== undefined) {
-        this.pubsub?.unsubscribe(subId);
+        this.pubsub.unsubscribe(subId);
         this.crossNodeSubs.delete(channelId);
       }
+      this._clearSnapshotTimer(channelId);
 
-      this.eviction.schedule(channelId, (key) => this._evict(key));
+      if (this.session.isLocal(channelId)) {
+        await this.session.leave(channelId);
+      } else {
+        this._followerStates.delete(channelId);
+      }
     }
   }
 
-  /**
-   * Handle a client that disconnected without sending explicit unsubscribes.
-   */
   async onClientDisconnect(clientId: string): Promise<void> {
     const chans = this.clientChannels.get(clientId);
     if (chans === undefined) return;
-
     const channelList = Array.from(chans);
     await Promise.all(channelList.map((channelId) => this.unsubscribe(clientId, channelId)));
   }
 
-  /**
-   * Flush all pending state and write final checkpoints. Call on graceful shutdown.
-   */
-  async shutdown(): Promise<void> {
-    this.coalescer.flushAll();
-    this.eviction.cancelAll();
-    this._clearAllSnapshotTimers();
-
-    await Promise.all(
-      Array.from(this.sessions.entries()).map(([channelId, session]) =>
-        this._writeSnapshot(channelId, session, 'checkpoint')
-      )
-    );
-
-    for (const subId of this.crossNodeSubs.values()) {
-      this.pubsub?.unsubscribe(subId);
-    }
-    this.crossNodeSubs.clear();
-    this.sessions.clear();
-    this.clientChannels.clear();
-  }
-
   getStats(): SharedStateManagerStats {
     return {
-      activeSessions: this.sessions.size,
-      pendingCoalesce: this.coalescer.pendingCount,
-      pendingEvictions: this.eviction.pendingCount,
+      activeSessions: this.session.getStats().localSessions + this._followerStates.size,
+      pendingCoalesce: 0,
+      pendingEvictions: this.session.getStats().pendingEvictions,
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Private
-  // ---------------------------------------------------------------------------
-
-  private async _openSession(channelId: string): Promise<SharedStateSession<S>> {
-    let state: S;
-    const stored = this.snapshots ? await this.snapshots.getLatest(channelId) : null;
-    state = stored !== null ? this.adapter.deserialize(stored.data) : this.adapter.createState();
-
-    const session: SharedStateSession<S> = {
-      channelId,
-      state,
-      subscriberCount: 0,
-      operationCount: 0,
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-    };
-    this.sessions.set(channelId, session);
-
-    // Register cross-node update receiver
-    if (this.pubsub !== undefined) {
-      const subId = this.pubsub.subscribe(
-        `${PUBSUB_PREFIX}${channelId}`,
-        (_topic, payload) => this._applyRemote(channelId, payload as U)
-      );
-      this.crossNodeSubs.set(channelId, subId);
+  private async _onSessionEvicted(sessionId: string): Promise<void> {
+    if (this.snapshotStore === undefined) return;
+    const state = this.session.getState(sessionId);
+    if (state !== null) {
+      await this.snapshotStore.store(sessionId, state, { type: 'checkpoint' });
     }
-
-    return session;
   }
 
-  /** Apply an update received from another cluster node — no re-publish. */
-  private _applyRemote(channelId: string, update: U): void {
-    const session = this.sessions.get(channelId);
-    if (session === undefined) return;
+  private _onCrossNodeMessage(
+    channelId: string,
+    payload: CrossNodePayload<U>,
+    meta: PubSubMessageMetadata
+  ): void {
+    if (meta.publisherNodeId === this.session.nodeId) return;
+    if (this.session.isLocal(channelId)) return;
 
-    session.state = this.adapter.applyUpdate(session.state, update);
-    session.lastActivity = Date.now();
+    const current = this._followerStates.get(channelId) ?? this.adapter.createState();
+    const next = this.adapter.applyUpdate(current, payload.update);
+    this._followerStates.set(channelId, next);
 
-    // Coalesce for local broadcast only
-    this.coalescer.buffer(channelId, update);
-    this._scheduleSnapshot(channelId, session);
+    this.emit('state:updated', channelId, next);
   }
 
-  /** Called by the coalescer when the window closes for a channel. */
-  private async _broadcastCoalesced(channelId: string, updates: U[]): Promise<void> {
-    if (this.channels === undefined) return;
-    // Pass the merged/raw batch as-is; the application layer decides how to serialize
-    const payload = updates.length === 1 ? updates[0] : updates;
-    await this.channels.broadcastToChannel(channelId, payload);
-  }
-
-  private _scheduleSnapshot(channelId: string, session: SharedStateSession<S>): void {
+  private _scheduleSnapshot(channelId: string): void {
     this._clearSnapshotTimer(channelId);
+    if (this.snapshotStore === undefined) return;
     const timer = setTimeout(async () => {
       this.snapshotTimers.delete(channelId);
-      await this._writeSnapshot(channelId, session, 'auto');
-    }, this.config.snapshotDebounceMs);
+      const state = this.session.getState(channelId);
+      if (state !== null) {
+        await this.snapshotStore!.store(channelId, state, { type: 'auto' });
+      }
+    }, this.snapshotDebounceMs);
     timer.unref();
     this.snapshotTimers.set(channelId, timer);
-  }
-
-  private async _writeSnapshot(
-    channelId: string,
-    session: SharedStateSession<S>,
-    type: 'auto' | 'checkpoint'
-  ): Promise<void> {
-    if (this.snapshots === undefined) return;
-    const data = this.adapter.serialize(session.state);
-    await this.snapshots.store(channelId, data, { type });
-  }
-
-  private async _evict(channelId: string): Promise<void> {
-    const session = this.sessions.get(channelId);
-    if (session === undefined || session.subscriberCount > 0) return;
-    this.sessions.delete(channelId);
   }
 
   private _clearSnapshotTimer(channelId: string): void {

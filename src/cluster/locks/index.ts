@@ -4,3 +4,5 @@ export { LeaderElection } from './LeaderElection';
 export type { LeaderElectionConfig } from './LeaderElection';
 export { ClusterLeaderElection } from './ClusterLeaderElection';
 export type { ClusterLeaderElectionConfig } from './ClusterLeaderElection';
+export { QuorumDistributedLock } from './QuorumDistributedLock';
+export type { QuorumDistributedLockConfig } from './QuorumDistributedLock';

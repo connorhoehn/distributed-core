@@ -219,6 +219,22 @@ export class ResourceRouter extends EventEmitter {
     return this.registry.getAllKnownEntities().map((r) => this._toHandle(r));
   }
 
+  /**
+   * The node ID this router is running on.
+   */
+  get nodeId(): string {
+    return this.localNodeId;
+  }
+
+  /**
+   * Returns the IDs of all currently ALIVE cluster members.
+   * Exposed so external policies (e.g. AutoReclaimPolicy) can evaluate
+   * placement strategies without reaching into private state.
+   */
+  getAliveNodeIds(): string[] {
+    return this._getAliveNodeIds();
+  }
+
   // ---------------------------------------------------------------------------
   // Cross-node sync helpers
   // ---------------------------------------------------------------------------
@@ -243,6 +259,14 @@ export class ResourceRouter extends EventEmitter {
   // ---------------------------------------------------------------------------
   // Private
   // ---------------------------------------------------------------------------
+
+  /**
+   * Called by external failure detection to trigger orphan emission
+   * for resources owned by the given node.
+   */
+  handleNodeLeft(nodeId: string): void {
+    this._handleNodeLeft(nodeId);
+  }
 
   private _handleNodeLeft(nodeId: string): void {
     const orphaned = this.registry

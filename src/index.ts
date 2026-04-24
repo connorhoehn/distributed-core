@@ -105,11 +105,12 @@ export * from './connections/ConnectionRegistry';
 export * from './connections/Session';
 export * from './connections/types';
 
-// Routing — ResourceRouter, placement strategies, consistent hashing, cross-node sync, forwarding
+// Routing — ResourceRouter, placement strategies, consistent hashing, cross-node sync, forwarding, auto-reclaim
 export {
   ResourceRouter,
   ResourceRouterFactory,
   ResourceRouterSyncAdapter,
+  AutoReclaimPolicy,
   LocalPlacement,
   HashPlacement,
   LeastLoadedPlacement,
@@ -129,6 +130,7 @@ export type {
   ResourceRouterConfig,
   PlacementStrategy,
   ResourceRouterSyncAdapterConfig,
+  AutoReclaimPolicyConfig,
   ForwardingTransport,
   ForwardingRouterConfig,
   HttpForwardingTransportConfig,
@@ -140,11 +142,13 @@ export type {
 export { EntityRegistrySyncAdapter } from './cluster/entity/EntityRegistrySyncAdapter';
 export type { EntityRegistrySyncAdapterConfig } from './cluster/entity/EntityRegistrySyncAdapter';
 
-// Distributed coordination — locks, leader election, sessions
-export { DistributedLock, LeaderElection, ClusterLeaderElection } from './cluster/locks';
-export type { LockHandle, DistributedLockConfig, LeaderElectionConfig, ClusterLeaderElectionConfig } from './cluster/locks';
+// Distributed coordination — locks, leader election, sessions, quorum, failure
+export { DistributedLock, LeaderElection, ClusterLeaderElection, QuorumDistributedLock } from './cluster/locks';
+export type { LockHandle, DistributedLockConfig, LeaderElectionConfig, ClusterLeaderElectionConfig, QuorumDistributedLockConfig } from './cluster/locks';
 export { DistributedSession } from './cluster/sessions';
 export type { DistributedSessionConfig, SessionInfo } from './cluster/sessions';
+export { FailureDetectorBridge } from './cluster/failure';
+export type { FailureDetectorBridgeTargets, FailureDetectorBridgeConfig } from './cluster/failure';
 
 // Gateway domain — PubSub, Presence, Channel, Queue, MessageRouter
 export * from './gateway';

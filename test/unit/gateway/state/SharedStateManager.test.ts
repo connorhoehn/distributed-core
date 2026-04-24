@@ -1,58 +1,102 @@
+import { EventEmitter } from 'events';
 import { SharedStateManager } from '../../../../src/gateway/state/SharedStateManager';
 import { SharedStateAdapter } from '../../../../src/gateway/state/types';
+import { DistributedSession } from '../../../../src/cluster/sessions/DistributedSession';
+import { ResourceRouter } from '../../../../src/routing/ResourceRouter';
+import { EntityRegistryFactory } from '../../../../src/cluster/entity/EntityRegistryFactory';
+import { LocalPlacement } from '../../../../src/routing/PlacementStrategy';
 import { InMemorySnapshotVersionStore } from '../../../../src/persistence/snapshot/InMemorySnapshotVersionStore';
+import { MembershipEntry } from '../../../../src/cluster/types';
+import { PubSubMessageMetadata } from '../../../../src/gateway/pubsub/types';
+
+// ---------------------------------------------------------------------------
+// Counter adapter
+// ---------------------------------------------------------------------------
+
+interface CounterState { count: number }
+interface CounterUpdate { inc: number }
+
+const adapter: SharedStateAdapter<CounterState, CounterUpdate> = {
+  createState: () => ({ count: 0 }),
+  applyUpdate: (s, u) => ({ count: s.count + u.inc }),
+  serialize: (s) => JSON.stringify(s),
+  deserialize: (raw) => JSON.parse(raw as string),
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// Simple string accumulator: state is a sorted list of tokens joined by ','
-// Updates are individual tokens to append.
-const stringAdapter: SharedStateAdapter<string, string> = {
-  createState: () => '',
-  applyUpdate: (state, update) => (state ? `${state},${update}` : update),
-  serialize: (state) => state,
-  deserialize: (raw) => raw as string,
-  mergeUpdates: (updates) => [updates.join('+')],
-};
-
-function makeMockPubSub() {
-  const handlers = new Map<string, (topic: string, payload: unknown) => void>();
-  let subCounter = 0;
+function makeCluster(localNodeId: string) {
+  const emitter = new EventEmitter();
+  const membership = new Map<string, MembershipEntry>();
+  membership.set(localNodeId, {
+    id: localNodeId,
+    status: 'ALIVE',
+    lastSeen: Date.now(),
+    version: 1,
+    lastUpdated: Date.now(),
+    metadata: { address: '127.0.0.1', port: 7000 },
+  } as MembershipEntry);
   return {
-    subscribe: jest.fn((topic: string, handler: (t: string, p: unknown) => void) => {
-      const id = `sub-${++subCounter}`;
-      handlers.set(id, (t, p) => handler(t, p));
-      // Store topic → id for easy retrieval in tests
-      handlers.set(`${topic}::id`, () => {}) as any;
+    getMembership: () => membership,
+    getLocalNodeInfo: () => ({ id: localNodeId }),
+    on: (e: string, h: (...a: any[]) => void) => emitter.on(e, h),
+    off: (e: string, h: (...a: any[]) => void) => emitter.off(e, h),
+    emit: (e: string, ...a: any[]) => emitter.emit(e, ...a),
+  };
+}
+
+function makeMockPubSub(localNodeId = 'node-1') {
+  type Handler = (topic: string, payload: unknown, meta: PubSubMessageMetadata) => void;
+  const topicHandlers = new Map<string, Map<string, Handler>>();
+  let counter = 0;
+
+  const deliver = (topic: string, payload: unknown, sourceNodeId: string) => {
+    const meta: PubSubMessageMetadata = {
+      messageId: `msg-${++counter}`,
+      publisherNodeId: sourceNodeId,
+      timestamp: Date.now(),
+      topic,
+    };
+    const subs = topicHandlers.get(topic);
+    if (!subs) return;
+    for (const handler of subs.values()) {
+      handler(topic, payload, meta);
+    }
+  };
+
+  const mock = {
+    localNodeId,
+    subscribe: jest.fn((topic: string, handler: Handler) => {
+      const id = `sub-${++counter}`;
+      let subs = topicHandlers.get(topic);
+      if (!subs) { subs = new Map(); topicHandlers.set(topic, subs); }
+      subs.set(id, handler);
       return id;
     }),
     unsubscribe: jest.fn((id: string) => {
-      handlers.delete(id);
+      for (const subs of topicHandlers.values()) subs.delete(id);
+      return true;
     }),
     publish: jest.fn(async (topic: string, payload: unknown) => {
-      // Simulate remote delivery by calling all handlers for this topic
-      for (const [, handler] of handlers) {
-        try { handler(topic, payload); } catch (_) {}
-      }
+      deliver(topic, payload, localNodeId);
     }),
-    _handlers: handlers,
+    _deliver: deliver,
   };
+  return mock;
 }
 
-function makeMockChannels() {
-  return {
-    joinChannel: jest.fn(),
-    leaveChannel: jest.fn(),
-    broadcastToChannel: jest.fn().mockResolvedValue(undefined),
-  };
-}
-
-function makeMockPresence() {
-  return {
-    trackClient: jest.fn().mockReturnValue({ clientId: 'c', nodeId: 'n', metadata: {}, connectedAt: 0, lastSeen: 0 }),
-    untrackClient: jest.fn().mockReturnValue(true),
-  };
+async function makeSetup(nodeId = 'node-1') {
+  const cluster = makeCluster(nodeId);
+  const registry = EntityRegistryFactory.createMemory(nodeId, { enableTestMode: true });
+  const router = new ResourceRouter(nodeId, registry, cluster as any, {
+    placement: new LocalPlacement(),
+  });
+  const session = new DistributedSession<CounterState, CounterUpdate>(nodeId, router, adapter, {
+    ownsRouter: true,
+  });
+  return { session, router, cluster };
 }
 
 // ---------------------------------------------------------------------------
@@ -60,357 +104,243 @@ function makeMockPresence() {
 // ---------------------------------------------------------------------------
 
 describe('SharedStateManager', () => {
-  let snapshots: InMemorySnapshotVersionStore<string>;
+  const activeSessions: DistributedSession<any, any>[] = [];
 
   beforeEach(() => {
     jest.useFakeTimers();
-    snapshots = new InMemorySnapshotVersionStore();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.useRealTimers();
+    for (const s of activeSessions.splice(0)) {
+      await s.stop().catch(() => {});
+    }
   });
 
-  // -------------------------------------------------------------------------
-  // subscribe
-  // -------------------------------------------------------------------------
+  // 1. subscribe() returns initial state from adapter for a new channel
+  it('subscribe() returns initial state from adapter for a new channel', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-  describe('subscribe()', () => {
-    it('returns initial empty state when no snapshot exists', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      const state = await mgr.subscribe('client-1', 'ch-1');
-      expect(state).toBe('');
-    });
-
-    it('hydrates state from snapshot store on first subscribe', async () => {
-      await snapshots.store('ch-1', 'hydrated-state');
-      const mgr = new SharedStateManager(stringAdapter, {}, { snapshots });
-
-      const state = await mgr.subscribe('client-1', 'ch-1');
-      expect(state).toBe('hydrated-state');
-    });
-
-    it('increments subscriberCount for the same channel', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.subscribe('client-2', 'ch-1');
-
-      expect(mgr.getStats().activeSessions).toBe(1);
-    });
-
-    it('cancels a pending eviction when a new subscriber arrives', async () => {
-      const mgr = new SharedStateManager(stringAdapter, { idleEvictionMs: 500 });
-
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(mgr.getStats().pendingEvictions).toBe(1);
-
-      // New subscriber before eviction fires
-      await mgr.subscribe('client-2', 'ch-1');
-      expect(mgr.getStats().pendingEvictions).toBe(0);
-      expect(mgr.getStats().activeSessions).toBe(1);
-    });
-
-    it('calls channels.joinChannel when dep is provided', async () => {
-      const channels = makeMockChannels();
-      const mgr = new SharedStateManager(stringAdapter, {}, { channels: channels as any });
-
-      await mgr.subscribe('client-1', 'ch-1');
-      expect(channels.joinChannel).toHaveBeenCalledWith('ch-1', 'client-1');
-    });
-
-    it('calls presence.trackClient only on first channel subscription', async () => {
-      const presence = makeMockPresence();
-      const mgr = new SharedStateManager(stringAdapter, {}, { presence: presence as any });
-
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.subscribe('client-1', 'ch-2'); // second channel, same client
-      expect(presence.trackClient).toHaveBeenCalledTimes(1);
-    });
+    const state = await mgr.subscribe('client-1', 'ch-1');
+    expect(state).toEqual({ count: 0 });
   });
 
-  // -------------------------------------------------------------------------
-  // applyUpdate
-  // -------------------------------------------------------------------------
+  // 2. subscribe() hydrates from snapshotStore if a persisted snapshot exists
+  it('subscribe() hydrates from snapshotStore if a persisted snapshot exists', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const snapshotStore = new InMemorySnapshotVersionStore<CounterState>();
+    await snapshotStore.store('ch-hydrate', { count: 42 });
 
-  describe('applyUpdate()', () => {
-    it('mutates session state via the adapter', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'hello');
+    const mgr = new SharedStateManager(session, pubsub as any, adapter, { snapshotStore });
+    await mgr.start();
 
-      const snapshot = await mgr.getSnapshot('ch-1');
-      expect(snapshot).toBe('hello');
-    });
-
-    it('accumulates multiple updates', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'a');
-      await mgr.applyUpdate('ch-1', 'b');
-
-      expect(await mgr.getSnapshot('ch-1')).toBe('a,b');
-    });
-
-    it('throws when the channel has no active session', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await expect(mgr.applyUpdate('no-session', 'x')).rejects.toThrow('no active session');
-    });
-
-    it('buffers updates in the coalescer', async () => {
-      const mgr = new SharedStateManager(stringAdapter, { coalescingWindowMs: 50 });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'a');
-
-      expect(mgr.getStats().pendingCoalesce).toBe(1);
-    });
-
-    it('calls pubsub.publish for cross-node propagation', async () => {
-      const pubsub = makeMockPubSub();
-      const mgr = new SharedStateManager(stringAdapter, {}, { pubsub: pubsub as any });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'msg');
-
-      expect(pubsub.publish).toHaveBeenCalledWith('shared-state:ch-1', 'msg');
-    });
-
-    it('takes an auto snapshot every operationsBeforeCheckpoint ops', async () => {
-      const storeSpy = jest.spyOn(snapshots, 'store');
-      const mgr = new SharedStateManager(
-        stringAdapter,
-        { operationsBeforeCheckpoint: 3 },
-        { snapshots }
-      );
-      await mgr.subscribe('client-1', 'ch-1');
-
-      await mgr.applyUpdate('ch-1', 'a');
-      await mgr.applyUpdate('ch-1', 'b');
-      expect(storeSpy).not.toHaveBeenCalled();
-
-      await mgr.applyUpdate('ch-1', 'c'); // 3rd op triggers immediate snapshot
-      expect(storeSpy).toHaveBeenCalledWith('ch-1', 'a,b,c', { type: 'auto' });
-    });
+    const state = await mgr.subscribe('client-1', 'ch-hydrate');
+    expect(state).toEqual({ count: 42 });
   });
 
-  // -------------------------------------------------------------------------
-  // getSnapshot
-  // -------------------------------------------------------------------------
+  // 3. applyUpdate() modifies state, publishes to pubsub, schedules debounced snapshot
+  it('applyUpdate() modifies state, publishes to pubsub, and schedules debounced snapshot', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const snapshotStore = new InMemorySnapshotVersionStore<CounterState>();
+    const storeSpy = jest.spyOn(snapshotStore, 'store');
 
-  describe('getSnapshot()', () => {
-    it('returns null when no session and no snapshot', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      expect(await mgr.getSnapshot('ch-1')).toBeNull();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter, {
+      snapshotStore,
+      snapshotDebounceMs: 100,
     });
+    await mgr.start();
+    await mgr.subscribe('client-1', 'ch-1');
+    await mgr.applyUpdate('ch-1', { inc: 5 });
 
-    it('returns live session state for active channels', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'live');
+    expect(pubsub.publish).toHaveBeenCalledWith(
+      'shared-state:ch-1',
+      expect.objectContaining({ update: { inc: 5 } })
+    );
+    expect(storeSpy).not.toHaveBeenCalled();
 
-      expect(await mgr.getSnapshot('ch-1')).toBe('live');
-    });
+    await jest.advanceTimersByTimeAsync(100);
+    expect(storeSpy).toHaveBeenCalledWith('ch-1', { count: 5 }, { type: 'auto' });
 
-    it('falls back to snapshot store for inactive sessions', async () => {
-      await snapshots.store('ch-1', 'persisted');
-      const mgr = new SharedStateManager(stringAdapter, {}, { snapshots });
-
-      // No subscribe → no active session
-      expect(await mgr.getSnapshot('ch-1')).toBe('persisted');
-    });
+    const snap = await mgr.getSnapshot('ch-1');
+    expect(snap).toEqual({ count: 5 });
   });
 
-  // -------------------------------------------------------------------------
-  // unsubscribe
-  // -------------------------------------------------------------------------
+  // 4. Second subscribe() to same channel returns the same state
+  it('second subscribe() to same channel returns the same (updated) state', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-  describe('unsubscribe()', () => {
-    it('is a no-op when client has no session', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await expect(mgr.unsubscribe('unknown', 'ch-1')).resolves.not.toThrow();
-    });
+    await mgr.subscribe('client-1', 'ch-1');
+    await mgr.applyUpdate('ch-1', { inc: 3 });
+    const state2 = await mgr.subscribe('client-2', 'ch-1');
 
-    it('calls channels.leaveChannel', async () => {
-      const channels = makeMockChannels();
-      const mgr = new SharedStateManager(stringAdapter, {}, { channels: channels as any });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(channels.leaveChannel).toHaveBeenCalledWith('ch-1', 'client-1');
-    });
-
-    it('untracks presence when client leaves all channels', async () => {
-      const presence = makeMockPresence();
-      const mgr = new SharedStateManager(stringAdapter, {}, { presence: presence as any });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(presence.untrackClient).toHaveBeenCalledWith('client-1');
-    });
-
-    it('does NOT untrack presence while client is still in other channels', async () => {
-      const presence = makeMockPresence();
-      const mgr = new SharedStateManager(stringAdapter, {}, { presence: presence as any });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.subscribe('client-1', 'ch-2');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(presence.untrackClient).not.toHaveBeenCalled();
-    });
-
-    it('schedules eviction when last subscriber leaves', async () => {
-      const mgr = new SharedStateManager(stringAdapter, { idleEvictionMs: 1000 });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(mgr.getStats().pendingEvictions).toBe(1);
-    });
-
-    it('does not schedule eviction while other subscribers remain', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.subscribe('client-2', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(mgr.getStats().pendingEvictions).toBe(0);
-    });
-
-    it('writes a checkpoint snapshot on last unsubscribe', async () => {
-      const storeSpy = jest.spyOn(snapshots, 'store');
-      const mgr = new SharedStateManager(stringAdapter, {}, { snapshots });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'data');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(storeSpy).toHaveBeenCalledWith('ch-1', 'data', { type: 'checkpoint' });
-    });
+    expect(state2).toEqual({ count: 3 });
   });
 
-  // -------------------------------------------------------------------------
-  // onClientDisconnect
-  // -------------------------------------------------------------------------
+  // 5. unsubscribe() of last client releases the session
+  it('unsubscribe() of the last client releases the session on this node', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-  describe('onClientDisconnect()', () => {
-    it('unsubscribes the client from all channels', async () => {
-      const channels = makeMockChannels();
-      const mgr = new SharedStateManager(stringAdapter, {}, { channels: channels as any });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.subscribe('client-1', 'ch-2');
+    await mgr.subscribe('client-1', 'ch-1');
+    expect(session.isLocal('ch-1')).toBe(true);
 
-      await mgr.onClientDisconnect('client-1');
-
-      expect(channels.leaveChannel).toHaveBeenCalledWith('ch-1', 'client-1');
-      expect(channels.leaveChannel).toHaveBeenCalledWith('ch-2', 'client-1');
-    });
-
-    it('is a no-op for unknown clients', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await expect(mgr.onClientDisconnect('ghost')).resolves.not.toThrow();
-    });
+    await mgr.unsubscribe('client-1', 'ch-1');
+    expect(session.isLocal('ch-1')).toBe(false);
   });
 
-  // -------------------------------------------------------------------------
-  // shutdown
-  // -------------------------------------------------------------------------
+  // 6. onClientDisconnect() unsubscribes from all that client's channels
+  it('onClientDisconnect() unsubscribes from all channels for that client', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-  describe('shutdown()', () => {
-    it('writes checkpoints for all active sessions', async () => {
-      const storeSpy = jest.spyOn(snapshots, 'store');
-      const mgr = new SharedStateManager(stringAdapter, {}, { snapshots });
+    await mgr.subscribe('client-1', 'ch-1');
+    await mgr.subscribe('client-1', 'ch-2');
+    expect(session.isLocal('ch-1')).toBe(true);
+    expect(session.isLocal('ch-2')).toBe(true);
 
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'alive');
-      await mgr.subscribe('client-2', 'ch-2');
-      await mgr.applyUpdate('ch-2', 'alive2');
-
-      await mgr.shutdown();
-
-      expect(storeSpy).toHaveBeenCalledWith('ch-1', 'alive', { type: 'checkpoint' });
-      expect(storeSpy).toHaveBeenCalledWith('ch-2', 'alive2', { type: 'checkpoint' });
-    });
-
-    it('clears all active sessions after shutdown', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.shutdown();
-      expect(mgr.getStats().activeSessions).toBe(0);
-    });
-
-    it('cancels all pending evictions', async () => {
-      const mgr = new SharedStateManager(stringAdapter, { idleEvictionMs: 5000 });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
-      expect(mgr.getStats().pendingEvictions).toBe(1);
-
-      await mgr.shutdown();
-      expect(mgr.getStats().pendingEvictions).toBe(0);
-    });
+    await mgr.onClientDisconnect('client-1');
+    expect(session.isLocal('ch-1')).toBe(false);
+    expect(session.isLocal('ch-2')).toBe(false);
   });
 
-  // -------------------------------------------------------------------------
-  // eviction
-  // -------------------------------------------------------------------------
+  // 7. Cross-node incoming update updates follower state and emits 'state:updated'
+  it('cross-node pubsub message updates follower state and emits state:updated', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub('node-1');
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-  describe('idle eviction', () => {
-    it('evicts the session after the idle delay', async () => {
-      const mgr = new SharedStateManager(stringAdapter, { idleEvictionMs: 500 });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
+    await mgr.subscribe('client-1', 'ch-follower');
 
-      expect(mgr.getStats().activeSessions).toBe(1); // still in memory
-      await jest.advanceTimersByTimeAsync(500);
-      expect(mgr.getStats().activeSessions).toBe(0); // evicted
+    await session.leave('ch-follower');
+
+    const updates: Array<[string, CounterState]> = [];
+    mgr.on('state:updated', (channelId: string, state: CounterState) => {
+      updates.push([channelId, state]);
     });
 
-    it('does not evict a session that has regained subscribers', async () => {
-      const mgr = new SharedStateManager(stringAdapter, { idleEvictionMs: 500 });
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.unsubscribe('client-1', 'ch-1');
+    pubsub._deliver('shared-state:ch-follower', { update: { inc: 7 } }, 'node-2');
 
-      await jest.advanceTimersByTimeAsync(200);
-      await mgr.subscribe('client-2', 'ch-1'); // arrives before eviction
-
-      await jest.advanceTimersByTimeAsync(400); // past original eviction time
-      expect(mgr.getStats().activeSessions).toBe(1); // still alive
-    });
+    expect(updates).toHaveLength(1);
+    expect(updates[0][0]).toBe('ch-follower');
+    expect(updates[0][1]).toEqual({ count: 7 });
   });
 
-  // -------------------------------------------------------------------------
-  // snapshot debounce
-  // -------------------------------------------------------------------------
+  // 8. Own published updates are NOT re-applied (loop prevention)
+  it('own published updates are not re-applied (loop prevention)', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub('node-1');
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-  describe('snapshot debounce', () => {
-    it('takes a debounced snapshot after inactivity', async () => {
-      const storeSpy = jest.spyOn(snapshots, 'store');
-      const mgr = new SharedStateManager(
-        stringAdapter,
-        { snapshotDebounceMs: 200, operationsBeforeCheckpoint: 1000 },
-        { snapshots }
-      );
-      await mgr.subscribe('client-1', 'ch-1');
-      await mgr.applyUpdate('ch-1', 'x');
+    await mgr.subscribe('client-1', 'ch-1');
+    await mgr.applyUpdate('ch-1', { inc: 1 });
 
-      expect(storeSpy).not.toHaveBeenCalled();
-      await jest.advanceTimersByTimeAsync(200);
-      expect(storeSpy).toHaveBeenCalledWith('ch-1', 'x', { type: 'auto' });
-    });
+    const snap = await mgr.getSnapshot('ch-1');
+    expect(snap).toEqual({ count: 1 });
   });
 
-  // -------------------------------------------------------------------------
-  // getStats
-  // -------------------------------------------------------------------------
+  // 9. getSnapshot() returns latest state for local or follower channels
+  it('getSnapshot() returns latest local state', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-  describe('getStats()', () => {
-    it('reports zero stats on a fresh manager', () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      expect(mgr.getStats()).toEqual({ activeSessions: 0, pendingCoalesce: 0, pendingEvictions: 0 });
-    });
+    await mgr.subscribe('client-1', 'ch-1');
+    await mgr.applyUpdate('ch-1', { inc: 10 });
+    expect(await mgr.getSnapshot('ch-1')).toEqual({ count: 10 });
+  });
 
-    it('tracks active sessions', async () => {
-      const mgr = new SharedStateManager(stringAdapter);
-      await mgr.subscribe('c1', 'ch-1');
-      await mgr.subscribe('c2', 'ch-2');
-      expect(mgr.getStats().activeSessions).toBe(2);
-    });
+  it('getSnapshot() returns follower state for non-local channels', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub('node-1');
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
 
-    it('tracks pending evictions', async () => {
-      const mgr = new SharedStateManager(stringAdapter, { idleEvictionMs: 9999 });
-      await mgr.subscribe('c1', 'ch-1');
-      await mgr.unsubscribe('c1', 'ch-1');
-      expect(mgr.getStats().pendingEvictions).toBe(1);
-    });
+    await mgr.subscribe('client-1', 'ch-follower');
+    await session.leave('ch-follower');
+
+    pubsub._deliver('shared-state:ch-follower', { update: { inc: 3 } }, 'node-2');
+
+    expect(await mgr.getSnapshot('ch-follower')).toEqual({ count: 3 });
+  });
+
+  it('getSnapshot() returns null for unknown channels', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
+
+    expect(await mgr.getSnapshot('nonexistent')).toBeNull();
+  });
+
+  // 10. applyUpdate on non-local channel throws
+  it('applyUpdate() throws when channel is not owned by this node', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
+
+    await expect(mgr.applyUpdate('not-owned', { inc: 1 })).rejects.toThrow(
+      'channel is not owned by this node'
+    );
+  });
+
+  // 11. stop() persists all active channels to the snapshot store
+  it('stop() persists all active local channels to snapshot store', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const snapshotStore = new InMemorySnapshotVersionStore<CounterState>();
+    const storeSpy = jest.spyOn(snapshotStore, 'store');
+
+    const mgr = new SharedStateManager(session, pubsub as any, adapter, { snapshotStore });
+    await mgr.start();
+
+    await mgr.subscribe('client-1', 'ch-a');
+    await mgr.applyUpdate('ch-a', { inc: 2 });
+    await mgr.subscribe('client-2', 'ch-b');
+    await mgr.applyUpdate('ch-b', { inc: 5 });
+
+    await mgr.stop();
+
+    expect(storeSpy).toHaveBeenCalledWith('ch-a', { count: 2 }, { type: 'checkpoint' });
+    expect(storeSpy).toHaveBeenCalledWith('ch-b', { count: 5 }, { type: 'checkpoint' });
+  });
+
+  // onClientDisconnect is a no-op for unknown clients
+  it('onClientDisconnect() is a no-op for unknown clients', async () => {
+    const { session } = await makeSetup();
+    activeSessions.push(session);
+    const pubsub = makeMockPubSub();
+    const mgr = new SharedStateManager(session, pubsub as any, adapter);
+    await mgr.start();
+
+    await expect(mgr.onClientDisconnect('ghost')).resolves.not.toThrow();
   });
 });
