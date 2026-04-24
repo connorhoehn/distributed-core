@@ -105,7 +105,7 @@ export * from './connections/ConnectionRegistry';
 export * from './connections/Session';
 export * from './connections/types';
 
-// Routing — ResourceRouter, placement strategies, consistent hashing, cross-node sync
+// Routing — ResourceRouter, placement strategies, consistent hashing, cross-node sync, forwarding
 export {
   ResourceRouter,
   ResourceRouterFactory,
@@ -114,6 +114,13 @@ export {
   HashPlacement,
   LeastLoadedPlacement,
   RandomPlacement,
+  ForwardingRouter,
+  LocalResourceError,
+  UnroutableResourceError,
+  HttpForwardingTransport,
+  MisdirectedError,
+  TimeoutError,
+  ForwardingServer,
 } from './routing';
 export type {
   RouteTarget,
@@ -122,7 +129,16 @@ export type {
   ResourceRouterConfig,
   PlacementStrategy,
   ResourceRouterSyncAdapterConfig,
+  ForwardingTransport,
+  ForwardingRouterConfig,
+  HttpForwardingTransportConfig,
+  ForwardingServerConfig,
+  ForwardingHandler,
 } from './routing';
+
+// Entity registries — cross-node sync adapter
+export { EntityRegistrySyncAdapter } from './cluster/entity/EntityRegistrySyncAdapter';
+export type { EntityRegistrySyncAdapterConfig } from './cluster/entity/EntityRegistrySyncAdapter';
 
 // Distributed coordination — locks, leader election, sessions
 export { DistributedLock, LeaderElection, ClusterLeaderElection } from './cluster/locks';

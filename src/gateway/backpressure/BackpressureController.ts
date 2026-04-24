@@ -1,4 +1,5 @@
 import { RateLimiter } from '../../common/RateLimiter';
+import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
 
 export type DropStrategy = 'drop-oldest' | 'drop-newest' | 'reject';
 
@@ -8,6 +9,7 @@ export interface BackpressureConfig<T> {
   flushIntervalMs?: number;
   rateLimiter?: RateLimiter;
   onDrop?: (key: string, item: T) => void;
+  metrics?: MetricsRegistry;
 }
 
 export interface EnqueueResult {
@@ -26,6 +28,7 @@ export class BackpressureController<T> {
   private readonly queues: Map<string, T[]> = new Map();
   private readonly onFlush: (key: string, items: T[]) => Promise<void>;
   private readonly config: BackpressureConfig<T>;
+  private readonly metrics: MetricsRegistry | null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private totalEnqueued = 0;
   private totalFlushed = 0;
@@ -37,6 +40,7 @@ export class BackpressureController<T> {
   ) {
     this.onFlush = onFlush;
     this.config = config;
+    this.metrics = config.metrics ?? null;
   }
 
   enqueue(key: string, item: T): EnqueueResult {
@@ -55,6 +59,8 @@ export class BackpressureController<T> {
     if (queue.length < this.config.maxQueueSize) {
       queue.push(item);
       this.totalEnqueued++;
+      this.metrics?.counter('bp.enqueued.count').inc();
+      this.metrics?.gauge('bp.queue_depth.gauge', { key }).set(queue.length);
       return { accepted: true, dropped: 0 };
     }
 
@@ -63,18 +69,23 @@ export class BackpressureController<T> {
     if (strategy === 'drop-oldest') {
       const dropped = queue.shift()!;
       this.totalDropped++;
+      this.metrics?.counter('bp.dropped.count', { strategy: 'drop-oldest' }).inc();
       this.config.onDrop?.(key, dropped);
       queue.push(item);
       this.totalEnqueued++;
+      this.metrics?.counter('bp.enqueued.count').inc();
+      this.metrics?.gauge('bp.queue_depth.gauge', { key }).set(queue.length);
       return { accepted: true, dropped: 1 };
     }
 
     if (strategy === 'drop-newest') {
       this.totalDropped++;
+      this.metrics?.counter('bp.dropped.count', { strategy: 'drop-newest' }).inc();
       this.config.onDrop?.(key, item);
       return { accepted: false, dropped: 1 };
     }
 
+    this.metrics?.counter('bp.dropped.count', { strategy: 'reject' }).inc();
     return { accepted: false, dropped: 0 };
   }
 
@@ -88,6 +99,8 @@ export class BackpressureController<T> {
     try {
       await this.onFlush(key, items);
       this.totalFlushed += items.length;
+      this.metrics?.counter('bp.flushed.count').inc(items.length);
+      this.metrics?.gauge('bp.queue_depth.gauge', { key }).set(0);
     } catch (err) {
       const current = this.queues.get(key) ?? [];
       this.queues.set(key, [...items, ...current]);

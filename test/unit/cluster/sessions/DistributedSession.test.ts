@@ -5,6 +5,7 @@ import { MembershipEntry } from '../../../../src/cluster/types';
 import { HashPlacement, LocalPlacement } from '../../../../src/routing/PlacementStrategy';
 import { DistributedSession } from '../../../../src/cluster/sessions/DistributedSession';
 import { SharedStateAdapter } from '../../../../src/gateway/state/types';
+import { MetricsRegistry } from '../../../../src/monitoring/metrics/MetricsRegistry';
 
 // ---------------------------------------------------------------------------
 // Minimal ClusterManager stub
@@ -352,6 +353,89 @@ describe('DistributedSession', () => {
 
     expect(startSpy).toHaveBeenCalledTimes(1);
     startSpy.mockRestore();
+  });
+
+  // -------------------------------------------------------------------------
+  // metrics
+  // -------------------------------------------------------------------------
+
+  describe('metrics', () => {
+    async function makeMetricsSession() {
+      const metrics = new MetricsRegistry('node-1');
+      const cluster = makeCluster('node-1', [{ id: 'node-2', address: '10.0.0.2', port: 7001 }]);
+      const registry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+      const router = new ResourceRouter('node-1', registry, cluster as any, {
+        placement: new LocalPlacement(),
+      });
+      const session = new DistributedSession<TestState, TestUpdate>('node-1', router, adapter, {
+        idleTimeoutMs: 60_000,
+        metrics,
+      });
+      activeSessions.push(session);
+      await session.start();
+      return { session, cluster, registry, metrics };
+    }
+
+    it('increments session.created.count on join', async () => {
+      const { session, metrics } = await makeMetricsSession();
+      await session.join('s1');
+      expect(metrics.counter('session.created.count').get()).toBe(1);
+    });
+
+    it('session.active.gauge reflects active count (increment + decrement cycle)', async () => {
+      const { session, metrics } = await makeMetricsSession();
+      expect(metrics.gauge('session.active.gauge').get()).toBe(0);
+      await session.join('s1');
+      expect(metrics.gauge('session.active.gauge').get()).toBe(1);
+      await session.join('s2');
+      expect(metrics.gauge('session.active.gauge').get()).toBe(2);
+      await session.leave('s1');
+      expect(metrics.gauge('session.active.gauge').get()).toBe(1);
+    });
+
+    it('records session.apply.latency_ms histogram on apply', async () => {
+      const { session, metrics } = await makeMetricsSession();
+      await session.join('s1');
+      await session.apply('s1', { inc: 1 });
+      expect(metrics.histogram('session.apply.latency_ms').getCount()).toBe(1);
+    });
+
+    it('increments session.evicted.count on idle eviction and updates gauge', async () => {
+      const metrics = new MetricsRegistry('node-1');
+      const cluster = makeCluster('node-1');
+      const registry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+      const router = new ResourceRouter('node-1', registry, cluster as any, {
+        placement: new LocalPlacement(),
+      });
+      const session = new DistributedSession<TestState, TestUpdate>('node-1', router, adapter, {
+        idleTimeoutMs: 5_000,
+        metrics,
+      });
+      activeSessions.push(session);
+      await session.start();
+
+      await session.join('s-evict');
+      expect(metrics.gauge('session.active.gauge').get()).toBe(1);
+
+      jest.advanceTimersByTime(5_001);
+      expect(metrics.counter('session.evicted.count').get()).toBe(1);
+      expect(metrics.gauge('session.active.gauge').get()).toBe(0);
+    });
+
+    it('increments session.orphaned.count on orphan event', async () => {
+      const { session, cluster, registry, metrics } = await makeMetricsSession();
+      await registry.applyRemoteUpdate({
+        entityId: 'sess-orphan', ownerNodeId: 'node-2', version: 1,
+        timestamp: Date.now(), operation: 'CREATE', metadata: {},
+      });
+      cluster.simulateLeave('node-2');
+      expect(metrics.counter('session.orphaned.count').get()).toBe(1);
+    });
+
+    it('no metrics errors when metrics is omitted', async () => {
+      const { session } = await makeSession();
+      await expect(session.join('s-no-metrics')).resolves.toBeDefined();
+    });
   });
 
   // resource:orphaned listener is attached in start(), not constructor

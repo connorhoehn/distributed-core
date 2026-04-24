@@ -4,6 +4,7 @@ import { PlacementStrategy } from '../../routing/types';
 import { SharedStateAdapter } from '../../gateway/state/types';
 import { EvictionTimer } from '../../gateway/eviction/EvictionTimer';
 import { ResourceHandle } from '../../routing/types';
+import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
 
 export interface DistributedSessionConfig {
   idleTimeoutMs?: number;
@@ -14,6 +15,7 @@ export interface DistributedSessionConfig {
    * can manage the router's lifecycle externally.
    */
   ownsRouter?: boolean;
+  metrics?: MetricsRegistry;
 }
 
 export interface SessionInfo<S> {
@@ -29,7 +31,8 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
   private readonly localNodeId: string;
   private readonly router: ResourceRouter;
   private readonly adapter: SharedStateAdapter<S, U>;
-  private readonly config: Required<DistributedSessionConfig>;
+  private readonly config: Required<Omit<DistributedSessionConfig, 'metrics'>>;
+  private readonly metrics: MetricsRegistry | null;
   private readonly sessions = new Map<string, S>();
   private readonly eviction: EvictionTimer<string>;
 
@@ -45,6 +48,7 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
     this.localNodeId = localNodeId;
     this.router = router;
     this.adapter = adapter;
+    this.metrics = config?.metrics ?? null;
     this.config = {
       idleTimeoutMs: config?.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
       placement: config?.placement ?? { selectNode: (_rid, local) => local },
@@ -53,6 +57,7 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
     this.eviction = new EvictionTimer<string>(this.config.idleTimeoutMs);
 
     this._onOrphaned = (handle: ResourceHandle) => {
+      this.metrics?.counter('session.orphaned.count').inc();
       this.emit('session:orphaned', handle.resourceId);
     };
   }
@@ -108,8 +113,12 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
       this.eviction.schedule(sessionId, (sid) => {
         this.sessions.delete(sid);
         void this.router.release(sid);
+        this.metrics?.counter('session.evicted.count').inc();
+        this.metrics?.gauge('session.active.gauge').set(this.sessions.size);
         this.emit('session:evicted', sid);
       });
+      this.metrics?.counter('session.created.count').inc();
+      this.metrics?.gauge('session.active.gauge').set(this.sessions.size);
       this.emit('session:created', sessionId, state);
       return { sessionId, ownerNodeId: this.localNodeId, state, isLocal: true };
     }
@@ -130,14 +139,18 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
     if (current === undefined) {
       throw new Error(`session ${sessionId} is not local`);
     }
+    const start = Date.now();
     const newState = this.adapter.applyUpdate(current, update);
     this.sessions.set(sessionId, newState);
     this.eviction.cancel(sessionId);
     this.eviction.schedule(sessionId, (sid) => {
       this.sessions.delete(sid);
       void this.router.release(sid);
+      this.metrics?.counter('session.evicted.count').inc();
+      this.metrics?.gauge('session.active.gauge').set(this.sessions.size);
       this.emit('session:evicted', sid);
     });
+    this.metrics?.histogram('session.apply.latency_ms').observe(Date.now() - start);
     return newState;
   }
 
@@ -149,6 +162,7 @@ export class DistributedSession<S, U = unknown> extends EventEmitter {
     this.eviction.cancel(sessionId);
     this.sessions.delete(sessionId);
     await this.router.release(sessionId);
+    this.metrics?.gauge('session.active.gauge').set(this.sessions.size);
   }
 
   isLocal(sessionId: string): boolean {

@@ -1,4 +1,5 @@
 import { EntityUpdate } from '../cluster/entity/types';
+import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
 
 /**
  * Resolved routing target for a resource.
@@ -33,6 +34,7 @@ export interface ResourceRouterConfig {
    * Default: LocalPlacement (always this node).
    */
   placement?: PlacementStrategy;
+  metrics?: MetricsRegistry;
 }
 
 /**

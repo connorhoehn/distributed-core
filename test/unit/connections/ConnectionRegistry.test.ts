@@ -2,6 +2,7 @@ import { ConnectionRegistry, ConnectionHandle } from '../../../src/connections/C
 import { EntityRegistryFactory } from '../../../src/cluster/entity/EntityRegistryFactory';
 import { EntityRegistry } from '../../../src/cluster/entity/types';
 import { EntityUpdate } from '../../../src/persistence/wal/types';
+import { MetricsRegistry } from '../../../src/monitoring/metrics/MetricsRegistry';
 
 jest.useFakeTimers();
 
@@ -251,6 +252,63 @@ describe('ConnectionRegistry', () => {
       await jest.advanceTimersByTimeAsync(TTL_MS + 1);
 
       expect(unregisteredHandler).toHaveBeenCalledWith('conn-ev3');
+    });
+  });
+
+  describe('metrics', () => {
+    let metricsReg: ConnectionRegistry;
+    let metricsRegistry: MetricsRegistry;
+
+    beforeEach(async () => {
+      metricsRegistry = new MetricsRegistry(LOCAL_NODE);
+      const entityRegistry = EntityRegistryFactory.createMemory(LOCAL_NODE, { enableTestMode: true });
+      metricsReg = new ConnectionRegistry(entityRegistry, LOCAL_NODE, {
+        ttlMs: TTL_MS,
+        metrics: metricsRegistry,
+      });
+      registry = metricsReg;
+      await metricsReg.start();
+    });
+
+    it('increments connection.registered.count on register', async () => {
+      await metricsReg.register('c1');
+      expect(metricsRegistry.counter('connection.registered.count').get()).toBe(1);
+      await metricsReg.register('c2');
+      expect(metricsRegistry.counter('connection.registered.count').get()).toBe(2);
+    });
+
+    it('increments connection.unregistered.count on manual unregister', async () => {
+      await metricsReg.register('c1');
+      await metricsReg.unregister('c1');
+      expect(metricsRegistry.counter('connection.unregistered.count').get()).toBe(1);
+    });
+
+    it('connection.active.gauge reflects active connection count (increment + decrement)', async () => {
+      expect(metricsRegistry.gauge('connection.active.gauge').get()).toBe(0);
+      await metricsReg.register('c1');
+      expect(metricsRegistry.gauge('connection.active.gauge').get()).toBe(1);
+      await metricsReg.register('c2');
+      expect(metricsRegistry.gauge('connection.active.gauge').get()).toBe(2);
+      await metricsReg.unregister('c1');
+      expect(metricsRegistry.gauge('connection.active.gauge').get()).toBe(1);
+    });
+
+    it('increments connection.expired.count and decrements gauge on TTL expiry', async () => {
+      await metricsReg.register('c-expire');
+      expect(metricsRegistry.gauge('connection.active.gauge').get()).toBe(1);
+
+      await jest.advanceTimersByTimeAsync(TTL_MS + 1);
+
+      expect(metricsRegistry.counter('connection.expired.count').get()).toBe(1);
+      expect(metricsRegistry.gauge('connection.active.gauge').get()).toBe(0);
+    });
+
+    it('no metrics errors when metrics is omitted', async () => {
+      const entityRegistry = EntityRegistryFactory.createMemory(LOCAL_NODE, { enableTestMode: true });
+      const reg = new ConnectionRegistry(entityRegistry, LOCAL_NODE);
+      await reg.start();
+      await expect(reg.register('c-no-metrics')).resolves.toBeDefined();
+      await reg.stop();
     });
   });
 

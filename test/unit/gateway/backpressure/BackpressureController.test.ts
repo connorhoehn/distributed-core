@@ -1,5 +1,6 @@
 import { BackpressureController } from '../../../../src/gateway/backpressure/BackpressureController';
 import { RateLimiter } from '../../../../src/common/RateLimiter';
+import { MetricsRegistry } from '../../../../src/monitoring/metrics/MetricsRegistry';
 
 describe('BackpressureController', () => {
   beforeEach(() => jest.useFakeTimers());
@@ -275,5 +276,84 @@ describe('BackpressureController', () => {
 
     await ctrl.flush('k');
     expect(ctrl.getQueueDepth('k')).toBe(0);
+  });
+
+  describe('metrics', () => {
+    function makeMetricsCtrl(strategy: 'drop-oldest' | 'drop-newest' | 'reject' = 'drop-oldest') {
+      const metrics = new MetricsRegistry('node-1');
+      const onFlush = jest.fn().mockResolvedValue(undefined);
+      const ctrl = new BackpressureController<string>(onFlush, {
+        maxQueueSize: 2,
+        strategy,
+        metrics,
+      });
+      return { ctrl, metrics, onFlush };
+    }
+
+    it('increments bp.enqueued.count on accepted enqueue', () => {
+      const { ctrl, metrics } = makeMetricsCtrl();
+      ctrl.enqueue('k', 'a');
+      ctrl.enqueue('k', 'b');
+      expect(metrics.counter('bp.enqueued.count').get()).toBe(2);
+    });
+
+    it('increments bp.dropped.count{strategy=drop-oldest} when full with drop-oldest', () => {
+      const { ctrl, metrics } = makeMetricsCtrl('drop-oldest');
+      ctrl.enqueue('k', 'a');
+      ctrl.enqueue('k', 'b');
+      ctrl.enqueue('k', 'c');
+      expect(metrics.counter('bp.dropped.count', { strategy: 'drop-oldest' }).get()).toBe(1);
+    });
+
+    it('increments bp.dropped.count{strategy=drop-newest} when full with drop-newest', () => {
+      const { ctrl, metrics } = makeMetricsCtrl('drop-newest');
+      ctrl.enqueue('k', 'a');
+      ctrl.enqueue('k', 'b');
+      ctrl.enqueue('k', 'c');
+      expect(metrics.counter('bp.dropped.count', { strategy: 'drop-newest' }).get()).toBe(1);
+    });
+
+    it('increments bp.dropped.count{strategy=reject} when full with reject', () => {
+      const { ctrl, metrics } = makeMetricsCtrl('reject');
+      ctrl.enqueue('k', 'a');
+      ctrl.enqueue('k', 'b');
+      ctrl.enqueue('k', 'c');
+      expect(metrics.counter('bp.dropped.count', { strategy: 'reject' }).get()).toBe(1);
+    });
+
+    it('increments bp.flushed.count on successful flush', async () => {
+      const { ctrl, metrics } = makeMetricsCtrl();
+      ctrl.enqueue('k', 'a');
+      ctrl.enqueue('k', 'b');
+      await ctrl.flush('k');
+      expect(metrics.counter('bp.flushed.count').get()).toBe(2);
+    });
+
+    it('bp.queue_depth.gauge{key} reflects depth after enqueue and flush', async () => {
+      const { ctrl, metrics } = makeMetricsCtrl();
+      ctrl.enqueue('k', 'a');
+      expect(metrics.gauge('bp.queue_depth.gauge', { key: 'k' }).get()).toBe(1);
+      ctrl.enqueue('k', 'b');
+      expect(metrics.gauge('bp.queue_depth.gauge', { key: 'k' }).get()).toBe(2);
+      await ctrl.flush('k');
+      expect(metrics.gauge('bp.queue_depth.gauge', { key: 'k' }).get()).toBe(0);
+    });
+
+    it('tracks separate gauges per key', () => {
+      const { ctrl, metrics } = makeMetricsCtrl();
+      ctrl.enqueue('key-a', 'x');
+      ctrl.enqueue('key-b', 'y');
+      expect(metrics.gauge('bp.queue_depth.gauge', { key: 'key-a' }).get()).toBe(1);
+      expect(metrics.gauge('bp.queue_depth.gauge', { key: 'key-b' }).get()).toBe(1);
+    });
+
+    it('no metrics errors when metrics is omitted', () => {
+      const onFlush = jest.fn().mockResolvedValue(undefined);
+      const ctrl = new BackpressureController<string>(onFlush, {
+        maxQueueSize: 10,
+        strategy: 'reject',
+      });
+      expect(() => ctrl.enqueue('k', 'x')).not.toThrow();
+    });
   });
 });

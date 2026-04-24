@@ -9,6 +9,7 @@ import {
 } from '../../../src/routing/PlacementStrategy';
 import { EntityRegistryFactory } from '../../../src/cluster/entity/EntityRegistryFactory';
 import { MembershipEntry } from '../../../src/cluster/types';
+import { MetricsRegistry } from '../../../src/monitoring/metrics/MetricsRegistry';
 
 // ---------------------------------------------------------------------------
 // Minimal ClusterManager stub — only what ResourceRouter touches
@@ -577,6 +578,81 @@ describe('ResourceRouter', () => {
         const p = new RandomPlacement();
         expect(p.selectNode('x', 'node-1', [])).toBe('node-1');
       });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // metrics
+  // -------------------------------------------------------------------------
+
+  describe('metrics', () => {
+    async function makeMetricsRouter() {
+      const metrics = new MetricsRegistry('node-1');
+      const cluster = makeCluster('node-1', [{ id: 'node-2', address: '10.0.0.2', port: 7001 }]);
+      const registry = EntityRegistryFactory.createMemory('node-1', { enableTestMode: true });
+      const router = new ResourceRouter('node-1', registry, cluster as any, { metrics });
+      await router.start();
+      activeRouters.push(router);
+      return { router, cluster, registry, metrics };
+    }
+
+    it('increments resource.claim.count{result=success} on successful claim', async () => {
+      const { router, metrics } = await makeMetricsRouter();
+      await router.claim('r1');
+      expect(metrics.counter('resource.claim.count', { result: 'success' }).get()).toBe(1);
+    });
+
+    it('increments resource.claim.count{result=conflict} on duplicate claim', async () => {
+      const { router, metrics } = await makeMetricsRouter();
+      await router.claim('r1');
+      await expect(router.claim('r1')).rejects.toThrow();
+      expect(metrics.counter('resource.claim.count', { result: 'conflict' }).get()).toBe(1);
+    });
+
+    it('records resource.claim.latency_ms histogram on successful claim', async () => {
+      const { router, metrics } = await makeMetricsRouter();
+      await router.claim('r1');
+      expect(metrics.histogram('resource.claim.latency_ms').getCount()).toBe(1);
+    });
+
+    it('increments resource.release.count on release', async () => {
+      const { router, metrics } = await makeMetricsRouter();
+      await router.claim('r1');
+      await router.release('r1');
+      expect(metrics.counter('resource.release.count').get()).toBe(1);
+    });
+
+    it('increments resource.transfer.count on transfer', async () => {
+      const { router, metrics } = await makeMetricsRouter();
+      await router.claim('r1');
+      await router.transfer('r1', 'node-2');
+      expect(metrics.counter('resource.transfer.count').get()).toBe(1);
+    });
+
+    it('increments resource.orphaned.count on orphan event', async () => {
+      const { router, cluster, registry, metrics } = await makeMetricsRouter();
+      await registry.applyRemoteUpdate({
+        entityId: 'r-orphan', ownerNodeId: 'node-2', version: 1,
+        timestamp: Date.now(), operation: 'CREATE', metadata: {},
+      });
+      cluster.simulateLeave('node-2');
+      expect(metrics.counter('resource.orphaned.count').get()).toBe(1);
+    });
+
+    it('resource.local.gauge reflects owned resource count (increment + decrement cycle)', async () => {
+      const { router, metrics } = await makeMetricsRouter();
+      expect(metrics.gauge('resource.local.gauge').get()).toBe(0);
+      await router.claim('r1');
+      expect(metrics.gauge('resource.local.gauge').get()).toBe(1);
+      await router.claim('r2');
+      expect(metrics.gauge('resource.local.gauge').get()).toBe(2);
+      await router.release('r1');
+      expect(metrics.gauge('resource.local.gauge').get()).toBe(1);
+    });
+
+    it('no metrics errors when metrics is omitted', async () => {
+      const { router } = await makeRouter();
+      await expect(router.claim('r-no-metrics')).resolves.toBeDefined();
     });
   });
 

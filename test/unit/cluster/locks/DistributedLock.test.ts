@@ -1,6 +1,7 @@
 import { EntityRegistryFactory } from '../../../../src/cluster/entity/EntityRegistryFactory';
 import { EntityRegistry } from '../../../../src/cluster/entity/types';
 import { DistributedLock } from '../../../../src/cluster/locks/DistributedLock';
+import { MetricsRegistry } from '../../../../src/monitoring/metrics/MetricsRegistry';
 
 describe('DistributedLock', () => {
   let registry: EntityRegistry;
@@ -137,6 +138,84 @@ describe('DistributedLock', () => {
     jest.advanceTimersByTime(300);
     await Promise.resolve();
     expect(lock.isHeldLocally('lock-1')).toBe(false);
+  });
+
+  describe('metrics', () => {
+    let metricsRegistry: MetricsRegistry;
+    let metricsLock: DistributedLock;
+
+    beforeEach(() => {
+      metricsRegistry = new MetricsRegistry('node-1');
+      metricsLock = new DistributedLock(registry, 'node-1', {
+        defaultTtlMs: 1_000,
+        acquireTimeoutMs: 500,
+        retryIntervalMs: 100,
+        metrics: metricsRegistry,
+      });
+    });
+
+    it('increments lock.acquire.count{result=success} on successful tryAcquire', async () => {
+      await metricsLock.tryAcquire('lock-m1');
+      expect(metricsRegistry.counter('lock.acquire.count', { result: 'success' }).get()).toBe(1);
+    });
+
+    it('increments lock.acquire.count{result=fail} when lock is already held', async () => {
+      await lock2.tryAcquire('lock-m2');
+      await metricsLock.tryAcquire('lock-m2');
+      expect(metricsRegistry.counter('lock.acquire.count', { result: 'fail' }).get()).toBe(1);
+    });
+
+    it('records lock.acquire.latency_ms histogram on successful acquire', async () => {
+      await metricsLock.tryAcquire('lock-m3');
+      expect(metricsRegistry.histogram('lock.acquire.latency_ms').getCount()).toBe(1);
+    });
+
+    it('lock.hold.gauge reflects held lock count (increment + decrement cycle)', async () => {
+      expect(metricsRegistry.gauge('lock.hold.gauge').get()).toBe(0);
+      const h1 = await metricsLock.tryAcquire('lock-m4');
+      expect(metricsRegistry.gauge('lock.hold.gauge').get()).toBe(1);
+      const h2 = await metricsLock.tryAcquire('lock-m5');
+      expect(metricsRegistry.gauge('lock.hold.gauge').get()).toBe(2);
+      await metricsLock.release(h1!);
+      expect(metricsRegistry.gauge('lock.hold.gauge').get()).toBe(1);
+      await metricsLock.release(h2!);
+      expect(metricsRegistry.gauge('lock.hold.gauge').get()).toBe(0);
+    });
+
+    it('increments lock.extend.count on extend', async () => {
+      const h = await metricsLock.tryAcquire('lock-m6');
+      await metricsLock.extend(h!, 500);
+      expect(metricsRegistry.counter('lock.extend.count').get()).toBe(1);
+    });
+
+    it('increments lock.expired.count on TTL expiry', async () => {
+      await metricsLock.tryAcquire('lock-m7', { ttlMs: 500 });
+      jest.advanceTimersByTime(600);
+      await Promise.resolve();
+      expect(metricsRegistry.counter('lock.expired.count').get()).toBe(1);
+    });
+
+    it('increments lock.acquire.count{result=timeout} when acquire times out', async () => {
+      const blockLock = new DistributedLock(registry, 'node-2', {
+        defaultTtlMs: 10_000,
+        acquireTimeoutMs: 500,
+        retryIntervalMs: 100,
+        metrics: metricsRegistry,
+      });
+      await blockLock.tryAcquire('lock-timeout', { ttlMs: 10_000 });
+
+      const acquirePromise = metricsLock.acquire('lock-timeout');
+      const rejectAssertion = expect(acquirePromise).rejects.toThrow(/Failed to acquire/);
+      await jest.advanceTimersByTimeAsync(600);
+      await rejectAssertion;
+
+      expect(metricsRegistry.counter('lock.acquire.count', { result: 'timeout' }).get()).toBe(1);
+    });
+
+    it('no metrics errors when metrics is omitted', async () => {
+      const h = await lock.tryAcquire('lock-no-metrics');
+      expect(h).not.toBeNull();
+    });
   });
 
   it('getHeldLocks returns all locks held by this node', async () => {

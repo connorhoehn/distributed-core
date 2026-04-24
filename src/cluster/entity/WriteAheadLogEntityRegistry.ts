@@ -1,7 +1,8 @@
 import { EventEmitter } from 'eventemitter3';
-import { 
-  EntityRegistry, 
-  EntityRecord, 
+import { unlink } from 'fs/promises';
+import {
+  EntityRegistry,
+  EntityRecord,
   EntitySnapshot
 } from './types';
 import { EntityUpdate, WALConfig, WALWriter, WALReader } from '../../persistence/wal/types';
@@ -10,6 +11,13 @@ import { WALReaderImpl } from '../../persistence/wal/WALReader';
 import { CheckpointWriterImpl } from '../../persistence/checkpoint/CheckpointWriter';
 import { CheckpointReaderImpl } from '../../persistence/checkpoint/CheckpointReader';
 import { CheckpointConfig, EntityState } from '../../persistence/checkpoint/types';
+
+export interface WALEntityRegistryCompactionResult {
+  entriesBefore: number;
+  entriesKept: number;
+  entriesRemoved: number;
+  entitiesAlive: number;
+}
 
 export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityRegistry {
   private entities: Map<string, EntityRecord> = new Map();
@@ -463,6 +471,65 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
 
   async forceCheckpoint(): Promise<void> {
     await this.createCheckpoint();
+  }
+
+  async compact(): Promise<WALEntityRegistryCompactionResult> {
+    const tempReader = new WALReaderImpl(this.config.filePath!);
+    await (tempReader as WALReaderImpl).initialize();
+    const allEntries = await tempReader.readAll();
+    await tempReader.close();
+
+    const entriesBefore = allEntries.length;
+
+    const latestByEntity = new Map<string, EntityUpdate>();
+    for (const entry of allEntries) {
+      latestByEntity.set(entry.data.entityId, entry.data);
+    }
+
+    const surviving: EntityUpdate[] = [];
+    for (const update of latestByEntity.values()) {
+      if (update.operation !== 'DELETE') {
+        surviving.push(update);
+      }
+    }
+
+    await this.walWriter.close();
+    await (this.walReader as WALReaderImpl).close();
+
+    try {
+      await unlink(this.config.filePath!);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (code !== 'ENOENT') throw err;
+    }
+
+    const freshWriter = new WALWriterImpl({ filePath: this.config.filePath!, syncInterval: 0 });
+    await freshWriter.initialize();
+
+    for (const update of surviving) {
+      await freshWriter.append({
+        entityId: update.entityId,
+        ownerNodeId: update.ownerNodeId,
+        version: update.version,
+        timestamp: update.timestamp,
+        operation: 'CREATE',
+        metadata: update.metadata,
+      });
+    }
+
+    await freshWriter.close();
+
+    this.walWriter = new WALWriterImpl(this.config);
+    this.walReader = new WALReaderImpl(this.config.filePath!);
+    await (this.walWriter as WALWriterImpl).initialize();
+    await (this.walReader as WALReaderImpl).initialize();
+
+    return {
+      entriesBefore,
+      entriesKept: surviving.length,
+      entriesRemoved: entriesBefore - surviving.length,
+      entitiesAlive: surviving.length,
+    };
   }
 
   // Check if we need to create checkpoint after each write

@@ -1,4 +1,5 @@
 import { EntityRegistry } from '../entity/types';
+import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
 
 export interface LockHandle {
   lockId: string;
@@ -11,6 +12,7 @@ export interface DistributedLockConfig {
   defaultTtlMs?: number;
   acquireTimeoutMs?: number;
   retryIntervalMs?: number;
+  metrics?: MetricsRegistry;
 }
 
 const DEFAULT_TTL_MS = 30_000;
@@ -20,13 +22,15 @@ const DEFAULT_RETRY_INTERVAL_MS = 100;
 export class DistributedLock {
   private readonly registry: EntityRegistry;
   private readonly localNodeId: string;
-  private readonly config: Required<DistributedLockConfig>;
+  private readonly config: Required<Omit<DistributedLockConfig, 'metrics'>>;
+  private readonly metrics: MetricsRegistry | null;
   private readonly heldLocks = new Map<string, LockHandle>();
   private readonly ttlTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(registry: EntityRegistry, localNodeId: string, config?: DistributedLockConfig) {
     this.registry = registry;
     this.localNodeId = localNodeId;
+    this.metrics = config?.metrics ?? null;
     this.config = {
       defaultTtlMs: config?.defaultTtlMs ?? DEFAULT_TTL_MS,
       acquireTimeoutMs: config?.acquireTimeoutMs ?? DEFAULT_ACQUIRE_TIMEOUT_MS,
@@ -36,6 +40,7 @@ export class DistributedLock {
 
   async tryAcquire(lockId: string, options?: { ttlMs?: number }): Promise<LockHandle | null> {
     const ttl = options?.ttlMs ?? this.config.defaultTtlMs;
+    const start = Date.now();
     try {
       const record = await this.registry.proposeEntity(lockId, { ttlMs: ttl, lockedBy: this.localNodeId });
       const handle: LockHandle = {
@@ -46,8 +51,12 @@ export class DistributedLock {
       };
       this.heldLocks.set(lockId, handle);
       this._scheduleTtl(lockId, ttl);
+      this.metrics?.counter('lock.acquire.count', { result: 'success' }).inc();
+      this.metrics?.histogram('lock.acquire.latency_ms').observe(Date.now() - start);
+      this.metrics?.gauge('lock.hold.gauge').set(this.heldLocks.size);
       return handle;
     } catch {
+      this.metrics?.counter('lock.acquire.count', { result: 'fail' }).inc();
       return null;
     }
   }
@@ -60,6 +69,7 @@ export class DistributedLock {
         return handle;
       }
       if (Date.now() + this.config.retryIntervalMs > deadline) {
+        this.metrics?.counter('lock.acquire.count', { result: 'timeout' }).inc();
         throw new Error(`Failed to acquire lock "${lockId}" within ${this.config.acquireTimeoutMs}ms`);
       }
       await this._sleep(this.config.retryIntervalMs);
@@ -74,6 +84,7 @@ export class DistributedLock {
     this._clearTimer(lockId);
     this.heldLocks.delete(lockId);
     await this.registry.releaseEntity(lockId);
+    this.metrics?.gauge('lock.hold.gauge').set(this.heldLocks.size);
   }
 
   async extend(lockHandle: LockHandle, additionalMs?: number): Promise<LockHandle> {
@@ -87,6 +98,7 @@ export class DistributedLock {
     const updated: LockHandle = { ...lockHandle, expiresAt: newExpiresAt };
     this.heldLocks.set(lockId, updated);
     this._scheduleTtl(lockId, extra);
+    this.metrics?.counter('lock.extend.count').inc();
     return updated;
   }
 
@@ -120,6 +132,8 @@ export class DistributedLock {
   private _onExpired(lockId: string): void {
     this.ttlTimers.delete(lockId);
     this.heldLocks.delete(lockId);
+    this.metrics?.counter('lock.expired.count').inc();
+    this.metrics?.gauge('lock.hold.gauge').set(this.heldLocks.size);
     this.registry.releaseEntity(lockId).catch(() => {});
   }
 

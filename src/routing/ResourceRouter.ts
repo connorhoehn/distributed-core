@@ -10,8 +10,9 @@ import {
   ResourceRouterConfig,
   RouteTarget,
 } from './types';
+import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
 
-const DEFAULTS: Required<ResourceRouterConfig> = {
+const DEFAULTS: Omit<Required<ResourceRouterConfig>, 'metrics'> = {
   placement: new LocalPlacement(),
 };
 
@@ -48,7 +49,8 @@ export class ResourceRouter extends EventEmitter {
   private readonly localNodeId: string;
   private readonly registry: EntityRegistry;
   private readonly cluster: ClusterManager;
-  private readonly config: Required<ResourceRouterConfig>;
+  private readonly config: Omit<Required<ResourceRouterConfig>, 'metrics'>;
+  private readonly metrics: MetricsRegistry | null;
 
   // Stored so they can be removed in stop()
   private readonly _onEntityCreated: (record: EntityRecord) => void;
@@ -66,7 +68,8 @@ export class ResourceRouter extends EventEmitter {
     this.localNodeId = localNodeId;
     this.registry = registry;
     this.cluster = cluster;
-    this.config = { ...DEFAULTS, ...config };
+    this.metrics = config?.metrics ?? null;
+    this.config = { placement: config?.placement ?? DEFAULTS.placement };
 
     this._onEntityCreated = (record: EntityRecord) => {
       if (record.ownerNodeId === this.localNodeId) {
@@ -128,11 +131,20 @@ export class ResourceRouter extends EventEmitter {
    * Use selectNode() first if you want placement-aware routing.
    */
   async claim(resourceId: string, options?: ClaimOptions): Promise<ResourceHandle> {
-    const record = await this.registry.proposeEntity(
-      resourceId,
-      (options?.metadata as Record<string, any>) ?? {}
-    );
-    return this._toHandle(record);
+    const start = Date.now();
+    try {
+      const record = await this.registry.proposeEntity(
+        resourceId,
+        (options?.metadata as Record<string, any>) ?? {}
+      );
+      this.metrics?.counter('resource.claim.count', { result: 'success' }).inc();
+      this.metrics?.histogram('resource.claim.latency_ms').observe(Date.now() - start);
+      this.metrics?.gauge('resource.local.gauge').set(this.getOwnedResources().length);
+      return this._toHandle(record);
+    } catch (err) {
+      this.metrics?.counter('resource.claim.count', { result: 'conflict' }).inc();
+      throw err;
+    }
   }
 
   /**
@@ -143,6 +155,8 @@ export class ResourceRouter extends EventEmitter {
     const entity = this.registry.getEntity(resourceId);
     if (entity === null || entity.ownerNodeId !== this.localNodeId) return;
     await this.registry.releaseEntity(resourceId);
+    this.metrics?.counter('resource.release.count').inc();
+    this.metrics?.gauge('resource.local.gauge').set(this.getOwnedResources().length);
   }
 
   /**
@@ -187,6 +201,7 @@ export class ResourceRouter extends EventEmitter {
       throw new Error(`Cannot transfer to node "${targetNodeId}": not in alive membership`);
     }
     const record = await this.registry.transferEntity(resourceId, targetNodeId);
+    this.metrics?.counter('resource.transfer.count').inc();
     return this._toHandle(record);
   }
 
@@ -234,6 +249,7 @@ export class ResourceRouter extends EventEmitter {
       .getAllKnownEntities()
       .filter((e) => e.ownerNodeId === nodeId);
     for (const entity of orphaned) {
+      this.metrics?.counter('resource.orphaned.count').inc();
       this.emit('resource:orphaned', this._toHandle(entity));
     }
   }

@@ -3,6 +3,7 @@ import { EntityRegistry, EntityRecord } from '../cluster/entity/types';
 import { EntityUpdate } from '../persistence/wal/types';
 import { EvictionTimer } from '../gateway/eviction/EvictionTimer';
 import { defaultLogger } from '../common/logger';
+import { MetricsRegistry } from '../monitoring/metrics/MetricsRegistry';
 
 export interface ConnectionHandle {
   connectionId: string;
@@ -14,6 +15,7 @@ export interface ConnectionHandle {
 
 export interface ConnectionRegistryConfig {
   ttlMs?: number;
+  metrics?: MetricsRegistry;
 }
 
 function toHandle(record: EntityRecord, ttlMs?: number): ConnectionHandle {
@@ -31,6 +33,7 @@ export class ConnectionRegistry extends EventEmitter {
   private readonly localNodeId: string;
   private readonly ttlMs: number | undefined;
   private readonly evictionTimer: EvictionTimer<string> | null;
+  private readonly metrics: MetricsRegistry | null;
   private readonly onEntityCreated: (record: EntityRecord) => void;
   private readonly onEntityDeleted: (record: EntityRecord) => void;
 
@@ -43,6 +46,7 @@ export class ConnectionRegistry extends EventEmitter {
     this.registry = registry;
     this.localNodeId = localNodeId;
     this.ttlMs = config?.ttlMs;
+    this.metrics = config?.metrics ?? null;
     this.evictionTimer = this.ttlMs !== undefined ? new EvictionTimer<string>(this.ttlMs) : null;
 
     this.onEntityCreated = (record: EntityRecord) => {
@@ -74,9 +78,13 @@ export class ConnectionRegistry extends EventEmitter {
     if (this.evictionTimer !== null) {
       this.evictionTimer.schedule(connectionId, async (id) => {
         await this.unregister(id);
+        this.metrics?.counter('connection.expired.count').inc();
+        this.metrics?.gauge('connection.active.gauge').set(this.getLocalConnections().length);
         this.emit('connection:expired', id);
       });
     }
+    this.metrics?.counter('connection.registered.count').inc();
+    this.metrics?.gauge('connection.active.gauge').set(this.getLocalConnections().length);
     return toHandle(record, this.ttlMs);
   }
 
@@ -88,6 +96,8 @@ export class ConnectionRegistry extends EventEmitter {
     }
     try {
       await this.registry.releaseEntity(connectionId);
+      this.metrics?.counter('connection.unregistered.count').inc();
+      this.metrics?.gauge('connection.active.gauge').set(this.getLocalConnections().length);
     } catch (err) {
       defaultLogger.warn(`[ConnectionRegistry] releaseEntity(${connectionId}) failed`, err);
     }
