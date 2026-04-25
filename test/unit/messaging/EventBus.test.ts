@@ -898,9 +898,10 @@ describe('autoCompactIntervalMs', () => {
     expect(errors[0].message).toBe('disk full');
     expect(completed).toHaveLength(0);
 
-    // Bus should still be alive — publish should work
+    // Bus should still be alive — await the publish so the in-flight WAL write
+    // completes before stop() closes the file handle.
     compactSpy.mockRestore();
-    expect(() => bus.publish('user.created', { userId: 'u1' })).not.toThrow();
+    await expect(bus.publish('user.created', { userId: 'u1' })).resolves.toBeDefined();
 
     await bus.stop();
   });

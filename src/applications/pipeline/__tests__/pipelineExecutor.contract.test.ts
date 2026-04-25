@@ -458,10 +458,15 @@ describe('PipelineExecutor contract', () => {
 
       const { events } = await collectEvents(def, {
         onExecutor: (executor) => {
-          // Approve on next tick so the run terminates.
-          setTimeout(() => {
-            executor.resolveApproval(executor.runId, ap.id, 'alice', 'approve');
-          }, 5);
+          // Poll until the approval step registers itself as pending, then
+          // resolve. A fixed timeout is racy under load — the approval node may
+          // not have been reached yet when the timer fires.
+          const poll = setInterval(() => {
+            if (executor.getPendingApprovals().some((p) => p.stepId === ap.id)) {
+              clearInterval(poll);
+              executor.resolveApproval(executor.runId, ap.id, 'alice', 'approve');
+            }
+          }, 1);
         },
       });
 
