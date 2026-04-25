@@ -15,6 +15,8 @@ import { main as runEventBus } from './eventBus.bench';
 import { main as runBackpressure } from './backpressureController.bench';
 import { main as runRateLimiter } from './rateLimiter.bench';
 import { main as runMetrics } from './metricsRegistry.bench';
+import { main as runPubSubFanout } from './pubsubFanout.bench';
+import { main as runCrdtMerge } from './crdtMerge.bench';
 
 interface SuiteEntry {
   name: string;
@@ -28,6 +30,8 @@ const SUITES: SuiteEntry[] = [
   { name: 'BackpressureController',  run: runBackpressure },
   { name: 'RateLimiter',             run: runRateLimiter },
   { name: 'MetricsRegistry',         run: runMetrics },
+  { name: 'PubSubFanout',            run: runPubSubFanout },
+  { name: 'CrdtMerge',               run: runCrdtMerge },
 ];
 
 async function main(): Promise<void> {
