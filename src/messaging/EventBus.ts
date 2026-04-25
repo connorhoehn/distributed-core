@@ -414,45 +414,59 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
       await reader.close();
     }
 
-    if (this._walWriter) {
-      await this._walWriter.close();
-      this._walWriter = null;
-    }
+    // H2: gate concurrent publish() through the close→reopen window. Any
+    // publish() that observes _compactionInFlight will await it before
+    // touching _walWriter, so an event cannot slip through while the writer
+    // is null.
+    let resolveSwap!: () => void;
+    this._compactionInFlight = new Promise<void>((resolve) => {
+      resolveSwap = resolve;
+    });
 
     try {
-      await unlink(this.config.walFilePath);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if (code !== 'ENOENT') throw err;
-    }
+      if (this._walWriter) {
+        await this._walWriter.close();
+        this._walWriter = null;
+      }
 
-    const freshWriter = new WALWriterImpl({
-      filePath: this.config.walFilePath,
-      syncInterval: 0,
-    });
-    await freshWriter.initialize();
+      try {
+        await unlink(this.config.walFilePath);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        if (code !== 'ENOENT') throw err;
+      }
 
-    allEntries.sort((a, b) => a.version - b.version);
-    for (const event of allEntries) {
-      await freshWriter.append({
-        entityId: `event:${event.type}`,
-        version: event.version,
-        timestamp: event.timestamp,
-        operation: 'CREATE',
-        metadata: {
-          _eventBus: true,
-          event: JSON.stringify(event),
-        },
+      const freshWriter = new WALWriterImpl({
+        filePath: this.config.walFilePath,
+        syncInterval: 0,
       });
+      await freshWriter.initialize();
+
+      allEntries.sort((a, b) => a.version - b.version);
+      for (const event of allEntries) {
+        await freshWriter.append({
+          entityId: `event:${event.type}`,
+          version: event.version,
+          timestamp: event.timestamp,
+          operation: 'CREATE',
+          metadata: {
+            _eventBus: true,
+            event: JSON.stringify(event),
+          },
+        });
+      }
+
+      await freshWriter.close();
+
+      this._walWriter = new WALWriterImpl({
+        filePath: this.config.walFilePath,
+        syncInterval: this.config.walSyncIntervalMs ?? 1000,
+      });
+      await this._walWriter.initialize();
+    } finally {
+      this._compactionInFlight = null;
+      resolveSwap();
     }
-
-    await freshWriter.close();
-
-    this._walWriter = new WALWriterImpl({
-      filePath: this.config.walFilePath,
-      syncInterval: this.config.walSyncIntervalMs ?? 1000,
-    });
-    await this._walWriter.initialize();
 
     if (allEntries.length > 0) {
       const maxKeptVersion = Math.max(...allEntries.map((e) => e.version));

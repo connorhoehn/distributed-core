@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { CheckpointWriter, CheckpointSnapshot, EntityState, CheckpointConfig } from './types';
+import { atomicWriteFile } from '../atomicWrite';
 
 export class CheckpointWriterImpl implements CheckpointWriter {
   private config: Required<CheckpointConfig> & { filePath: string };
@@ -29,35 +30,23 @@ export class CheckpointWriterImpl implements CheckpointWriter {
 
     const filename = `checkpoint-lsn-${lsn.toString().padStart(8, '0')}.json`;
     const filePath = path.join(this.config.filePath, filename);
-    const tempPath = `${filePath}.tmp`;
 
-    try {
-      // Write to temporary file first
-      const content = JSON.stringify(snapshot, null, 2);
-      await fs.writeFile(tempPath, content, 'utf-8');
-      
-      // Atomic rename
-      await fs.rename(tempPath, filePath);
+    const content = JSON.stringify(snapshot, null, 2);
+    await atomicWriteFile(filePath, async (tmpPath) => {
+      await fs.writeFile(tmpPath, content, 'utf-8');
+    });
 
-      // Update latest symlink/pointer
-      const latestPath = path.join(this.config.filePath, 'latest.json');
-      await fs.writeFile(latestPath, JSON.stringify({ 
-        lsn, 
-        filename, 
-        timestamp: snapshot.timestamp 
-      }), 'utf-8');
+    const latestPath = path.join(this.config.filePath, 'latest.json');
+    const latestContent = JSON.stringify({
+      lsn,
+      filename,
+      timestamp: snapshot.timestamp,
+    });
+    await atomicWriteFile(latestPath, async (tmpPath) => {
+      await fs.writeFile(tmpPath, latestContent, 'utf-8');
+    });
 
-      // Clean up old checkpoints
-      await this.cleanup();
-    } catch (error) {
-      // Clean up temp file on error
-      try {
-        await fs.unlink(tempPath);
-      } catch {
-        // Ignore cleanup errors
-      }
-      throw error;
-    }
+    await this.cleanup();
   }
 
   async cleanup(): Promise<void> {
