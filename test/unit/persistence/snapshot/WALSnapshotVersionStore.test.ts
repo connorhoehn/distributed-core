@@ -277,23 +277,70 @@ describe('WALSnapshotVersionStore', () => {
       }
     });
 
-    it('propagates unlink errors other than ENOENT', async () => {
+    it('propagates rename errors (atomic swap failure) during compact', async () => {
       const tempPath = path.join(os.tmpdir(), randomUUID());
       const store = new WALSnapshotVersionStore<{ n: number }>(tempPath);
       await store.initialize();
       await store.store('k', { n: 1 });
 
-      const unlinkSpy = jest.spyOn(fs, 'unlink').mockRejectedValueOnce(
-        Object.assign(new Error('denied'), { code: 'EACCES' }),
+      const renameSpy = jest.spyOn(fs, 'rename').mockRejectedValueOnce(
+        Object.assign(new Error('Simulated rename failure'), { code: 'EIO' }),
       );
 
       try {
         await expect(store.compact()).rejects.toThrow();
       } finally {
-        unlinkSpy.mockRestore();
+        renameSpy.mockRestore();
         await store.close().catch(() => {});
         await fs.unlink(tempPath).catch(() => {});
       }
+    });
+
+    // -----------------------------------------------------------------------
+    // Atomicity regression tests (C2 fix)
+    // -----------------------------------------------------------------------
+    describe('atomicity', () => {
+      test('temp file does NOT survive a successful compact', async () => {
+        for (let i = 0; i < 4; i++) {
+          await compactStore.store('k', { i });
+          await new Promise(r => setTimeout(r, 5));
+        }
+        await compactStore.compact({ maxEntriesPerKey: 2, deleteExpired: false });
+
+        const tmpPath = `${compactFilePath}.${process.pid}.tmp`;
+        await expect(fs.access(tmpPath)).rejects.toThrow();
+      });
+
+      test('original file is intact when rename throws mid-compact', async () => {
+        // Write several entries so the file has real content.
+        for (let i = 0; i < 3; i++) {
+          await compactStore.store('k', { i });
+          await new Promise(r => setTimeout(r, 5));
+        }
+
+        const originalContent = await fs.readFile(compactFilePath, 'utf-8');
+
+        // Simulate a crash between the temp-write and the rename.
+        const renameSpy = jest.spyOn(fs, 'rename').mockRejectedValueOnce(
+          new Error('Simulated rename failure'),
+        );
+
+        try {
+          await expect(
+            compactStore.compact({ maxEntriesPerKey: 1, deleteExpired: false }),
+          ).rejects.toThrow('Simulated rename failure');
+        } finally {
+          renameSpy.mockRestore();
+        }
+
+        // The original file must still be present and unchanged.
+        const afterContent = await fs.readFile(compactFilePath, 'utf-8');
+        expect(afterContent).toBe(originalContent);
+
+        // The temp file must have been cleaned up.
+        const tmpPath = `${compactFilePath}.${process.pid}.tmp`;
+        await expect(fs.access(tmpPath)).rejects.toThrow();
+      });
     });
   });
 });

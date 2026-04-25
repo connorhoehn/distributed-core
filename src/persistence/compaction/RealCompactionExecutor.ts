@@ -3,6 +3,7 @@ import * as path from 'path';
 import { WALFileImpl } from '../wal/WALFile';
 import { WALEntry } from '../wal/types';
 import { CompactionPlan, CompactionResult } from './types';
+import { fsyncFile } from '../atomicWrite';
 
 /**
  * Returns true only when every inputSegment.filePath in the plan exists on
@@ -97,7 +98,13 @@ export async function executeRealCompaction(
     await outputWal.close();
   }
 
-  // Delete input segment files
+  // fsync the output file (and its parent directory is handled inside
+  // atomicWriteFile; here we do a direct fsync because we wrote through
+  // WALFileImpl rather than atomicWriteFile).  This guarantees the output
+  // inode is durable before we destroy the inputs (H5 fix).
+  await fsyncFile(outputPath);
+
+  // Delete input segment files — only after the output is safely on disk.
   for (const seg of plan.inputSegments) {
     await fs.unlink(seg.filePath).catch(() => undefined);
   }

@@ -1,11 +1,12 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { WALEntry, WALFile } from './types';
+import { atomicWriteFile } from '../atomicWrite';
 
 export class WALFileImpl implements WALFile {
   private filePath: string;
   private fileHandle: fs.FileHandle | null = null;
-  private isOpen = false;
+  private isOpen: boolean = false;
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -68,16 +69,29 @@ export class WALFileImpl implements WALFile {
   async truncate(beforeLSN: number): Promise<void> {
     const entries = await this.readEntries();
     const keepEntries = entries.filter(entry => entry.logSequenceNumber >= beforeLSN);
-    
-    // Rewrite file with kept entries
+
+    // Close the live handle before rewriting.
     await this.close();
-    await fs.unlink(this.filePath).catch(() => {}); // Ignore if file doesn't exist
-    
+
+    // Write kept entries to a temp file, fsync, then rename over the original.
+    // This ensures the original file is never absent — even if the process
+    // crashes mid-write the rename hasn't happened yet, so the old file is
+    // still intact on disk.
+    await atomicWriteFile(this.filePath, async (tmpPath) => {
+      const tmpFile = new WALFileImpl(tmpPath);
+      await tmpFile.open();
+      try {
+        for (const entry of keepEntries) {
+          await tmpFile.append(entry);
+        }
+        await tmpFile.flush();
+      } finally {
+        await tmpFile.close();
+      }
+    });
+
+    // Re-open the live handle so subsequent appends work as expected.
     await this.open();
-    for (const entry of keepEntries) {
-      await this.append(entry);
-    }
-    await this.flush();
   }
 
   async getSize(): Promise<number> {

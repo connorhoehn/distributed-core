@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { unlink } from 'fs/promises';
 import { WALWriterImpl } from '../wal/WALWriter';
 import { WALReaderImpl } from '../wal/WALReader';
+import { atomicWriteFile } from '../atomicWrite';
 import { WALEntry } from '../wal/types';
 import {
   ISnapshotVersionStore,
@@ -250,40 +251,39 @@ export class WALSnapshotVersionStore<T> implements ISnapshotVersionStore<T>, Lif
     await this.writer.close();
     await this.reader.close();
 
-    try {
-      await unlink(this.filePath);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException)?.code;
-      if (code !== 'ENOENT') throw err;
-    }
+    // Write kept entries to a temp file, fsync, then rename over the original.
+    // This replaces the old unlink-then-rewrite pattern (C2): the original file
+    // is never absent — the rename is the single atomic step that replaces it.
+    await atomicWriteFile(this.filePath, async (tmpPath) => {
+      const freshWriter = new WALWriterImpl({ filePath: tmpPath, syncInterval: 0 });
+      await freshWriter.initialize();
+      try {
+        for (const entry of toKeep) {
+          const meta: SnapshotMetadata = {
+            _snapshot: true,
+            id: entry.id,
+            key: entry.key,
+            type: entry.type,
+            data: JSON.stringify(entry.data),
+            sizeBytes: entry.sizeBytes ?? Buffer.byteLength(JSON.stringify(entry.data), 'utf8'),
+            ...(entry.name !== undefined && { name: entry.name }),
+            ...(entry.expiresAt !== undefined && { expiresAt: entry.expiresAt }),
+            ...(entry.metadata !== undefined && { metadata: entry.metadata }),
+          };
 
-    const freshWriter = new WALWriterImpl({ filePath: this.filePath, syncInterval: 0 });
-    await freshWriter.initialize();
-
-    for (const entry of toKeep) {
-      const meta: SnapshotMetadata = {
-        _snapshot: true,
-        id: entry.id,
-        key: entry.key,
-        type: entry.type,
-        data: JSON.stringify(entry.data),
-        sizeBytes: entry.sizeBytes ?? Buffer.byteLength(JSON.stringify(entry.data), 'utf8'),
-        ...(entry.name !== undefined && { name: entry.name }),
-        ...(entry.expiresAt !== undefined && { expiresAt: entry.expiresAt }),
-        ...(entry.metadata !== undefined && { metadata: entry.metadata }),
-      };
-
-      await freshWriter.append({
-        entityId: `snapshot:${entry.key}`,
-        ownerNodeId: 'local',
-        version: entry.timestamp,
-        timestamp: entry.timestamp,
-        operation: 'CREATE',
-        metadata: meta as unknown as Record<string, unknown>,
-      });
-    }
-
-    await freshWriter.close();
+          await freshWriter.append({
+            entityId: `snapshot:${entry.key}`,
+            ownerNodeId: 'local',
+            version: entry.timestamp,
+            timestamp: entry.timestamp,
+            operation: 'CREATE',
+            metadata: meta as unknown as Record<string, unknown>,
+          });
+        }
+      } finally {
+        await freshWriter.close();
+      }
+    });
 
     this.writer = new WALWriterImpl({ filePath: this.filePath, syncInterval: 0 });
     this.reader = new WALReaderImpl(this.filePath);

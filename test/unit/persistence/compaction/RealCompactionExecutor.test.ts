@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { WALFileImpl } from '../../../../src/persistence/wal/WALFile';
 import { WALCoordinatorImpl } from '../../../../src/persistence/wal/WALCoordinator';
 import { executeRealCompaction, inputsExistOnDisk } from '../../../../src/persistence/compaction/RealCompactionExecutor';
+import * as atomicWriteModule from '../../../../src/persistence/atomicWrite';
 import { CompactionPlan, WALSegment } from '../../../../src/persistence/compaction/types';
 import { EntityUpdate } from '../../../../src/persistence/wal/types';
 
@@ -269,6 +270,74 @@ describe('RealCompactionExecutor', () => {
       const kept = await outputWal.readEntries();
       await outputWal.close();
       expect(kept.length).toBe(0);
+    });
+
+    // -----------------------------------------------------------------------
+    // Atomicity regression tests (H5 fix)
+    // -----------------------------------------------------------------------
+    describe('atomicity', () => {
+      test('fsyncFile is called before any input is unlinked', async () => {
+        const { segment: seg1 } = await writeSegment(testDir, 'seg-atomic-1', [
+          { entityId: 'e1', version: 1, timestamp: 1, operation: 'UPDATE' },
+        ]);
+        const { segment: seg2 } = await writeSegment(testDir, 'seg-atomic-2', [
+          { entityId: 'e2', version: 1, timestamp: 2, operation: 'UPDATE' },
+        ]);
+
+        const callOrder: string[] = [];
+
+        const fsyncSpy = jest
+          .spyOn(atomicWriteModule, 'fsyncFile')
+          .mockImplementation(async () => {
+            callOrder.push('fsync');
+          });
+
+        const unlinkSpy = jest.spyOn(fs, 'unlink').mockImplementation(async () => {
+          callOrder.push('unlink');
+        });
+
+        const plan = makePlan([seg1, seg2]);
+        try {
+          await executeRealCompaction(plan, Date.now());
+        } finally {
+          fsyncSpy.mockRestore();
+          unlinkSpy.mockRestore();
+        }
+
+        // fsync must come before the first unlink.
+        const fsyncIdx = callOrder.indexOf('fsync');
+        const firstUnlinkIdx = callOrder.indexOf('unlink');
+        expect(fsyncIdx).toBeGreaterThanOrEqual(0);
+        expect(firstUnlinkIdx).toBeGreaterThanOrEqual(0);
+        expect(fsyncIdx).toBeLessThan(firstUnlinkIdx);
+      });
+
+      test('if fsyncFile throws, no input segments are unlinked', async () => {
+        const { segment } = await writeSegment(testDir, 'seg-fsync-throws', [
+          { entityId: 'e1', version: 1, timestamp: 1, operation: 'UPDATE' },
+        ]);
+
+        const fsyncSpy = jest
+          .spyOn(atomicWriteModule, 'fsyncFile')
+          .mockRejectedValueOnce(new Error('Simulated fsync failure'));
+
+        const unlinkSpy = jest.spyOn(fs, 'unlink');
+
+        const plan = makePlan([segment]);
+        try {
+          await expect(executeRealCompaction(plan, Date.now())).rejects.toThrow(
+            'Simulated fsync failure',
+          );
+          // fs.unlink must not have been called for any input.
+          const inputPaths = plan.inputSegments.map(s => s.filePath);
+          const unlinkedPaths = unlinkSpy.mock.calls.map(c => c[0] as string);
+          const inputsUnlinked = inputPaths.filter(p => unlinkedPaths.includes(p));
+          expect(inputsUnlinked).toHaveLength(0);
+        } finally {
+          fsyncSpy.mockRestore();
+          unlinkSpy.mockRestore();
+        }
+      });
     });
   });
 });

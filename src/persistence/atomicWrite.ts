@@ -57,3 +57,17 @@ export async function atomicWriteFile(
     throw err;
   }
 }
+
+/**
+ * Opens the file at `filePath` and calls fsync on it, ensuring its contents
+ * are flushed to stable storage.  Intended for use before unlinking input
+ * files in a compaction pipeline (write output → fsyncFile → unlink inputs).
+ */
+export async function fsyncFile(filePath: string): Promise<void> {
+  const fh = await fs.open(filePath, 'r');
+  try {
+    await fh.sync();
+  } finally {
+    await fh.close();
+  }
+}
