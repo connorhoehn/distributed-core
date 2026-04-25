@@ -21,6 +21,16 @@ export {
 // Cluster modules
 export * from './cluster/ClusterManager';
 export * from './cluster/membership/MembershipTable';
+export { Cluster } from './cluster/Cluster';
+export type {
+  ClusterConfig,
+  TransportConfig,
+  RegistryConfig,
+  ClusterFailureDetectionConfig,
+  ClusterAutoReclaimConfig,
+  ClusterLocksConfig,
+  Logger,
+} from './cluster/Cluster';
 export * from './gossip/GossipStrategy';
 export * from './monitoring/FailureDetector';
 export * from './config/BootstrapConfig';
@@ -98,7 +108,7 @@ export * from './common/utils';
 export { RateLimiter } from './common/RateLimiter';
 export type { RateLimiterConfig, RateLimitResult } from './common/RateLimiter';
 export type { LifecycleAware } from './common/LifecycleAware';
-export { CoreError, NotStartedError, AlreadyStartedError, ConflictError, TimeoutError as CoreTimeoutError } from './common/errors';
+export { CoreError, NotStartedError, AlreadyStartedError, ConflictError, TimeoutError as CoreTimeoutError, EntityNotFoundError, EntityAlreadyExistsError, MetricConflictError, NotOwnedByNodeError } from './common/errors';
 
 // Messaging modules
 export * from './messaging';

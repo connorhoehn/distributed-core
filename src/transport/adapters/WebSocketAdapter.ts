@@ -5,6 +5,7 @@ import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
 import { GossipMessage } from '../../gossip/transport/GossipMessage';
+import { NotStartedError } from '../../common/errors';
 
 interface WebSocketConnection {
   ws: WebSocket;
@@ -166,7 +167,7 @@ export class WebSocketAdapter extends Transport {
 
   async send(message: Message): Promise<void> {
     if (!this.isStarted) {
-      throw new Error('WebSocket adapter not started');
+      throw new NotStartedError('WebSocket adapter');
     }
 
     const gossipMessage = message as unknown as GossipMessage;

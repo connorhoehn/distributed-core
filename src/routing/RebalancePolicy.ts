@@ -19,6 +19,25 @@ import { LifecycleAware } from '../common/LifecycleAware';
  */
 export type RebalanceTrigger = 'member-joined' | 'member-left' | 'periodic';
 
+/**
+ * Caller-supplied function used to ask peer nodes for their current load.
+ *
+ * The contract is intentionally narrow: return a Map keyed by nodeId of the
+ * loads the caller currently knows about. Inclusion of the local node is
+ * optional — RebalancePolicy will fill in (or override) the local entry from
+ * its own measurement.
+ *
+ * Wire this through whatever telemetry channel the integrator already runs
+ * (PubSub, Prometheus scrape, gossip metadata, ...). RebalancePolicy treats
+ * the response as point-in-time and does no caching beyond the dampening
+ * window for the local node.
+ *
+ * Returning a Map with one or zero peer entries (i.e. only knowing the
+ * local node) causes the policy to no-op with a `peer-load-unavailable`
+ * warning emitted as `rebalance:skipped`.
+ */
+export type PeerLoadProvider = () => Promise<Map<string, number>>;
+
 export interface RebalancePolicyConfig {
   /**
    * Placement strategy used to compute the ideal owner for each
@@ -49,26 +68,92 @@ export interface RebalancePolicyConfig {
   maxTransfersPerSecond?: number;
 
   /**
-   * Skip a transfer when the load delta between local and ideal nodes is
-   * below this fraction of the local load. Default: 0.2.
-   *
-   * Concretely: if local owns N resources and ideal owns M, the transfer
-   * is skipped when `(N - M) / max(N, 1) < targetLoadDelta`. This avoids
-   * rebalance churn on near-balanced clusters where the placement strategy
-   * still emits a different node.
-   */
-  targetLoadDelta?: number;
-
-  /**
    * Interval (ms) for the 'periodic' trigger. Ignored otherwise.
    * Default: 30_000.
    */
   periodicIntervalMs?: number;
+
+  /**
+   * Caller-provided load function. Maps a resourceId to a numeric weight
+   * representing its current load contribution. Default: `() => 1`
+   * (count-based — every owned resource contributes 1).
+   *
+   * Examples:
+   *  - SFU: `(rid) => egressBpsByRoom.get(rid) ?? 0`
+   *  - Gateway: `(rid) => activePipelineRunsByJob.get(rid) ?? 0`
+   *  - Default: count of owned resources.
+   *
+   * The function MUST be cheap (called once per locally-owned resource on
+   * every trigger fire) and MUST NOT throw. Negative values are coerced
+   * to 0; NaN is treated as 0.
+   */
+  loadFn?: (resourceId: string) => number;
+
+  /**
+   * Asymmetric trigger threshold: the policy only rebalances when this
+   * node's load is more than `(1 + thresholdAboveMean) * clusterMean`.
+   * Default: 0.20 (20% above the cluster mean).
+   *
+   * "Asymmetric" means: a node BELOW the mean never rebalances toward
+   * itself — only over-loaded nodes shed work. This is the convergence
+   * shape both the SFU and gateway integrations independently asked for.
+   */
+  thresholdAboveMean?: number;
+
+  /**
+   * Sliding window (ms) over which `localLoad` samples are retained for
+   * P95 dampening. Default: 60_000 (60s).
+   *
+   * Each trigger fire records one sample of the current localLoad. The
+   * window is bounded by wall-clock age, not sample count.
+   */
+  dampeningWindowMs?: number;
+
+  /**
+   * Percentile of the dampening window used as the spike-resistant
+   * load estimate. Default: 0.95 (P95).
+   *
+   * The smaller this is, the more aggressive (more reactive); the
+   * larger, the more conservative (slower to act on sustained load).
+   */
+  dampeningPercentile?: number;
+
+  /**
+   * Caller-provided source of peer loads. Without this, RebalancePolicy
+   * cannot compute a cluster mean and degrades to a no-op (with a
+   * one-time-per-pass `rebalance:skipped` warning, reason
+   * `peer-load-unavailable`).
+   *
+   * The provider is invoked once per rebalance pass, after jitter and
+   * after the local sample has been recorded. It is async to allow
+   * scrape-based implementations.
+   */
+  peerLoadProvider?: PeerLoadProvider;
 }
+
+/**
+ * Smoothing factor applied to the dampening-side guard. The instantaneous
+ * `localLoad / clusterMean` ratio must clear `1 + thresholdAboveMean`, but
+ * the P95-of-window ratio only needs to clear
+ * `1 + thresholdAboveMean * DAMPENING_SMOOTHING_FACTOR`.
+ *
+ * The intent is: if instantaneous load JUST barely crosses the threshold,
+ * the dampened view is allowed to be slightly more permissive (we'd
+ * otherwise need P95 to cross the same line, which by construction lags
+ * the instantaneous value). 0.85 is empirical — it lets a sustained burst
+ * trigger but a single spike does not, while still requiring some
+ * dampened evidence (not pure instantaneous reactivity).
+ */
+const DAMPENING_SMOOTHING_FACTOR = 0.85;
 
 interface ScheduledTransfer {
   resourceId: string;
   targetNodeId: string;
+}
+
+interface DampeningSample {
+  t: number;
+  load: number;
 }
 
 /**
@@ -79,6 +164,27 @@ interface ScheduledTransfer {
  * `member-joined` (or another configurable trigger) and migrates
  * locally-owned resources to their ideal owner under the configured
  * placement strategy.
+ *
+ * The decision algorithm is **cluster-mean-relative with asymmetric
+ * triggering and P95 dampening over a sliding window**:
+ *
+ *   1. Sleep `jitterMs * random()`.
+ *   2. Compute `localLoad = sum(loadFn(r) for r in locallyOwnedResources)`.
+ *   3. Append the sample to the dampening window; evict aged-out samples.
+ *   4. Ask `peerLoadProvider()` for peer loads. If the result yields no
+ *      peers, no-op with `peer-load-unavailable`.
+ *   5. Compute `clusterMean = average(allNodeLoads)`. (Local entry is
+ *      taken from our own measurement, overriding any value the provider
+ *      reported for ourselves.)
+ *   6. Asymmetric guard:
+ *        localLoad / clusterMean > 1 + thresholdAboveMean
+ *      AND
+ *        p95(window) / clusterMean
+ *          > 1 + thresholdAboveMean * DAMPENING_SMOOTHING_FACTOR
+ *      Both must hold.
+ *   7. If guard passes, walk locally-owned resources; for each, ask the
+ *      strategy. If `ideal !== local`, transfer. Throttle by
+ *      `maxTransfersPerSecond`.
  *
  * Walks ONLY resources owned by the local node — does not implement the
  * `evaluate: 'all-cluster'` mode (that needs core-team direction per the
@@ -91,7 +197,10 @@ interface ScheduledTransfer {
  *  rebalance:scheduled    — trigger fired; rebalance pass scheduled after jitter
  *  rebalance:evaluated    — pass completed; emitted with { transferred, skipped }
  *  rebalance:transferred  — a single resource was transferred
- *  rebalance:skipped      — a single resource was not transferred (with reason)
+ *  rebalance:skipped      — a single resource (or whole pass) was not transferred
+ *                           (with reason: 'already-ideal' | 'ideal-not-alive' |
+ *                           'peer-load-unavailable' | 'below-threshold' |
+ *                           'dampened')
  *  rebalance:failed       — `router.transfer()` threw for a resource
  */
 export class RebalancePolicy extends EventEmitter implements LifecycleAware {
@@ -100,8 +209,12 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
   private readonly trigger: RebalanceTrigger;
   private readonly jitterMs: number;
   private readonly maxTransfersPerSecond: number;
-  private readonly targetLoadDelta: number;
   private readonly periodicIntervalMs: number;
+  private readonly loadFn: (resourceId: string) => number;
+  private readonly thresholdAboveMean: number;
+  private readonly dampeningWindowMs: number;
+  private readonly dampeningPercentile: number;
+  private readonly peerLoadProvider: PeerLoadProvider | null;
 
   private started = false;
   private readonly jitterTimers = new Set<NodeJS.Timeout>();
@@ -113,6 +226,10 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
   // transfer time within a sliding 1-second window.
   private readonly recentTransferTimes: number[] = [];
 
+  // Dampening window: append-only ring of (timestamp, load) samples.
+  // Aged out by wall-clock at the start of each pass.
+  private readonly loadSamples: DampeningSample[] = [];
+
   private readonly _onTriggerEvent: () => void;
 
   constructor(router: ResourceRouter, config?: RebalancePolicyConfig) {
@@ -122,8 +239,12 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
     this.trigger = config?.trigger ?? 'member-joined';
     this.jitterMs = config?.jitterMs ?? 2000;
     this.maxTransfersPerSecond = config?.maxTransfersPerSecond ?? 5;
-    this.targetLoadDelta = config?.targetLoadDelta ?? 0.2;
     this.periodicIntervalMs = config?.periodicIntervalMs ?? 30_000;
+    this.loadFn = config?.loadFn ?? (() => 1);
+    this.thresholdAboveMean = config?.thresholdAboveMean ?? 0.2;
+    this.dampeningWindowMs = config?.dampeningWindowMs ?? 60_000;
+    this.dampeningPercentile = config?.dampeningPercentile ?? 0.95;
+    this.peerLoadProvider = config?.peerLoadProvider ?? null;
 
     this._onTriggerEvent = () => this._scheduleRebalance();
   }
@@ -137,10 +258,6 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
     this.started = true;
 
     if (this.trigger === 'member-joined' || this.trigger === 'member-left') {
-      // ResourceRouter holds the cluster reference; we subscribe via the
-      // same ClusterManager it uses. Going through the router keeps the
-      // surface area matching AutoReclaimPolicy (which uses
-      // router.on('resource:orphaned', ...)).
       const cluster = this._getCluster();
       cluster.on(this.trigger, this._onTriggerEvent);
     } else if (this.trigger === 'periodic') {
@@ -173,6 +290,7 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
     for (const t of this.throttleTimers) clearTimeout(t);
     this.throttleTimers.clear();
     this.recentTransferTimes.length = 0;
+    this.loadSamples.length = 0;
 
     return Promise.resolve();
   }
@@ -186,8 +304,7 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
    * ResourceRouter does not expose `cluster` publicly, but it does expose
    * `getAliveNodeIds()` and forwards `member-left` events; for
    * `member-joined` we need direct access. We do this by subscribing
-   * through a small getter on the router. To keep the test surface
-   * narrow, we rely on the router constructor having stored the cluster.
+   * through a small getter on the router.
    */
   private _getCluster(): {
     on: (event: string, handler: (...args: any[]) => void) => void;
@@ -224,24 +341,166 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
     this.jitterTimers.add(timer);
   }
 
+  /**
+   * Coerce a loadFn result into a non-negative finite number. NaN, -Infinity,
+   * +Infinity, and negatives all collapse to 0 — the policy treats unmeasurable
+   * load as "no load" rather than failing the entire pass.
+   */
+  private _safeLoad(resourceId: string): number {
+    let v: number;
+    try {
+      v = this.loadFn(resourceId);
+    } catch {
+      return 0;
+    }
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return 0;
+    return v;
+  }
+
+  /**
+   * Compute the configured percentile (e.g. 0.95) over the dampening window.
+   * Uses linear interpolation between the two surrounding samples — close
+   * enough for steady-state dampening; we don't need perfect tail accuracy.
+   * Returns 0 if the window is empty.
+   */
+  private _percentileOfWindow(now: number): number {
+    // Evict aged-out samples in place.
+    const cutoff = now - this.dampeningWindowMs;
+    while (
+      this.loadSamples.length > 0 &&
+      this.loadSamples[0].t < cutoff
+    ) {
+      this.loadSamples.shift();
+    }
+    if (this.loadSamples.length === 0) return 0;
+
+    const sorted = this.loadSamples
+      .map((s) => s.load)
+      .sort((a, b) => a - b);
+    if (sorted.length === 1) return sorted[0];
+
+    const rank = this.dampeningPercentile * (sorted.length - 1);
+    const lo = Math.floor(rank);
+    const hi = Math.ceil(rank);
+    if (lo === hi) return sorted[lo];
+    const frac = rank - lo;
+    return sorted[lo] * (1 - frac) + sorted[hi] * frac;
+  }
+
   private async _evaluate(): Promise<void> {
     if (!this.started) return;
 
     const localNodeId = this.router.nodeId;
     const candidates = this.router.getAliveNodeIds();
     const owned = this.router.getOwnedResources();
-    const allKnown = this.router.getAllResources();
 
-    // Pre-compute load (resource count) per candidate node from the router's
-    // global view, used for the targetLoadDelta gate.
-    const loadByNode = new Map<string, number>(
-      candidates.map((id) => [id, 0])
-    );
-    for (const handle of allKnown) {
-      const c = loadByNode.get(handle.ownerNodeId);
-      if (c !== undefined) loadByNode.set(handle.ownerNodeId, c + 1);
+    // Step 2: localLoad
+    let localLoad = 0;
+    for (const handle of owned) {
+      localLoad += this._safeLoad(handle.resourceId);
     }
 
+    // Step 3: append sample, compute P95 over window.
+    const now = Date.now();
+    this.loadSamples.push({ t: now, load: localLoad });
+    const p95 = this._percentileOfWindow(now);
+
+    // Step 4: peer load provider.
+    if (this.peerLoadProvider === null) {
+      this.emit(
+        'rebalance:skipped',
+        null,
+        'peer-load-unavailable'
+      );
+      this.emit('rebalance:evaluated', {
+        transferred: 0,
+        skipped: 1,
+        considered: owned.length,
+        reason: 'peer-load-unavailable',
+      });
+      return;
+    }
+
+    let peerLoads: Map<string, number>;
+    try {
+      peerLoads = await this.peerLoadProvider();
+    } catch (err) {
+      this.emit(
+        'rebalance:failed',
+        null,
+        err instanceof Error ? err : new Error(String(err))
+      );
+      return;
+    }
+    if (!this.started) return;
+
+    // Override the local entry with our own measurement — it's the
+    // authoritative source-of-truth for ourselves.
+    const allLoads = new Map<string, number>(peerLoads);
+    allLoads.set(localNodeId, localLoad);
+
+    // If we only know our own load (no peers reported), no-op.
+    if (allLoads.size < 2) {
+      this.emit(
+        'rebalance:skipped',
+        null,
+        'peer-load-unavailable'
+      );
+      this.emit('rebalance:evaluated', {
+        transferred: 0,
+        skipped: 1,
+        considered: owned.length,
+        reason: 'peer-load-unavailable',
+      });
+      return;
+    }
+
+    // Step 5: cluster mean.
+    let sum = 0;
+    for (const v of allLoads.values()) sum += v;
+    const clusterMean = sum / allLoads.size;
+
+    // If the cluster mean is zero, no relative comparison makes sense.
+    if (clusterMean <= 0) {
+      this.emit('rebalance:skipped', null, 'below-threshold');
+      this.emit('rebalance:evaluated', {
+        transferred: 0,
+        skipped: 1,
+        considered: owned.length,
+        reason: 'below-threshold',
+      });
+      return;
+    }
+
+    // Step 6: asymmetric guard with dampening.
+    const ratio = localLoad / clusterMean;
+    const dampenedRatio = p95 / clusterMean;
+    const instantaneousGate = 1 + this.thresholdAboveMean;
+    const dampenedGate =
+      1 + this.thresholdAboveMean * DAMPENING_SMOOTHING_FACTOR;
+
+    if (ratio <= instantaneousGate) {
+      this.emit('rebalance:skipped', null, 'below-threshold');
+      this.emit('rebalance:evaluated', {
+        transferred: 0,
+        skipped: 1,
+        considered: owned.length,
+        reason: 'below-threshold',
+      });
+      return;
+    }
+    if (dampenedRatio <= dampenedGate) {
+      this.emit('rebalance:skipped', null, 'dampened');
+      this.emit('rebalance:evaluated', {
+        transferred: 0,
+        skipped: 1,
+        considered: owned.length,
+        reason: 'dampened',
+      });
+      return;
+    }
+
+    // Step 7: walk owned resources and schedule transfers.
     const transfers: ScheduledTransfer[] = [];
     let skippedCount = 0;
 
@@ -264,25 +523,7 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
         continue;
       }
 
-      const localLoad = loadByNode.get(localNodeId) ?? owned.length;
-      const idealLoad = loadByNode.get(ideal) ?? 0;
-      const denom = Math.max(localLoad, 1);
-      const delta = (localLoad - idealLoad) / denom;
-      if (delta < this.targetLoadDelta) {
-        this.emit(
-          'rebalance:skipped',
-          handle.resourceId,
-          'below-load-delta'
-        );
-        skippedCount++;
-        continue;
-      }
-
       transfers.push({ resourceId: handle.resourceId, targetNodeId: ideal });
-      // Optimistically update the in-memory load map so downstream resources
-      // in this same pass observe the rebalance progress.
-      loadByNode.set(localNodeId, Math.max(0, (loadByNode.get(localNodeId) ?? 1) - 1));
-      loadByNode.set(ideal, idealLoad + 1);
     }
 
     let transferredCount = 0;
@@ -290,7 +531,7 @@ export class RebalancePolicy extends EventEmitter implements LifecycleAware {
       try {
         await this._throttledTransfer(t.resourceId, t.targetNodeId);
         transferredCount++;
-      } catch (err) {
+      } catch (err: unknown) {
         this.emit(
           'rebalance:failed',
           t.resourceId,

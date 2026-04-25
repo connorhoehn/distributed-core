@@ -1,6 +1,7 @@
 import { HTTPAdapter, HTTPAdapterConfig } from '../../../src/transport/adapters/HTTPAdapter';
 import { Message, MessageType } from '../../../src/types';
 import * as http from 'http';
+import { NotStartedError, AlreadyStartedError } from '../../../src/common/errors';
 import * as https from 'https';
 
 // Mock the CircuitBreaker and RetryManager
@@ -72,7 +73,7 @@ describe('HTTPAdapter', () => {
 
     test('should handle multiple start calls', async () => {
       await adapter.start();
-      await expect(adapter.start()).rejects.toThrow('HTTP adapter is already running');
+      await expect(adapter.start()).rejects.toThrow(AlreadyStartedError);
     });
 
     test('should handle stop when not started', async () => {
@@ -110,7 +111,7 @@ describe('HTTPAdapter', () => {
         data: { test: 'data' }
       };
 
-      await expect(stoppedAdapter.send(message, nodeB)).rejects.toThrow('HTTP adapter is not running');
+      await expect(stoppedAdapter.send(message, nodeB)).rejects.toThrow(NotStartedError);
     });
 
     test('should create message for send', async () => {

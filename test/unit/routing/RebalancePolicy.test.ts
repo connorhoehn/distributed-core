@@ -1,6 +1,10 @@
 import { EventEmitter } from 'events';
 import { ResourceRouter } from '../../../src/routing/ResourceRouter';
-import { RebalancePolicy } from '../../../src/routing/RebalancePolicy';
+import {
+  RebalancePolicy,
+  PeerLoadProvider,
+  RebalancePolicyConfig,
+} from '../../../src/routing/RebalancePolicy';
 import {
   HashPlacement,
   LocalPlacement,
@@ -23,6 +27,17 @@ function waitForEvent(
   return new Promise((resolve) => {
     emitter.once(event, (...args) => resolve(args));
   });
+}
+
+/**
+ * Build a peerLoadProvider stub that returns a fixed map. Useful for tests
+ * that want to assert the policy's response to a particular cluster shape
+ * without needing live peer telemetry.
+ */
+function staticPeerLoads(
+  loads: Record<string, number>
+): PeerLoadProvider {
+  return async () => new Map(Object.entries(loads));
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +117,7 @@ const activePolicies: RebalancePolicy[] = [];
 async function makeSetup(
   localNodeId = 'node-1',
   peers: { id: string; address: string; port: number }[] = [],
-  policyConfig?: ConstructorParameters<typeof RebalancePolicy>[1]
+  policyConfig?: RebalancePolicyConfig
 ) {
   const cluster = makeCluster(localNodeId, peers);
   const registry = EntityRegistryFactory.createMemory(localNodeId, {
@@ -147,7 +162,6 @@ describe('RebalancePolicy', () => {
     const { cluster, policy } = await makeSetup('node-1', [], {
       strategy: new LocalPlacement(),
       jitterMs: 1000,
-      targetLoadDelta: 0,
     });
     await policy.start();
 
@@ -190,13 +204,19 @@ describe('RebalancePolicy', () => {
             candidates.includes('node-2') ? 'node-2' : _local,
         } satisfies PlacementStrategy,
         jitterMs: 4000,
-        targetLoadDelta: 0,
         maxTransfersPerSecond: 0,
+        // Make the cluster-mean guard easy to clear.
+        thresholdAboveMean: 0.0,
+        peerLoadProvider: staticPeerLoads({
+          'node-1': 100, // doesn't matter — overridden by local measurement
+          'node-2': 0,
+        }),
       }
     );
     await policy.start();
 
-    // Pre-claim a resource locally so there is something to migrate.
+    // Pre-claim a resource locally so there is something to migrate, AND
+    // so the local load (count=1) > clusterMean (avg of {1, 0} = 0.5).
     await registry.proposeEntity('room-jitter', {});
 
     // Pin Math.random so we can predict the delay.
@@ -217,7 +237,7 @@ describe('RebalancePolicy', () => {
     expect(transferSpy).not.toHaveBeenCalled();
 
     // Crossing the 2000ms threshold should trigger evaluation.
-    await jest.advanceTimersByTimeAsync(2);
+    await jest.advanceTimersByTimeAsync(50);
     expect(transferSpy).toHaveBeenCalledWith('room-jitter', 'node-2');
   });
 
@@ -236,9 +256,8 @@ describe('RebalancePolicy', () => {
         } satisfies PlacementStrategy,
         jitterMs: 0,
         maxTransfersPerSecond: 2,
-        // Negative threshold disables the load-delta gate so we exclusively
-        // exercise the throttle path here.
-        targetLoadDelta: -Infinity,
+        thresholdAboveMean: 0.0,
+        peerLoadProvider: staticPeerLoads({ 'node-2': 0 }),
       }
     );
     await policy.start();
@@ -290,7 +309,8 @@ describe('RebalancePolicy', () => {
         strategy: new LocalPlacement(), // always returns local
         jitterMs: 0,
         maxTransfersPerSecond: 0,
-        targetLoadDelta: 0,
+        thresholdAboveMean: 0.0,
+        peerLoadProvider: staticPeerLoads({ 'node-2': 0 }),
       }
     );
     await policy.start();
@@ -301,14 +321,14 @@ describe('RebalancePolicy', () => {
     const transferSpy = jest.spyOn(router, 'transfer');
 
     const evaluatedPromise = waitForEvent(policy, 'rebalance:evaluated');
-    const skipped: Array<[string, string]> = [];
-    policy.on('rebalance:skipped', (rid: string, reason: string) =>
+    const skipped: Array<[string | null, string]> = [];
+    policy.on('rebalance:skipped', (rid: string | null, reason: string) =>
       skipped.push([rid, reason])
     );
 
     cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
 
-    await jest.advanceTimersByTimeAsync(0);
+    await jest.advanceTimersByTimeAsync(50);
     const [summary] = await evaluatedPromise;
 
     expect(transferSpy).not.toHaveBeenCalled();
@@ -320,65 +340,7 @@ describe('RebalancePolicy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 5. No-op when load delta below threshold
-  // -------------------------------------------------------------------------
-
-  it('skips transfer when load delta is below targetLoadDelta', async () => {
-    // Plant the joining node already in membership so we can pre-seed it
-    // with resources, then "join" it via the event.
-    const peer = { id: 'node-2', address: '10.0.0.2', port: 7001 };
-
-    const { router, cluster, registry, policy } = await makeSetup(
-      'node-1',
-      [peer],
-      {
-        // Strategy says ideal = node-2 — but we'll see the load gate stop it.
-        strategy: {
-          selectNode: () => 'node-2',
-        } satisfies PlacementStrategy,
-        jitterMs: 0,
-        maxTransfersPerSecond: 0,
-        targetLoadDelta: 0.5, // require >=50% delta
-      }
-    );
-    await policy.start();
-
-    // Local owns 4, node-2 owns 3. delta = (4-3)/4 = 0.25 < 0.5 -> skip.
-    for (let i = 0; i < 4; i++) {
-      await registry.proposeEntity(`local-${i}`, {});
-    }
-    for (let i = 0; i < 3; i++) {
-      await registry.applyRemoteUpdate({
-        entityId: `remote-${i}`,
-        ownerNodeId: 'node-2',
-        version: 1,
-        timestamp: Date.now(),
-        operation: 'CREATE',
-        metadata: {},
-      });
-    }
-
-    const transferSpy = jest.spyOn(router, 'transfer');
-    const skipped: Array<[string, string]> = [];
-    policy.on('rebalance:skipped', (rid: string, reason: string) =>
-      skipped.push([rid, reason])
-    );
-
-    const evaluatedPromise = waitForEvent(policy, 'rebalance:evaluated');
-    cluster.simulateJoin(peer);
-
-    await jest.advanceTimersByTimeAsync(0);
-    await evaluatedPromise;
-
-    expect(transferSpy).not.toHaveBeenCalled();
-    expect(skipped.length).toBe(4);
-    expect(skipped.every(([, reason]) => reason === 'below-load-delta')).toBe(
-      true
-    );
-  });
-
-  // -------------------------------------------------------------------------
-  // 6. Clean stop unsubscribes
+  // 5. Clean stop unsubscribes
   // -------------------------------------------------------------------------
 
   it('stop() unsubscribes from the trigger and clears pending timers', async () => {
@@ -392,7 +354,8 @@ describe('RebalancePolicy', () => {
         } satisfies PlacementStrategy,
         jitterMs: 5000,
         maxTransfersPerSecond: 0,
-        targetLoadDelta: 0,
+        thresholdAboveMean: 0.0,
+        peerLoadProvider: staticPeerLoads({ 'node-2': 0 }),
       }
     );
     await policy.start();
@@ -419,21 +382,19 @@ describe('RebalancePolicy', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 7. Default strategy is HashPlacement (smoke test)
+  // 6. Default strategy is HashPlacement (smoke test)
   // -------------------------------------------------------------------------
 
   it('uses HashPlacement by default', async () => {
     const { policy } = await makeSetup('node-1');
     expect(policy).toBeInstanceOf(RebalancePolicy);
-    // Default strategy is exercised in the join flow indirectly; this guards
-    // against accidental default change.
     expect(
       (policy as unknown as { strategy: unknown }).strategy
     ).toBeInstanceOf(HashPlacement);
   });
 
   // -------------------------------------------------------------------------
-  // 8. start() / stop() idempotent
+  // 7. start() / stop() idempotent
   // -------------------------------------------------------------------------
 
   it('start() and stop() are idempotent', async () => {
@@ -444,5 +405,325 @@ describe('RebalancePolicy', () => {
     await policy.stop();
     await policy.stop();
     expect(policy.isStarted()).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // 8. Cluster-mean trigger: rebalance only fires when local > mean
+  // -------------------------------------------------------------------------
+
+  it('triggers a rebalance pass only when localLoad exceeds clusterMean by thresholdAboveMean', async () => {
+    // Local owns 10, peer owns 0. Mean = 5. Local/mean = 2.0. Threshold 0.20
+    // requires ratio > 1.20 — easily clears.
+    const { router, cluster, registry, policy } = await makeSetup(
+      'node-1',
+      [],
+      {
+        strategy: {
+          selectNode: (_id, _local, candidates) =>
+            candidates.includes('node-2') ? 'node-2' : _local,
+        } satisfies PlacementStrategy,
+        jitterMs: 0,
+        maxTransfersPerSecond: 0,
+        thresholdAboveMean: 0.2,
+        peerLoadProvider: staticPeerLoads({ 'node-2': 0 }),
+      }
+    );
+    await policy.start();
+
+    for (let i = 0; i < 10; i++) {
+      await registry.proposeEntity(`room-${i}`, {});
+    }
+
+    const transferSpy = jest.spyOn(router, 'transfer').mockImplementation(
+      async (rid, target) =>
+        ({
+          resourceId: rid,
+          ownerNodeId: target,
+          metadata: {},
+          claimedAt: Date.now(),
+          version: 2,
+        }) as ResourceHandle
+    );
+
+    const evaluated = waitForEvent(policy, 'rebalance:evaluated');
+    cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
+    await jest.advanceTimersByTimeAsync(50);
+    const [summary] = await evaluated;
+
+    expect((summary as { transferred: number }).transferred).toBe(10);
+    expect(transferSpy).toHaveBeenCalledTimes(10);
+  });
+
+  // -------------------------------------------------------------------------
+  // 9. Asymmetric guard: a node BELOW the mean does not rebalance
+  // -------------------------------------------------------------------------
+
+  it('does not rebalance when localLoad is below clusterMean (asymmetric)', async () => {
+    // Local owns 1, peer reports 100. Mean = 50.5. Local/mean << 1 — node
+    // is "underloaded" and should never shed work.
+    const { router, cluster, registry, policy } = await makeSetup(
+      'node-1',
+      [],
+      {
+        strategy: {
+          selectNode: (_id, _local, candidates) =>
+            candidates.includes('node-2') ? 'node-2' : _local,
+        } satisfies PlacementStrategy,
+        jitterMs: 0,
+        maxTransfersPerSecond: 0,
+        thresholdAboveMean: 0.2,
+        peerLoadProvider: staticPeerLoads({ 'node-2': 100 }),
+      }
+    );
+    await policy.start();
+
+    await registry.proposeEntity('room-only', {});
+
+    const transferSpy = jest.spyOn(router, 'transfer');
+    const skipped: Array<[string | null, string]> = [];
+    policy.on('rebalance:skipped', (rid: string | null, reason: string) =>
+      skipped.push([rid, reason])
+    );
+
+    const evaluated = waitForEvent(policy, 'rebalance:evaluated');
+    cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
+    await jest.advanceTimersByTimeAsync(50);
+    await evaluated;
+
+    expect(transferSpy).not.toHaveBeenCalled();
+    expect(skipped).toEqual([[null, 'below-threshold']]);
+  });
+
+  // -------------------------------------------------------------------------
+  // 10. Default thresholdAboveMean is 0.20 — borderline cases respect it
+  // -------------------------------------------------------------------------
+
+  it('respects the default 20% threshold above mean', async () => {
+    // Local owns 11, peer reports 10. Mean = 10.5. ratio = 11/10.5 ≈ 1.0476.
+    // That's below 1 + 0.20 = 1.20 — so it should NOT trigger by default.
+    const { router, cluster, registry, policy } = await makeSetup(
+      'node-1',
+      [],
+      {
+        strategy: {
+          selectNode: (_id, _local, candidates) =>
+            candidates.includes('node-2') ? 'node-2' : _local,
+        } satisfies PlacementStrategy,
+        jitterMs: 0,
+        maxTransfersPerSecond: 0,
+        // Default thresholdAboveMean (0.2) — explicitly NOT overridden.
+        peerLoadProvider: staticPeerLoads({ 'node-2': 10 }),
+      }
+    );
+    await policy.start();
+
+    for (let i = 0; i < 11; i++) {
+      await registry.proposeEntity(`room-${i}`, {});
+    }
+
+    const transferSpy = jest.spyOn(router, 'transfer');
+    const evaluated = waitForEvent(policy, 'rebalance:evaluated');
+    cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
+    await jest.advanceTimersByTimeAsync(50);
+    const [summary] = await evaluated;
+
+    expect(transferSpy).not.toHaveBeenCalled();
+    expect((summary as { transferred: number }).transferred).toBe(0);
+    expect((summary as { reason?: string }).reason).toBe('below-threshold');
+  });
+
+  // -------------------------------------------------------------------------
+  // 11. P95 dampening: a single spike does not trigger a rebalance
+  // -------------------------------------------------------------------------
+
+  it('dampens a single spike via P95 over the dampening window', async () => {
+    // Strategy: drive 9 prior trigger fires with localLoad=0 (no resources
+    // owned), then claim a burst of resources right before the 10th fire.
+    // The instantaneous ratio will be huge, but P95 over the 60s window is
+    // dominated by the prior zeros — guard should reject as 'dampened'.
+    let loadOverride: number | null = null;
+    const { router, cluster, policy } = await makeSetup('node-1', [], {
+      strategy: {
+        selectNode: (_id, _local, candidates) =>
+          candidates.includes('node-2') ? 'node-2' : _local,
+      } satisfies PlacementStrategy,
+      jitterMs: 0,
+      maxTransfersPerSecond: 0,
+      thresholdAboveMean: 0.2,
+      dampeningWindowMs: 60_000,
+      dampeningPercentile: 0.95,
+      // loadFn returns whatever loadOverride is set to. Bypasses needing
+      // to actually claim resources for the dampening test.
+      loadFn: () => (loadOverride !== null ? loadOverride : 0),
+      peerLoadProvider: staticPeerLoads({ 'node-2': 1 }),
+    });
+    await policy.start();
+
+    // Inject a single fake "owned" resource via the registry mock so that
+    // loadFn is actually called. We claim a single trivial entity.
+    await (router as any).registry.proposeEntity('probe', {});
+
+    const transferSpy = jest.spyOn(router, 'transfer');
+    const skippedEvents: Array<[string | null, string]> = [];
+    policy.on('rebalance:skipped', (rid: string | null, reason: string) =>
+      skippedEvents.push([rid, reason])
+    );
+
+    // 9 prior fires with load=0. Each one runs through evaluate(); since
+    // localLoad=0 is BELOW the cluster mean (peer=1, so mean=0.5), each
+    // pass skips for 'below-threshold' but ALSO appends a 0-sample to
+    // the dampening window.
+    loadOverride = 0;
+    for (let i = 0; i < 9; i++) {
+      cluster.simulateJoin({
+        id: `node-warmup-${i}`,
+        address: '10.0.0.99',
+        port: 7099,
+      });
+      await jest.advanceTimersByTimeAsync(50);
+    }
+
+    // 10th fire: spike to 1000.
+    loadOverride = 1000;
+    skippedEvents.length = 0;
+    const evaluated = waitForEvent(policy, 'rebalance:evaluated');
+    cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
+    await jest.advanceTimersByTimeAsync(50);
+    const [summary] = await evaluated;
+
+    // Instantaneous load (1000) >> mean — clears the instantaneous gate.
+    // But P95 over the window includes nine 0-samples + one 1000-sample,
+    // so P95 sits much closer to 0 than 1000, failing the dampened gate.
+    expect(transferSpy).not.toHaveBeenCalled();
+    expect((summary as { reason?: string }).reason).toBe('dampened');
+    expect(skippedEvents).toContainEqual([null, 'dampened']);
+  });
+
+  // -------------------------------------------------------------------------
+  // 12. Custom loadFn is honored
+  // -------------------------------------------------------------------------
+
+  it('honors a caller-supplied loadFn (e.g. egress bps, pipeline runs)', async () => {
+    // Local owns 2 resources but each weighs 50 (e.g. egress bps).
+    // Total localLoad = 100. Peer reports 10. Mean = 55. Ratio ≈ 1.82,
+    // clears the 1.20 gate. Should rebalance both.
+    const loadFn = jest.fn((_rid: string) => 50);
+    const { router, cluster, registry, policy } = await makeSetup(
+      'node-1',
+      [],
+      {
+        strategy: {
+          selectNode: (_id, _local, candidates) =>
+            candidates.includes('node-2') ? 'node-2' : _local,
+        } satisfies PlacementStrategy,
+        jitterMs: 0,
+        maxTransfersPerSecond: 0,
+        thresholdAboveMean: 0.2,
+        loadFn,
+        peerLoadProvider: staticPeerLoads({ 'node-2': 10 }),
+      }
+    );
+    await policy.start();
+
+    await registry.proposeEntity('hot-room-A', {});
+    await registry.proposeEntity('hot-room-B', {});
+
+    const transferSpy = jest.spyOn(router, 'transfer').mockImplementation(
+      async (rid, target) =>
+        ({
+          resourceId: rid,
+          ownerNodeId: target,
+          metadata: {},
+          claimedAt: Date.now(),
+          version: 2,
+        }) as ResourceHandle
+    );
+
+    const evaluated = waitForEvent(policy, 'rebalance:evaluated');
+    cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
+    await jest.advanceTimersByTimeAsync(50);
+    await evaluated;
+
+    expect(loadFn).toHaveBeenCalledWith('hot-room-A');
+    expect(loadFn).toHaveBeenCalledWith('hot-room-B');
+    expect(transferSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // 13. Missing peerLoadProvider degrades to a no-op + warning
+  // -------------------------------------------------------------------------
+
+  it('no-ops with peer-load-unavailable when peerLoadProvider is not configured', async () => {
+    const { router, cluster, registry, policy } = await makeSetup(
+      'node-1',
+      [],
+      {
+        strategy: {
+          selectNode: (_id, _local, candidates) =>
+            candidates.includes('node-2') ? 'node-2' : _local,
+        } satisfies PlacementStrategy,
+        jitterMs: 0,
+        maxTransfersPerSecond: 0,
+        thresholdAboveMean: 0.2,
+        // peerLoadProvider: undefined — degraded mode.
+      }
+    );
+    await policy.start();
+
+    for (let i = 0; i < 5; i++) {
+      await registry.proposeEntity(`room-${i}`, {});
+    }
+
+    const transferSpy = jest.spyOn(router, 'transfer');
+    const skipped: Array<[string | null, string]> = [];
+    policy.on('rebalance:skipped', (rid: string | null, reason: string) =>
+      skipped.push([rid, reason])
+    );
+
+    const evaluated = waitForEvent(policy, 'rebalance:evaluated');
+    cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
+    await jest.advanceTimersByTimeAsync(50);
+    const [summary] = await evaluated;
+
+    expect(transferSpy).not.toHaveBeenCalled();
+    expect((summary as { reason?: string }).reason).toBe(
+      'peer-load-unavailable'
+    );
+    expect(skipped).toEqual([[null, 'peer-load-unavailable']]);
+  });
+
+  // -------------------------------------------------------------------------
+  // 14. Provider reporting only the local node also degrades cleanly
+  // -------------------------------------------------------------------------
+
+  it('no-ops when peerLoadProvider returns only the local node', async () => {
+    const { router, cluster, registry, policy } = await makeSetup(
+      'node-1',
+      [],
+      {
+        strategy: {
+          selectNode: (_id, _local, candidates) =>
+            candidates.includes('node-2') ? 'node-2' : _local,
+        } satisfies PlacementStrategy,
+        jitterMs: 0,
+        maxTransfersPerSecond: 0,
+        thresholdAboveMean: 0.2,
+        peerLoadProvider: staticPeerLoads({ 'node-1': 7 }),
+      }
+    );
+    await policy.start();
+
+    await registry.proposeEntity('room-only', {});
+
+    const transferSpy = jest.spyOn(router, 'transfer');
+    const evaluated = waitForEvent(policy, 'rebalance:evaluated');
+    cluster.simulateJoin({ id: 'node-2', address: '10.0.0.2', port: 7001 });
+    await jest.advanceTimersByTimeAsync(50);
+    const [summary] = await evaluated;
+
+    expect(transferSpy).not.toHaveBeenCalled();
+    expect((summary as { reason?: string }).reason).toBe(
+      'peer-load-unavailable'
+    );
   });
 });

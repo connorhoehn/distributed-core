@@ -4,6 +4,7 @@ import { Transport } from '../Transport';
 import { NodeId, Message } from '../../types';
 import { CircuitBreaker } from '../CircuitBreaker';
 import { RetryManager } from '../RetryManager';
+import { AlreadyStartedError, NotStartedError } from '../../common/errors';
 
 export interface HTTPAdapterConfig {
   port?: number;
@@ -74,7 +75,7 @@ export class HTTPAdapter extends Transport {
 
   async start(): Promise<void> {
     if (this.isRunning) {
-      throw new Error('HTTP adapter is already running');
+      throw new AlreadyStartedError('HTTP adapter');
     }
 
     try {
@@ -142,7 +143,7 @@ export class HTTPAdapter extends Transport {
 
   async send(message: Message, target: NodeId): Promise<void> {
     if (!this.isRunning) {
-      throw new Error('HTTP adapter is not running');
+      throw new NotStartedError('HTTP adapter');
     }
 
     const agent = this.getAgent(target);

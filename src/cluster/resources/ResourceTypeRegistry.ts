@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { ResourceTypeDefinition } from './types';
+import { NotStartedError, ConflictError } from '../../common/errors';
 
 /**
  * ResourceTypeRegistry - Central registry for resource type definitions
@@ -32,11 +33,11 @@ export class ResourceTypeRegistry extends EventEmitter {
    */
   registerResourceType(definition: ResourceTypeDefinition): void {
     if (!this.isStarted) {
-      throw new Error('ResourceTypeRegistry is not started. Call start() first.');
+      throw new NotStartedError('ResourceTypeRegistry');
     }
 
     if (this.resourceTypes.has(definition.typeName)) {
-      throw new Error(`Resource type '${definition.typeName}' is already registered`);
+      throw new ConflictError(definition.typeName, 'resource type already registered');
     }
 
     this.resourceTypes.set(definition.typeName, definition);

@@ -253,6 +253,58 @@ describe('CrdtEntityRegistry — tombstone TTL / compaction (GAPS §3)', () => {
     });
   });
 
+  describe('Library invariant: __fence__:* entities are exempt from compaction', () => {
+    it('keeps __fence__: tombstones AND updateLog entries past the TTL while evicting regular ones', async () => {
+      const registry = new CrdtEntityRegistry('node-A', {
+        tombstoneTTLMs: 1_000,
+        updateLogRetentionMs: 1_000,
+        compactionIntervalMs: 500,
+      });
+      await registry.start();
+
+      try {
+        // Apply a DELETE on a fence sidecar — creates a tombstone + updateLog entry.
+        await registry.applyRemoteUpdate(
+          makeUpdate({
+            entityId: '__fence__:lock-42',
+            ownerNodeId: 'node-A',
+            version: 1,
+            operation: 'DELETE',
+          }),
+        );
+
+        // Apply a DELETE on a regular entity — control case, must be evicted.
+        await registry.applyRemoteUpdate(
+          makeUpdate({
+            entityId: 'regular-entity',
+            ownerNodeId: 'node-A',
+            version: 2,
+            operation: 'DELETE',
+          }),
+        );
+
+        expect((registry as any).tombstones.has('__fence__:lock-42')).toBe(true);
+        expect((registry as any).tombstones.has('regular-entity')).toBe(true);
+
+        // Advance well past both TTL windows; multiple compaction sweeps fire.
+        jest.advanceTimersByTime(60_000);
+
+        // Fence sidecar tombstone STILL present.
+        expect((registry as any).tombstones.has('__fence__:lock-42')).toBe(true);
+        // Regular tombstone evicted.
+        expect((registry as any).tombstones.has('regular-entity')).toBe(false);
+
+        // Fence sidecar update STILL in updateLog.
+        const remaining = registry.getUpdatesAfter(0).map((u) => u.entityId);
+        expect(remaining).toContain('__fence__:lock-42');
+        // Regular delete update evicted.
+        expect(remaining).not.toContain('regular-entity');
+      } finally {
+        await registry.stop();
+      }
+    });
+  });
+
   describe('Lifecycle + factory wiring', () => {
     it('stop() clears the compaction timer (no leaked handles)', async () => {
       const registry = new CrdtEntityRegistry('node-A', {

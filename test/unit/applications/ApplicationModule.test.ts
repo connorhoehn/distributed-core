@@ -2,6 +2,7 @@ import { jest, describe, beforeEach, afterEach, test, expect } from '@jest/globa
 import { ApplicationModule } from '../../../src/applications/ApplicationModule';
 import { ApplicationModuleConfig, ApplicationModuleContext, ModuleState, ApplicationModuleMetrics, ApplicationModuleDashboardData, ScalingStrategy } from '../../../src/applications/types';
 import { ResourceMetadata, ResourceTypeDefinition, DistributionStrategy } from '../../../src/cluster/resources/types';
+import { NotStartedError } from '../../../src/common/errors';
 
 // Mock context dependencies
 const mockContext: ApplicationModuleContext = {

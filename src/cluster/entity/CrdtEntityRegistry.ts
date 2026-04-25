@@ -5,6 +5,7 @@ import {
   EntitySnapshot,
   EntityUpdate,
 } from './types';
+import { EntityNotFoundError, EntityAlreadyExistsError, NotStartedError, NotOwnedByNodeError } from '../../common/errors';
 
 /**
  * Internal record enriched with a logical clock timestamp used for CRDT
@@ -137,7 +138,7 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
     this.compactionTimer = setInterval(() => {
       try {
         this.compact();
-      } catch (err) {
+      } catch (err: unknown) {
         // Compaction errors are non-fatal — log and continue.
         // eslint-disable-next-line no-console
         console.error('[CrdtEntityRegistry] compaction error:', err);
@@ -157,9 +158,43 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
   }
 
   /**
+   * Library invariant — entityIds with this prefix are exempt from BOTH
+   * tombstone TTL eviction and updateLog retention sweeps.
+   *
+   * Currently reserved:
+   *   - `__fence__:<lockId>` — fencing-token sidecar entities (see §1
+   *     fencing-token contract). These persist monotonic counters that
+   *     guard distributed locks; if compaction were allowed to evict them,
+   *     a stale claim returning from a long partition could re-INCR a
+   *     fence collected back to zero, presenting an artificially-low epoch
+   *     and silently corrupting locking. Both downstream consumers
+   *     (live-video-streaming, websocket-gateway) require this be a library
+   *     invariant rather than a per-consumer config knob.
+   */
+  private static readonly COMPACTION_EXEMPT_PREFIXES: readonly string[] = ['__fence__:'];
+
+  /**
+   * Returns true if the given entityId is exempt from compaction
+   * (tombstone-TTL eviction AND updateLog retention). See
+   * {@link CrdtEntityRegistry.COMPACTION_EXEMPT_PREFIXES}.
+   */
+  private isCompactionExempt(entityId: string): boolean {
+    for (const prefix of CrdtEntityRegistry.COMPACTION_EXEMPT_PREFIXES) {
+      if (entityId.startsWith(prefix)) return true;
+    }
+    return false;
+  }
+
+  /**
    * Evict tombstones older than `tombstoneTTLMs` and updateLog entries older
    * than `updateLogRetentionMs`. Exposed (package-private via test access) for
    * deterministic testing; otherwise driven by the compaction interval timer.
+   *
+   * NOTE: entityIds matching {@link CrdtEntityRegistry.COMPACTION_EXEMPT_PREFIXES}
+   * (currently `__fence__:*`) are intentionally exempt from both tombstone-TTL
+   * eviction and updateLog retention sweeps, per the §1 fencing-token contract.
+   * Evicting those sidecars would break the monotonic-counter invariant that
+   * underpins distributed locking — see the prefix-table JSDoc above.
    */
   compact(now: number = Date.now()): { tombstonesEvicted: number; updatesEvicted: number } {
     let tombstonesEvicted = 0;
@@ -168,6 +203,7 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
     if (this.tombstoneTTLMs !== Number.POSITIVE_INFINITY) {
       const cutoff = now - this.tombstoneTTLMs;
       for (const [entityId, tomb] of this.tombstones) {
+        if (this.isCompactionExempt(entityId)) continue; // fence sidecars never expire
         if (tomb.deletedAt <= cutoff) {
           this.tombstones.delete(entityId);
           tombstonesEvicted += 1;
@@ -181,7 +217,9 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
       let writeIdx = 0;
       for (let readIdx = 0; readIdx < this.updateLog.length; readIdx += 1) {
         const u = this.updateLog[readIdx];
-        if (u.timestamp > cutoff) {
+        // Fence-sidecar updates are retained regardless of age — a fresh node
+        // joining must see the latest fence values to preserve monotonicity.
+        if (u.timestamp > cutoff || this.isCompactionExempt(u.entityId)) {
           this.updateLog[writeIdx] = u;
           writeIdx += 1;
         } else {
@@ -203,7 +241,7 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
 
     const existing = this.entries.get(entityId);
     if (existing) {
-      throw new Error(`Entity ${entityId} already exists`);
+      throw new EntityAlreadyExistsError(entityId);
     }
 
     const ts = this.tick();
@@ -248,10 +286,10 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
 
     const entry = this.entries.get(entityId);
     if (!entry) {
-      throw new Error(`Entity ${entityId} not found`);
+      throw new EntityNotFoundError(entityId);
     }
     if (entry.record.ownerNodeId !== this.nodeId) {
-      throw new Error(`Cannot release entity ${entityId} — not owned by this node`);
+      throw new NotOwnedByNodeError(entityId, this.nodeId);
     }
 
     const ts = this.tick();
@@ -281,10 +319,10 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
 
     const entry = this.entries.get(entityId);
     if (!entry) {
-      throw new Error(`Entity ${entityId} not found`);
+      throw new EntityNotFoundError(entityId);
     }
     if (entry.record.ownerNodeId !== this.nodeId) {
-      throw new Error(`Cannot update entity ${entityId} — not owned by this node`);
+      throw new NotOwnedByNodeError(entityId, this.nodeId);
     }
 
     const ts = this.tick();
@@ -319,10 +357,10 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
 
     const entry = this.entries.get(entityId);
     if (!entry) {
-      throw new Error(`Entity ${entityId} not found`);
+      throw new EntityNotFoundError(entityId);
     }
     if (entry.record.ownerNodeId !== this.nodeId) {
-      throw new Error(`Cannot transfer entity ${entityId} — not owned by this node`);
+      throw new NotOwnedByNodeError(entityId, this.nodeId);
     }
 
     const ts = this.tick();
@@ -450,7 +488,7 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
 
       this.updateLog.push(update);
       return true;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(`[CrdtEntityRegistry] Failed to apply remote update for ${update.entityId}:`, error);
       return false;
     }
@@ -516,7 +554,7 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
 
   private ensureRunning(): void {
     if (!this.isRunning) {
-      throw new Error('CrdtEntityRegistry is not running. Call start() first.');
+      throw new NotStartedError('CrdtEntityRegistry');
     }
   }
 }

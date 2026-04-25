@@ -1,5 +1,6 @@
 import { WebSocketAdapter } from '../../../src/transport/adapters/WebSocketAdapter';
 import { Message, MessageType } from '../../../src/types';
+import { NotStartedError } from '../../../src/common/errors';
 
 // Mock the CircuitBreaker and RetryManager
 jest.mock('../../../src/transport/CircuitBreaker', () => ({
@@ -222,7 +223,7 @@ describe('WebSocketAdapter', () => {
         data: {}
       };
 
-      await expect(adapter.send(message as any)).rejects.toThrow('WebSocket adapter not started');
+      await expect(adapter.send(message as any)).rejects.toThrow(NotStartedError);
     });
 
     test('should handle connection errors gracefully', async () => {

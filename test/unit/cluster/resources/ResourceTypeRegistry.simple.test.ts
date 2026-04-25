@@ -1,6 +1,7 @@
 import { jest, describe, beforeEach, afterEach, test, expect } from '@jest/globals';
 import { ResourceTypeRegistry } from '../../../../src/cluster/resources/ResourceTypeRegistry';
 import { ResourceTypeDefinition, DistributionStrategy, ResourceHealth, ResourceMetadata } from '../../../../src/cluster/resources/types';
+import { NotStartedError, ConflictError } from '../../../../src/common/errors';
 
 describe('ResourceTypeRegistry', () => {
   let registry: ResourceTypeRegistry;
@@ -44,7 +45,7 @@ describe('ResourceTypeRegistry', () => {
 
       expect(() => {
         registry.registerResourceType(sampleResourceType);
-      }).toThrow('Resource type \'test-resource\' is already registered');
+      }).toThrow(ConflictError);
     });
 
     test('should throw error when registering before start', async () => {
@@ -53,7 +54,7 @@ describe('ResourceTypeRegistry', () => {
       
       expect(() => {
         newRegistry.registerResourceType(sampleResourceType);
-      }).toThrow('ResourceTypeRegistry is not started. Call start() first.');
+      }).toThrow(NotStartedError);
       
       await newRegistry.stop();
     });

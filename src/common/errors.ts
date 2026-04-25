@@ -138,3 +138,59 @@ export class UnroutableResourceError extends CoreError {
     this.name = 'UnroutableResourceError';
   }
 }
+
+/**
+ * Thrown by EntityRegistry implementations when an operation references an
+ * entity that does not exist (e.g., transferEntity / updateEntity on a
+ * never-claimed entityId).
+ */
+export class EntityNotFoundError extends CoreError {
+  constructor(public readonly entityId: string) {
+    super('entity-not-found', `Entity "${entityId}" not found`);
+  }
+}
+
+/**
+ * Thrown by EntityRegistry.proposeEntity when the entityId is already owned.
+ * Carries the current owner for caller diagnostics.
+ */
+export class EntityAlreadyExistsError extends CoreError {
+  constructor(public readonly entityId: string, public readonly ownerNodeId?: string) {
+    super(
+      'entity-already-exists',
+      ownerNodeId
+        ? `Entity "${entityId}" already owned by node "${ownerNodeId}"`
+        : `Entity "${entityId}" already exists`,
+    );
+  }
+}
+
+/**
+ * Thrown by EntityRegistry implementations when an operation requires the
+ * caller to be the entity's owner but it is not.
+ */
+export class NotOwnedByNodeError extends CoreError {
+  constructor(public readonly entityId: string, public readonly nodeId: string) {
+    super(
+      'not-owned-by-node',
+      `Entity "${entityId}" is not owned by node "${nodeId}"`,
+    );
+  }
+}
+
+/**
+ * Thrown by MetricsRegistry when a name is registered as one metric type
+ * (Counter / Gauge / Histogram) and then re-registered as a different type.
+ */
+export class MetricConflictError extends CoreError {
+  constructor(
+    public readonly metricKey: string,
+    public readonly existingType: string,
+    public readonly attemptedType: string,
+  ) {
+    super(
+      'metric-conflict',
+      `Metric "${metricKey}" already registered as ${existingType}, cannot re-register as ${attemptedType}`,
+    );
+  }
+}

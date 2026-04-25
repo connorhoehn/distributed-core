@@ -1,5 +1,6 @@
 import { CrdtEntityRegistry } from '../../../../src/cluster/entity/CrdtEntityRegistry';
 import { EntityUpdate } from '../../../../src/cluster/entity/types';
+import { NotStartedError } from '../../../../src/common/errors';
 
 jest.setTimeout(10000);
 
@@ -51,7 +52,7 @@ describe('CrdtEntityRegistry', () => {
     it('proposeEntity throws when the same entityId is registered twice', async () => {
       await registry.proposeEntity('entity-dup');
       await expect(registry.proposeEntity('entity-dup')).rejects.toThrow(
-        'Entity entity-dup already exists',
+        'Entity "entity-dup" already exists',
       );
     });
 
@@ -119,20 +120,18 @@ describe('CrdtEntityRegistry', () => {
     });
 
     it('releaseEntity throws for non-existent entity', async () => {
-      await expect(registry.releaseEntity('ghost')).rejects.toThrow('Entity ghost not found');
+      await expect(registry.releaseEntity('ghost')).rejects.toThrow('Entity "ghost" not found');
     });
 
     it('updateEntity throws for non-existent entity', async () => {
       await expect(registry.updateEntity('ghost', { x: 1 })).rejects.toThrow(
-        'Entity ghost not found',
+        'Entity "ghost" not found',
       );
     });
 
     it('operations throw when registry is not started', async () => {
       const unstarted = new CrdtEntityRegistry('unstarted-node');
-      await expect(unstarted.proposeEntity('e')).rejects.toThrow(
-        'CrdtEntityRegistry is not running',
-      );
+      await expect(unstarted.proposeEntity('e')).rejects.toThrow(NotStartedError);
     });
   });
 
