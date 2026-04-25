@@ -128,7 +128,7 @@ describe('DistributedLock', () => {
 
   it('extend throws NotOwnedError when the lock is not held', async () => {
     // Create a fake handle pointing to a lock we never acquired.
-    const fakeHandle = { lockId: 'nonexistent', nodeId: 'node-1', acquiredAt: 0, expiresAt: 9999 };
+    const fakeHandle = { lockId: 'nonexistent', nodeId: 'node-1', acquiredAt: 0, expiresAt: 9999, fencingToken: 0n };
     const err = await lock.extend(fakeHandle).catch(e => e);
     expect(err).toBeInstanceOf(CoreError);
     expect(err).toBeInstanceOf(NotOwnedError);

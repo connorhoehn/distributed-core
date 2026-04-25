@@ -15,15 +15,23 @@ export interface QuorumDistributedLockConfig {
 
 type QuorumMsg =
   | { kind: 'LOCK_REQUEST'; lockId: string; requestId: string; nodeId: string; ttlMs: number }
-  | { kind: 'LOCK_GRANT'; requestId: string; lockId: string; fromNodeId: string }
-  | { kind: 'LOCK_DENY'; requestId: string; lockId: string; fromNodeId: string; reason: string }
+  // `seenToken` is the stringified bigint of the highest fencing token this
+  // peer has ever seen for `lockId`. The acquirer takes max + 1n across
+  // grants to compute its own token, guaranteeing strict monotonicity.
+  | { kind: 'LOCK_GRANT'; requestId: string; lockId: string; fromNodeId: string; seenToken: string }
+  | { kind: 'LOCK_DENY'; requestId: string; lockId: string; fromNodeId: string; reason: string; seenToken: string }
   | { kind: 'LOCK_ABANDON'; lockId: string; nodeId: string }
-  | { kind: 'LOCK_RELEASE'; lockId: string; nodeId: string };
+  // `fencingToken` lets all peers update their lastSeen map so a future grant
+  // returns the right max.
+  | { kind: 'LOCK_RELEASE'; lockId: string; nodeId: string; fencingToken: string };
 
 interface PendingRequest {
   resolve: (handle: LockHandle | null) => void;
   grants: Set<string>;
   denies: Set<string>;
+  // Highest seenToken observed across all peers (including the local node)
+  // for this in-flight request. The granted token will be `maxSeen + 1n`.
+  maxSeenToken: bigint;
   timer: ReturnType<typeof setTimeout>;
   lockId: string;
   ttlMs: number;
@@ -47,6 +55,20 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
   private readonly remoteTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly pendingRequests = new Map<string, PendingRequest>();
   private readonly ttlTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * Highest fencing token this node has ever seen for each lockId. Used to
+   * (a) advertise our knowledge in `LOCK_GRANT.seenToken` so the acquirer
+   * can compute `max + 1n`, and (b) guarantee that even after a network
+   * flap our local view never goes backwards.
+   *
+   * Persistence note: this counter is currently in-memory per lock instance.
+   * On full process restart, the counter resets to whatever max the cluster
+   * has gossiped (eventually). Strict monotonicity within a stable cluster
+   * is preserved; for cross-restart strict monotonicity an integrator must
+   * back QuorumDistributedLock with a durable EntityRegistry — out of scope
+   * here.
+   */
+  private readonly lastSeenTokens = new Map<string, bigint>();
 
   private subscriptionId: string | null = null;
   private _started = false;
@@ -108,20 +130,25 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
     return new Promise<LockHandle | null>((resolve) => {
       const grants = new Set<string>([this.localNodeId]);
       const denies = new Set<string>();
+      // Seed with our own knowledge so a single-node majority still issues a
+      // strictly-increasing token across acquire/release/acquire cycles.
+      const initialSeen = this.lastSeenTokens.get(lockId) ?? 0n;
 
       const tryResolveEarly = () => {
-        if (grants.size >= majority) {
+        const pending = this.pendingRequests.get(requestId);
+        if (pending && grants.size >= majority) {
           clearTimeout(timer);
           this.pendingRequests.delete(requestId);
-          const handle = this._grantLocal(lockId, requestId, ttlMs);
+          const handle = this._grantLocal(lockId, requestId, ttlMs, pending.maxSeenToken + 1n);
           resolve(handle);
         }
       };
 
       const timer = setTimeout(async () => {
+        const pending = this.pendingRequests.get(requestId);
         this.pendingRequests.delete(requestId);
-        if (grants.size >= majority) {
-          const handle = this._grantLocal(lockId, requestId, ttlMs);
+        if (pending && grants.size >= majority) {
+          const handle = this._grantLocal(lockId, requestId, ttlMs, pending.maxSeenToken + 1n);
           resolve(handle);
         } else {
           await this.pubsub.publish(this.topic, {
@@ -141,6 +168,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
         resolve,
         grants,
         denies,
+        maxSeenToken: initialSeen,
         timer,
         lockId,
         ttlMs,
@@ -178,7 +206,8 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
 
   async release(lockHandle: LockHandle): Promise<void> {
     const { lockId } = lockHandle;
-    if (!this.heldLocks.has(lockId)) {
+    const held = this.heldLocks.get(lockId);
+    if (held === undefined) {
       return;
     }
     this._clearTtlTimer(lockId);
@@ -187,6 +216,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
       kind: 'LOCK_RELEASE',
       lockId,
       nodeId: this.localNodeId,
+      fencingToken: held.fencingToken.toString(),
     } satisfies QuorumMsg);
     this.emit('lock:released', lockId);
   }
@@ -199,18 +229,46 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
     return Array.from(this.heldLocks.values());
   }
 
-  private _grantLocal(lockId: string, _requestId: string, ttlMs: number): LockHandle {
+  /**
+   * Read the highest fencing token this node currently knows for `lockId`.
+   * Returns `0n` if never seen. Useful for acceptance-gate implementations.
+   */
+  getCurrentFencingToken(lockId: string): bigint {
+    return this.lastSeenTokens.get(lockId) ?? 0n;
+  }
+
+  private _grantLocal(lockId: string, _requestId: string, ttlMs: number, fencingToken: bigint): LockHandle {
     const now = Date.now();
     const handle: LockHandle = {
       lockId,
       nodeId: this.localNodeId,
       acquiredAt: now,
       expiresAt: now + ttlMs,
+      fencingToken,
     };
     this.heldLocks.set(lockId, handle);
+    // Update our own last-seen so any future grant we participate in returns
+    // a strictly-larger seenToken.
+    this._observeToken(lockId, fencingToken);
     this._scheduleTtlTimer(lockId, ttlMs);
     this.emit('lock:acquired', handle);
     return handle;
+  }
+
+  private _observeToken(lockId: string, token: bigint): void {
+    const current = this.lastSeenTokens.get(lockId) ?? 0n;
+    if (token > current) {
+      this.lastSeenTokens.set(lockId, token);
+    }
+  }
+
+  private _parseToken(raw: string | undefined): bigint {
+    if (raw === undefined) return 0n;
+    try {
+      return BigInt(raw);
+    } catch {
+      return 0n;
+    }
   }
 
   private _scheduleTtlTimer(lockId: string, ttlMs: number): void {
@@ -242,6 +300,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
           kind: 'LOCK_RELEASE',
           lockId,
           nodeId: this.localNodeId,
+          fencingToken: handle.fencingToken.toString(),
         } satisfies QuorumMsg)
         .catch(() => {});
       this.emit('lock:released', lockId);
@@ -279,6 +338,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
       if (metadata.publisherNodeId === this.localNodeId) return;
 
       const { lockId, requestId, nodeId, ttlMs } = msg;
+      const seenToken = (this.lastSeenTokens.get(lockId) ?? 0n).toString();
 
       if (this.heldLocks.has(lockId)) {
         this.pubsub
@@ -288,6 +348,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
             lockId,
             fromNodeId: this.localNodeId,
             reason: 'locally-held',
+            seenToken,
           } satisfies QuorumMsg)
           .catch(() => {});
         this.emit('lock:denied', lockId, nodeId, 'locally-held');
@@ -302,6 +363,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
             lockId,
             fromNodeId: this.localNodeId,
             reason: 'already-acked',
+            seenToken,
           } satisfies QuorumMsg)
           .catch(() => {});
         this.emit('lock:denied', lockId, nodeId, 'already-acked');
@@ -316,6 +378,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
           requestId,
           lockId,
           fromNodeId: this.localNodeId,
+          seenToken,
         } satisfies QuorumMsg)
         .catch(() => {});
       return;
@@ -323,11 +386,14 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
 
     if (msg.kind === 'LOCK_GRANT') {
       if (metadata.publisherNodeId === this.localNodeId) return;
-      const { requestId, fromNodeId } = msg;
+      const { requestId, fromNodeId, lockId, seenToken } = msg;
       const pending = this.pendingRequests.get(requestId);
       if (!pending) return;
 
       pending.grants.add(fromNodeId);
+      const peerSeen = this._parseToken(seenToken);
+      if (peerSeen > pending.maxSeenToken) pending.maxSeenToken = peerSeen;
+      this._observeToken(lockId, peerSeen);
 
       const alive = this.cluster.getMembership().size;
       const majority = Math.floor(alive / 2) + 1;
@@ -335,7 +401,7 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
       if (pending.grants.size >= majority) {
         clearTimeout(pending.timer);
         this.pendingRequests.delete(requestId);
-        const handle = this._grantLocal(pending.lockId, requestId, pending.ttlMs);
+        const handle = this._grantLocal(pending.lockId, requestId, pending.ttlMs, pending.maxSeenToken + 1n);
         pending.resolve(handle);
       }
       return;
@@ -343,11 +409,14 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
 
     if (msg.kind === 'LOCK_DENY') {
       if (metadata.publisherNodeId === this.localNodeId) return;
-      const { requestId, fromNodeId, reason } = msg;
+      const { requestId, fromNodeId, reason, lockId, seenToken } = msg;
       const pending = this.pendingRequests.get(requestId);
       if (!pending) return;
 
       pending.denies.add(fromNodeId);
+      const peerSeen = this._parseToken(seenToken);
+      if (peerSeen > pending.maxSeenToken) pending.maxSeenToken = peerSeen;
+      this._observeToken(lockId, peerSeen);
       this.emit('lock:denied', pending.lockId, fromNodeId, reason);
 
       const alive = this.cluster.getMembership().size;
@@ -379,9 +448,10 @@ export class QuorumDistributedLock extends EventEmitter implements LifecycleAwar
 
     if (msg.kind === 'LOCK_RELEASE') {
       if (metadata.publisherNodeId === this.localNodeId) return;
-      const { lockId } = msg;
+      const { lockId, fencingToken } = msg;
       this._clearRemoteTimer(lockId);
       this.remoteLocks.delete(lockId);
+      this._observeToken(lockId, this._parseToken(fencingToken));
       return;
     }
   }

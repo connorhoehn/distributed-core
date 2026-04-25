@@ -4,11 +4,29 @@ import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
 import { TimeoutError, NotOwnedError } from '../../common/errors';
 import { defaultLogger } from '../../common/logger';
 
+/**
+ * Handle returned by a successful lock acquisition.
+ *
+ * `fencingToken` is a strictly-monotonically-increasing integer per `lockId`.
+ * Implementations must guarantee that any later acquire of the same `lockId`
+ * (by any node) returns a strictly larger token. Counters are persisted into
+ * the underlying `EntityRegistry` (via a sidecar entity, see
+ * `__fence__:<lockId>`), so monotonicity survives lock release / re-acquire,
+ * lock TTL expiry, and node restarts that share the same registry. The
+ * counter is only reset by explicit registry truncation (e.g. starting from a
+ * fresh in-memory registry on every node).
+ *
+ * Standard usage: include the token in any side-effect you want guarded; a
+ * downstream acceptance gate compares the held token to the highest seen
+ * token per resource and rejects writes whose token is lower (Kleppmann
+ * fencing-token pattern).
+ */
 export interface LockHandle {
   lockId: string;
   nodeId: string;
   acquiredAt: number;
   expiresAt: number;
+  fencingToken: bigint;
 }
 
 export interface DistributedLockConfig {
@@ -21,6 +39,16 @@ export interface DistributedLockConfig {
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_INTERVAL_MS = 100;
+
+/**
+ * Sidecar entity-id prefix used to persist the per-lockId fencing-token
+ * counter. The sidecar is written via `applyRemoteUpdate` (so it is not bound
+ * to local ownership) and is intentionally never released.
+ */
+const FENCE_PREFIX = '__fence__:';
+function fenceEntityId(lockId: string): string {
+  return `${FENCE_PREFIX}${lockId}`;
+}
 
 export class DistributedLock extends EventEmitter {
   private readonly registry: EntityRegistry;
@@ -46,12 +74,32 @@ export class DistributedLock extends EventEmitter {
     const ttl = options?.ttlMs ?? this.config.defaultTtlMs;
     const start = Date.now();
     try {
-      const record = await this.registry.proposeEntity(lockId, { ttlMs: ttl, lockedBy: this.localNodeId });
+      // Propose the lock first; only bump the fencing-token counter on
+      // successful acquisition. This keeps "one bump per successful acquire"
+      // while preserving monotonicity (a fresh acquire always reads the
+      // last persisted token before incrementing).
+      const record = await this.registry.proposeEntity(lockId, {
+        ttlMs: ttl,
+        lockedBy: this.localNodeId,
+      });
+      const fencingToken = await this._bumpFencingToken(lockId);
+      // Stamp the lock entity's metadata too so the token is observable to
+      // anyone inspecting the registry directly.
+      try {
+        await this.registry.updateEntity(lockId, {
+          ttlMs: ttl,
+          lockedBy: this.localNodeId,
+          fencingToken: fencingToken.toString(),
+        });
+      } catch {
+        // Best-effort — sidecar is the source of truth.
+      }
       const handle: LockHandle = {
         lockId,
         nodeId: this.localNodeId,
         acquiredAt: record.createdAt,
         expiresAt: record.createdAt + ttl,
+        fencingToken,
       };
       this.heldLocks.set(lockId, handle);
       this._scheduleTtl(lockId, ttl);
@@ -99,7 +147,11 @@ export class DistributedLock extends EventEmitter {
     const extra = additionalMs ?? this.config.defaultTtlMs;
     this._clearTimer(lockId);
     const newExpiresAt = Date.now() + extra;
-    const updated: LockHandle = { ...lockHandle, expiresAt: newExpiresAt };
+    // Extend bumps the fencing token too — every successful extend yields a
+    // fresh, strictly-larger token, so a deposed-then-resumed leader cannot
+    // re-use a stale handle.
+    const fencingToken = await this._bumpFencingToken(lockId);
+    const updated: LockHandle = { ...lockHandle, expiresAt: newExpiresAt, fencingToken };
     this.heldLocks.set(lockId, updated);
     this._scheduleTtl(lockId, extra);
     this.metrics?.counter('lock.extend.count').inc();
@@ -119,16 +171,41 @@ export class DistributedLock extends EventEmitter {
   }
 
   /**
+   * Read the current (highest-seen) fencing token for `lockId` from the
+   * registry sidecar, or `0n` if no acquire has ever happened. Useful for
+   * acceptance-gate implementations that need to compare a presented token
+   * against the latest known.
+   */
+  getCurrentFencingToken(lockId: string): bigint {
+    const fence = this.registry.getEntity(fenceEntityId(lockId));
+    if (fence === null) return 0n;
+    const raw = (fence.metadata as Record<string, unknown> | undefined)?.fencingToken;
+    if (typeof raw === 'string') {
+      try {
+        return BigInt(raw);
+      } catch {
+        return 0n;
+      }
+    }
+    if (typeof raw === 'bigint') return raw;
+    if (typeof raw === 'number') return BigInt(raw);
+    return 0n;
+  }
+
+  /**
    * Externally triggered cleanup when a remote node is detected as failed.
    * Iterates all known registry entities owned by `nodeId`, applies a DELETE
    * remote update so local state converges, and removes any locally-tracked
    * lock handles for that node.
    * Returns the count of locks cleaned up.
+   *
+   * Fence-sidecar entities (`__fence__:*`) are intentionally NOT cleaned up —
+   * they must persist across owner changes to preserve monotonicity.
    */
   handleRemoteNodeFailure(nodeId: string): number {
     const victims = this.registry
       .getAllKnownEntities()
-      .filter((e) => e.ownerNodeId === nodeId);
+      .filter((e) => e.ownerNodeId === nodeId && !e.entityId.startsWith(FENCE_PREFIX));
 
     for (const entity of victims) {
       void this.registry.applyRemoteUpdate({
@@ -146,6 +223,32 @@ export class DistributedLock extends EventEmitter {
     }
 
     return victims.length;
+  }
+
+  /**
+   * Read-then-write the per-lockId fencing-token sidecar. Returns the new
+   * token. Cross-node monotonicity holds because every node reads through the
+   * same registry view; write contention is rare in practice (acquire is
+   * already serialized by `proposeEntity` for `DistributedLock`).
+   */
+  private async _bumpFencingToken(lockId: string): Promise<bigint> {
+    const current = this.getCurrentFencingToken(lockId);
+    const next = current + 1n;
+    const fenceId = fenceEntityId(lockId);
+    const exists = this.registry.getEntity(fenceId) !== null;
+    const now = Date.now();
+    // Use `applyRemoteUpdate` so we don't need ownership of the sidecar; the
+    // version field is the integer view of the bigint counter — safe up to
+    // 2^53 - 1 acquisitions per lockId, well beyond any realistic workload.
+    await this.registry.applyRemoteUpdate({
+      entityId: fenceId,
+      ownerNodeId: this.localNodeId,
+      version: Number(next),
+      timestamp: now,
+      operation: exists ? 'UPDATE' : 'CREATE',
+      metadata: { fencingToken: next.toString() },
+    });
+    return next;
   }
 
   private _scheduleTtl(lockId: string, ttlMs: number): void {

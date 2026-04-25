@@ -66,6 +66,41 @@ export class LeaderElection extends EventEmitter implements LifecycleAware {
     return this.isLeader() ? this.nodeId : null;
   }
 
+  /**
+   * Returns the currently-held `LockHandle`, or `null` if not leader.
+   * Exposed so wrappers (e.g. `ClusterLeaderElection`) can read the fencing
+   * token / epoch without duplicating renewal logic.
+   */
+  getCurrentHandle(): LockHandle | null {
+    return this.currentHandle;
+  }
+
+  /**
+   * Returns the fencing token of the currently-held lease, treating it as
+   * the leader's epoch. Throws if not leader.
+   */
+  currentEpoch(): bigint {
+    if (this.currentHandle === null) {
+      throw new Error(`Not leader for group "${this.groupId}"`);
+    }
+    return this.currentHandle.fencingToken;
+  }
+
+  /**
+   * Underlying lock instance — exposed so wrappers can read the registry's
+   * authoritative fencing token after a guarded operation completes.
+   */
+  getLock(): DistributedLock {
+    return this.lock;
+  }
+
+  /**
+   * Group identifier — exposed for diagnostic / error-message use by wrappers.
+   */
+  getGroupId(): string {
+    return this.groupId;
+  }
+
   private async _cycle(): Promise<void> {
     if (!this.isRunning) {
       return;

@@ -80,6 +80,27 @@ export class WalNotConfiguredError extends CoreError {
 }
 
 /**
+ * Thrown by `ClusterLeaderElection.guard()` (and equivalents) when the leader's
+ * fencing token changes during a guarded operation — i.e., a new leader was
+ * elected (or the original leader was deposed and re-elected) while the guarded
+ * function was still running. The caller must abort any side-effects.
+ */
+export class StaleLeaderError extends CoreError {
+  constructor(
+    public readonly groupId: string,
+    public readonly heldEpoch: bigint,
+    public readonly observedEpoch: bigint | null,
+  ) {
+    super(
+      'stale-leader',
+      observedEpoch === null
+        ? `Stale leader for group "${groupId}": held epoch ${heldEpoch.toString()} but lock is no longer held`
+        : `Stale leader for group "${groupId}": held epoch ${heldEpoch.toString()} but observed epoch ${observedEpoch.toString()}`,
+    );
+  }
+}
+
+/**
  * Thrown by ConnectionRegistry when a reconnect is attempted for a connection
  * currently owned by a remote node rather than the local node.
  */
