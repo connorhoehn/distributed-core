@@ -146,6 +146,8 @@ export type {
   HttpsForwardingTransportConfig,
   HttpsForwardingServerConfig,
 } from './routing';
+export { RebalancePolicy } from './routing/RebalancePolicy';
+export type { RebalancePolicyConfig, RebalanceTrigger } from './routing/RebalancePolicy';
 
 // Entity registries — cross-node sync adapter + bootstrap
 export { EntityRegistrySyncAdapter } from './cluster/entity/EntityRegistrySyncAdapter';

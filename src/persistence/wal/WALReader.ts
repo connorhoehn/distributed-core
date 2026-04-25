@@ -1,3 +1,6 @@
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { createInterface } from 'readline';
 import { WALReader, WALFile, WALEntry, WALCoordinator } from './types';
 import { WALFileImpl } from './WALFile';
 import { WALCoordinatorImpl } from './WALCoordinator';
@@ -5,10 +8,12 @@ import { FrameworkLogger } from '../../common/logger';
 
 export class WALReaderImpl implements WALReader {
   private walFile: WALFile;
+  private filePath: string;
   private coordinator: WALCoordinator;
   private logger: FrameworkLogger;
 
   constructor(filePath: string) {
+    this.filePath = filePath;
     this.walFile = new WALFileImpl(filePath);
     this.coordinator = new WALCoordinatorImpl();
     this.logger = new FrameworkLogger({ enableFrameworkLogs: true });
@@ -29,6 +34,57 @@ export class WALReaderImpl implements WALReader {
       }
       
       yield entry;
+    }
+  }
+
+  /**
+   * Streaming reader: yields validated WAL entries one at a time, reading the
+   * underlying file line-by-line. Memory cost is O(1) regardless of WAL size.
+   *
+   * Entries are yielded in on-disk order, which for an append-only WAL is also
+   * LSN order. Optional bounds let callers narrow the range without first
+   * collecting via readRange().
+   *
+   * Falls back to yielding nothing when the file is missing (matching the
+   * readAll() behavior). Malformed lines are logged and skipped.
+   */
+  async *readEntries(startLSN?: number, endLSN?: number): AsyncIterable<WALEntry> {
+    try {
+      await stat(this.filePath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw err;
+    }
+
+    const stream = createReadStream(this.filePath, { encoding: 'utf-8' });
+    const rl = createInterface({ input: stream, crlfDelay: Infinity });
+
+    try {
+      for await (const rawLine of rl) {
+        const line = rawLine.trim();
+        if (!line) continue;
+
+        let entry: WALEntry;
+        try {
+          entry = JSON.parse(line);
+        } catch {
+          console.warn('[WALReader] Skipping malformed entry:', line);
+          continue;
+        }
+
+        if (startLSN !== undefined && entry.logSequenceNumber < startLSN) continue;
+        if (endLSN !== undefined && entry.logSequenceNumber > endLSN) continue;
+
+        if (!this.coordinator.validateEntry(entry)) {
+          console.warn(`[WALReader] Invalid entry at LSN ${entry.logSequenceNumber}, filtering out`);
+          continue;
+        }
+
+        yield entry;
+      }
+    } finally {
+      rl.close();
+      stream.destroy();
     }
   }
 

@@ -99,6 +99,8 @@ interface PendingApproval {
   recorded: ApprovalRecord[];
   resolve: (decision: 'approve' | 'reject') => void;
   timer?: ReturnType<typeof setTimeout>;
+  message?: string;
+  requestedAt: string;
 }
 
 // Result of executing a single step. `sourceHandle` chooses the outgoing edge
@@ -358,11 +360,17 @@ export class PipelineExecutor {
     }
   }
 
-  getPendingApprovals(): Array<{ runId: string; stepId: string; approvers: Approver[] }> {
+  getPendingApprovals(): Array<{
+    stepId: string;
+    approvers: ApprovalNodeData['approvers'];
+    message?: string;
+    requestedAt: string;
+  }> {
     return Array.from(this.pendingApprovals.values()).map((p) => ({
-      runId: p.runId,
       stepId: p.stepId,
       approvers: p.approvers,
+      message: p.message,
+      requestedAt: p.requestedAt,
     }));
   }
 
@@ -786,6 +794,8 @@ export class PipelineExecutor {
         requiredCount: Math.max(1, data.requiredCount),
         recorded: [],
         resolve,
+        message: data.message,
+        requestedAt: at,
       };
 
       // §17.3: `escalate` is deferred to Phase 5 — treat as reject so runs

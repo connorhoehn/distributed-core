@@ -346,6 +346,27 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
   }
 
   async replay(fromVersion: number, handler: (event: BusEvent) => Promise<void>): Promise<void> {
+    // Stream entries through the handler so memory stays O(1) on large WALs.
+    // The handler is awaited per-event, providing natural backpressure: the
+    // reader does not advance until the handler resolves.
+    for await (const event of this.replayStream(fromVersion)) {
+      await handler(event);
+    }
+  }
+
+  /**
+   * Streaming replay: yields BusEvents from the WAL with version >= fromVersion,
+   * one at a time. Memory cost is O(1) per replay regardless of WAL size.
+   *
+   * The on-disk WAL is append-only and written in monotonic version order, so
+   * events are yielded in version order without buffering. Consumers that need
+   * an array can collect via `for await (...)` or `Array.fromAsync(...)`.
+   *
+   * Backpressure: the underlying file reader does not advance past the current
+   * event until the consumer's `for await` body resolves, so a slow consumer
+   * does not cause the reader to drain ahead unboundedly.
+   */
+  async *replayStream(fromVersion: number): AsyncIterable<BusEvent> {
     if (!this.config.walFilePath) {
       throw new WalNotConfiguredError('replay events');
     }
@@ -354,18 +375,12 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
     await reader.initialize();
 
     try {
-      const entries = await reader.readAll();
+      for await (const entry of reader.readEntries()) {
+        if (entry.data.metadata?._eventBus !== true) continue;
+        if (entry.data.version < fromVersion) continue;
 
-      const events: BusEvent[] = entries
-        .filter(
-          (e) =>
-            e.data.metadata?._eventBus === true && e.data.version >= fromVersion,
-        )
-        .map((e) => JSON.parse(e.data.metadata!.event as string) as BusEvent)
-        .sort((a, b) => a.version - b.version);
-
-      for (const event of events) {
-        await handler(event);
+        const event = JSON.parse(entry.data.metadata!.event as string) as BusEvent;
+        yield event;
       }
     } finally {
       await reader.close();

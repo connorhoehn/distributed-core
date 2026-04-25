@@ -30,6 +30,7 @@ import { PubSubManager } from '../../gateway/pubsub/PubSubManager';
 import { PipelineExecutor, PipelineExecutorOptions } from './PipelineExecutor';
 import { LLMClient } from './LLMClient';
 import type {
+  ApprovalNodeData,
   PipelineDefinition,
   PipelineEventMap,
   PipelineRun,
@@ -53,6 +54,20 @@ export interface PipelineRunResource extends ResourceMetadata {
     durationMs?: number;
     ownerNodeId: string;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pending approval row — structured view of approvals awaiting decision
+// ---------------------------------------------------------------------------
+
+export interface PendingApprovalRow {
+  runId: string;
+  stepId: string;
+  pipelineId: string;
+  approvers: ApprovalNodeData['approvers'];
+  message?: string;
+  /** ISO 8601 — drives frontend sort and "waiting Xm" label. */
+  requestedAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -618,6 +633,26 @@ export class PipelineModule extends ApplicationModule {
   ): void {
     const executor = this.activeExecutors.get(runId);
     if (executor) executor.resolveApproval(runId, stepId, userId, decision, comment);
+  }
+
+  /**
+   * Returns all approval steps currently awaiting a decision across every
+   * in-flight executor owned by this node. Each row includes the runId and
+   * pipelineId so callers can display a structured queue without further
+   * lookups. Cluster-wide aggregation is the bridge's responsibility — call
+   * from each node and merge.
+   */
+  getPendingApprovals(): PendingApprovalRow[] {
+    const rows: PendingApprovalRow[] = [];
+    for (const executor of this.activeExecutors.values()) {
+      const run = executor.getCurrentRun();
+      const runId = run.id;
+      const pipelineId = run.pipelineId;
+      for (const item of executor.getPendingApprovals()) {
+        rows.push({ runId, pipelineId, ...item });
+      }
+    }
+    return rows;
   }
 
   // -------------------------------------------------------------------------

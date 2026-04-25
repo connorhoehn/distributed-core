@@ -735,6 +735,92 @@ describe('PipelineModule Phase-4 API', () => {
   });
 
   // -------------------------------------------------------------------------
+  // getPendingApprovals
+  // -------------------------------------------------------------------------
+
+  describe('getPendingApprovals()', () => {
+    it('[scenario 11] aggregates rows across multiple in-flight runs, includes runId + pipelineId', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        // Start two approval-blocked runs in parallel (no timeout = block forever).
+        const resource1 = await module.createResource({
+          applicationData: {
+            definition: makeApprovalPipeline('pipe-pend-a'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const resource2 = await module.createResource({
+          applicationData: {
+            definition: makeApprovalPipeline('pipe-pend-b'),
+            speedMultiplier: 0.02,
+          },
+        });
+
+        // Wait for both runs to reach their approval steps.
+        await sleep(400);
+
+        const rows = module.getPendingApprovals();
+        expect(rows.length).toBeGreaterThanOrEqual(2);
+
+        // Each row must have runId + pipelineId.
+        for (const row of rows) {
+          expect(typeof row.runId).toBe('string');
+          expect(typeof row.pipelineId).toBe('string');
+          expect(typeof row.stepId).toBe('string');
+          expect(Array.isArray(row.approvers)).toBe(true);
+          expect(typeof row.requestedAt).toBe('string');
+          // requestedAt must be a valid ISO 8601 string.
+          expect(() => new Date(row.requestedAt).toISOString()).not.toThrow();
+        }
+
+        const runIds = rows.map((r) => r.runId);
+        expect(runIds).toContain(resource1.resourceId);
+        expect(runIds).toContain(resource2.resourceId);
+
+        const pipelineIds = rows.map((r) => r.pipelineId);
+        expect(pipelineIds).toContain('pipe-pend-a');
+        expect(pipelineIds).toContain('pipe-pend-b');
+
+        // Unblock both runs so the module can stop cleanly.
+        module.resolveApproval(resource1.resourceId, 'approval-1', 'alice', 'approve');
+        module.resolveApproval(resource2.resourceId, 'approval-1', 'alice', 'approve');
+        await sleep(300);
+      } finally {
+        await stop();
+      }
+    });
+
+    it('[scenario 12] rows disappear after the run completes (no more pending approvals)', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        const resource = await module.createResource({
+          applicationData: {
+            definition: makeApprovalPipeline('pipe-pend-resolve'),
+            speedMultiplier: 0.02,
+          },
+        });
+        const runId = resource.resourceId;
+
+        // Wait for the approval step to be reached.
+        await sleep(400);
+
+        expect(module.getPendingApprovals().length).toBeGreaterThanOrEqual(1);
+
+        // Resolve the approval and wait for the run to complete.
+        module.resolveApproval(runId, 'approval-1', 'alice', 'approve');
+        await sleep(400);
+
+        // After the run reaches terminal state the queue must be empty.
+        const rows = module.getPendingApprovals();
+        const rowsForRun = rows.filter((r) => r.runId === runId);
+        expect(rowsForRun).toHaveLength(0);
+      } finally {
+        await stop();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // pipeline.run.reassigned emitted alongside pipeline.run.orphaned
   // -------------------------------------------------------------------------
 

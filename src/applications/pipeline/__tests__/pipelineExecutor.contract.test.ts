@@ -908,6 +908,135 @@ describe('PipelineExecutor contract', () => {
     });
   });
 
+  describe('getPendingApprovals()', () => {
+    test('returns one row with correct fields while an approval node is awaiting', async () => {
+      const t = triggerNode();
+      const ap = approvalNode(undefined, {
+        approvers: [{ type: 'user', value: 'bob' }],
+        message: 'Please review the deployment',
+      });
+      const done = actionNode();
+      const def = buildPipeline({
+        nodes: [t, ap, done],
+        edges: [makeEdge(t.id, ap.id), makeEdge(ap.id, done.id, 'approved')],
+      });
+
+      const bus = makeEventBus();
+      await bus.start();
+
+      const executor = new PipelineExecutor({
+        definition: def,
+        ownerNodeId: 'test-node',
+        llmClient: makeFakeLLMClient(),
+        eventBus: bus,
+        speedMultiplier: 0.02,
+      });
+
+      // Start run without awaiting it so we can inspect the pending queue.
+      const runPromise = executor.run();
+
+      // Wait long enough for the executor to reach the approval step.
+      await new Promise<void>((r) => setTimeout(r, 100));
+
+      const pending = executor.getPendingApprovals();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]!.stepId).toBe(ap.id);
+      expect(pending[0]!.approvers).toEqual([{ type: 'user', value: 'bob' }]);
+      expect(pending[0]!.message).toBe('Please review the deployment');
+      expect(typeof pending[0]!.requestedAt).toBe('string');
+      // requestedAt must be a valid ISO 8601 string.
+      expect(() => new Date(pending[0]!.requestedAt).toISOString()).not.toThrow();
+
+      // Unblock the run.
+      executor.resolveApproval(executor.runId, ap.id, 'bob', 'approve');
+      await runPromise;
+      await bus.stop();
+    });
+
+    test('returns multiple rows when multiple approval nodes are awaiting in the same run', async () => {
+      const t = triggerNode();
+      const fork = forkNode(undefined, 2);
+      const ap1 = approvalNode(undefined, { approvers: [{ type: 'user', value: 'alice' }] });
+      const ap2 = approvalNode(undefined, { approvers: [{ type: 'role', value: 'manager' }] });
+      const join = joinNode(undefined, { mode: 'all', mergeStrategy: 'deep-merge' });
+      const done = actionNode();
+      const def = buildPipeline({
+        nodes: [t, fork, ap1, ap2, join, done],
+        edges: [
+          makeEdge(t.id, fork.id),
+          makeEdge(fork.id, ap1.id, 'out'),
+          makeEdge(fork.id, ap2.id, 'out'),
+          makeEdge(ap1.id, join.id, 'approved'),
+          makeEdge(ap2.id, join.id, 'approved'),
+          makeEdge(join.id, done.id),
+        ],
+      });
+
+      const bus = makeEventBus();
+      await bus.start();
+
+      const executor = new PipelineExecutor({
+        definition: def,
+        ownerNodeId: 'test-node',
+        llmClient: makeFakeLLMClient(),
+        eventBus: bus,
+        speedMultiplier: 0.02,
+      });
+
+      const runPromise = executor.run();
+
+      // Wait for both branches to reach their approval steps.
+      await new Promise<void>((r) => setTimeout(r, 150));
+
+      const pending = executor.getPendingApprovals();
+      expect(pending.length).toBeGreaterThanOrEqual(2);
+      const stepIds = pending.map((p) => p.stepId);
+      expect(stepIds).toContain(ap1.id);
+      expect(stepIds).toContain(ap2.id);
+
+      // Unblock both.
+      executor.resolveApproval(executor.runId, ap1.id, 'alice', 'approve');
+      executor.resolveApproval(executor.runId, ap2.id, 'manager-user', 'approve');
+      await runPromise;
+      await bus.stop();
+    });
+
+    test('resolved approvals are removed from the queue', async () => {
+      const t = triggerNode();
+      const ap = approvalNode();
+      const done = actionNode();
+      const def = buildPipeline({
+        nodes: [t, ap, done],
+        edges: [makeEdge(t.id, ap.id), makeEdge(ap.id, done.id, 'approved')],
+      });
+
+      const bus = makeEventBus();
+      await bus.start();
+
+      const executor = new PipelineExecutor({
+        definition: def,
+        ownerNodeId: 'test-node',
+        llmClient: makeFakeLLMClient(),
+        eventBus: bus,
+        speedMultiplier: 0.02,
+      });
+
+      const runPromise = executor.run();
+
+      // Wait for the approval step to be reached.
+      await new Promise<void>((r) => setTimeout(r, 100));
+      expect(executor.getPendingApprovals()).toHaveLength(1);
+
+      // Resolve and wait for completion.
+      executor.resolveApproval(executor.runId, ap.id, 'alice', 'approve');
+      await runPromise;
+
+      // After the run completes the queue must be empty.
+      expect(executor.getPendingApprovals()).toHaveLength(0);
+      await bus.stop();
+    });
+  });
+
   describe('Retry from step (manual)', () => {
     // Per PIPELINES_PLAN.md §17.6, manual "retry-from-here" emits
     // `pipeline:run:resume-from-step`. The executor does not yet expose a

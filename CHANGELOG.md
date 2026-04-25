@@ -21,6 +21,11 @@
   listener); adding a silent alias would suppress that safety mechanism.
   Those classes will adopt `lifecycle:error` in a future breaking release.
 
+### Added
+
+- `PipelineModule.getPendingApprovals(): PendingApprovalRow[]` — returns structured rows for every approval step currently awaiting a decision on this node. Each row includes `runId`, `stepId`, `pipelineId`, `approvers`, optional `message`, and `requestedAt` (ISO 8601). Synchronous; data is in-memory. Intended for the `PendingApprovalsPage` bridge call — cluster-wide aggregation is the bridge's responsibility.
+- `PendingApprovalRow` type exported from `distributed-core` (via `src/applications/pipeline/PipelineModule.ts`).
+
 ### Added — primitives and modules
 
 - `LifecycleAware` interface in `src/common/LifecycleAware.ts`. All primitives

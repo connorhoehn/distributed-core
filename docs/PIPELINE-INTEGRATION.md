@@ -136,11 +136,34 @@ The interpolation happens server-side inside `PipelineExecutor.execLLM()` before
 ```ts
 {
   runsStarted, runsCompleted, runsFailed, runsActive,
-  avgDurationMs, llmTokensIn, llmTokensOut
+  runsAwaitingApproval, avgDurationMs, llmTokensIn, llmTokensOut
 }
 ```
 
 Poll at 1Hz for dashboards. Don't subscribe to individual token events for dashboard purposes — the cost scales with token rate.
+
+## 7a. Bridge surface — pending approvals
+
+`pipelineModule.getPendingApprovals()` returns structured rows for every approval step currently blocked on this node. Use it to render the `PendingApprovalsPage` queue.
+
+```ts
+import type { PendingApprovalRow } from 'distributed-core';
+
+const rows: PendingApprovalRow[] = pipelineModule.getPendingApprovals();
+// Example row:
+// {
+//   runId:       "3f2e1d...",
+//   stepId:      "approval-1",
+//   pipelineId:  "deploy-prod",
+//   approvers:   [{ type: "user", value: "alice" }, { type: "role", value: "ops" }],
+//   message:     "Please review the production deployment",
+//   requestedAt: "2026-04-23T14:05:00.000Z"   // ISO 8601 — sort + "waiting Xm" label
+// }
+```
+
+**Scope**: this node only. For cluster-wide display, call `getPendingApprovals()` on each node and merge the flat arrays (de-dup on `runId + stepId`).
+
+**Return value**: synchronous — data is in-memory. Empty array when no approvals are pending.
 
 ## 8. Type drift warning
 

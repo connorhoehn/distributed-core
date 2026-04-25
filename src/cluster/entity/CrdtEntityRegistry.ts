@@ -19,6 +19,55 @@ interface CrdtEntry {
 }
 
 /**
+ * Tombstone metadata. `deletedAt` is wall-clock millis used for TTL eviction,
+ * separate from `logicalTs` which is the Lamport timestamp used for LWW merge.
+ */
+interface CrdtTombstone {
+  logicalTs: number;
+  authorNodeId: string;
+  /** Wall-clock millis when the tombstone was recorded locally. */
+  deletedAt: number;
+}
+
+/**
+ * Configuration for CrdtEntityRegistry tombstone TTL and compaction.
+ *
+ * RESURRECTION-WINDOW CONTRACT (AP/CP tradeoff — explicit by design):
+ *   With `tombstoneTTLMs = Infinity` (default) the registry is strongly
+ *   convergent: tombstones are retained forever and a stale CREATE for a
+ *   deleted entityId can NEVER resurrect it.
+ *
+ *   With a finite `tombstoneTTLMs`, tombstones are evicted after that many
+ *   wall-clock millis. A node that has been partitioned for longer than the
+ *   TTL and then rejoins MAY observe a re-creation of the same entityId —
+ *   this is the explicit resurrection window. Operators trade unbounded
+ *   memory growth for a bounded re-creation risk and MUST size the TTL
+ *   larger than the worst-case partition / sync lag.
+ */
+export interface CrdtRegistryOptions {
+  /**
+   * Time-to-live for tombstones in millis. Defaults to `Number.POSITIVE_INFINITY`
+   * (preserve "tombstones forever" semantics). Set to a finite value to cap
+   * memory; this opens a resurrection window of size `tombstoneTTLMs`.
+   */
+  tombstoneTTLMs?: number;
+
+  /**
+   * Compaction sweep interval in millis. Defaults to 60_000.
+   * The sweep evicts tombstones older than `tombstoneTTLMs` and updateLog
+   * entries older than `updateLogRetentionMs`.
+   */
+  compactionIntervalMs?: number;
+
+  /**
+   * Retention window for entries in `updateLog` in millis.
+   * Defaults to `Number.POSITIVE_INFINITY` (retain forever — preserves current
+   * `getUpdatesAfter` semantics for catch-up sync).
+   */
+  updateLogRetentionMs?: number;
+}
+
+/**
  * CrdtEntityRegistry — last-write-wins entity registry using logical timestamps.
  *
  * Concurrency semantics:
@@ -34,11 +83,11 @@ interface CrdtEntry {
 export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
   private readonly entries: Map<string, CrdtEntry> = new Map();
   /**
-   * Tombstones: entityId -> { logicalTs, authorNodeId } for deleted entities.
-   * Prevents out-of-order CREATE/UPDATE updates from resurrecting deleted entities.
+   * Tombstones: entityId -> { logicalTs, authorNodeId, deletedAt } for deleted entities.
+   * Prevents out-of-order CREATE/UPDATE updates from resurrecting deleted entities,
+   * subject to the configured `tombstoneTTLMs`.
    */
-  private readonly tombstones: Map<string, { logicalTs: number; authorNodeId: string }> =
-    new Map();
+  private readonly tombstones: Map<string, CrdtTombstone> = new Map();
   private readonly updateLog: EntityUpdate[] = [];
 
   private readonly nodeId: string;
@@ -47,9 +96,18 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
   /** Logical clock — monotonically increasing per-node counter. */
   private logicalClock = 0;
 
-  constructor(nodeId: string) {
+  // Compaction config + timer state
+  private readonly tombstoneTTLMs: number;
+  private readonly compactionIntervalMs: number;
+  private readonly updateLogRetentionMs: number;
+  private compactionTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(nodeId: string, options: CrdtRegistryOptions = {}) {
     super();
     this.nodeId = nodeId;
+    this.tombstoneTTLMs = options.tombstoneTTLMs ?? Number.POSITIVE_INFINITY;
+    this.compactionIntervalMs = options.compactionIntervalMs ?? 60_000;
+    this.updateLogRetentionMs = options.updateLogRetentionMs ?? Number.POSITIVE_INFINITY;
   }
 
   // ---------------------------------------------------------------------------
@@ -58,10 +116,82 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
 
   async start(): Promise<void> {
     this.isRunning = true;
+    this.startCompactionTimer();
   }
 
   async stop(): Promise<void> {
     this.isRunning = false;
+    this.stopCompactionTimer();
+  }
+
+  private startCompactionTimer(): void {
+    if (this.compactionTimer !== null) return;
+    // Skip the timer entirely if both retention windows are infinite — there
+    // would be nothing to evict. Avoids unnecessary timer pressure.
+    if (
+      this.tombstoneTTLMs === Number.POSITIVE_INFINITY &&
+      this.updateLogRetentionMs === Number.POSITIVE_INFINITY
+    ) {
+      return;
+    }
+    this.compactionTimer = setInterval(() => {
+      try {
+        this.compact();
+      } catch (err) {
+        // Compaction errors are non-fatal — log and continue.
+        // eslint-disable-next-line no-console
+        console.error('[CrdtEntityRegistry] compaction error:', err);
+      }
+    }, this.compactionIntervalMs);
+    // Don't keep the event loop alive solely for compaction.
+    if (typeof this.compactionTimer.unref === 'function') {
+      this.compactionTimer.unref();
+    }
+  }
+
+  private stopCompactionTimer(): void {
+    if (this.compactionTimer !== null) {
+      clearInterval(this.compactionTimer);
+      this.compactionTimer = null;
+    }
+  }
+
+  /**
+   * Evict tombstones older than `tombstoneTTLMs` and updateLog entries older
+   * than `updateLogRetentionMs`. Exposed (package-private via test access) for
+   * deterministic testing; otherwise driven by the compaction interval timer.
+   */
+  compact(now: number = Date.now()): { tombstonesEvicted: number; updatesEvicted: number } {
+    let tombstonesEvicted = 0;
+    let updatesEvicted = 0;
+
+    if (this.tombstoneTTLMs !== Number.POSITIVE_INFINITY) {
+      const cutoff = now - this.tombstoneTTLMs;
+      for (const [entityId, tomb] of this.tombstones) {
+        if (tomb.deletedAt <= cutoff) {
+          this.tombstones.delete(entityId);
+          tombstonesEvicted += 1;
+        }
+      }
+    }
+
+    if (this.updateLogRetentionMs !== Number.POSITIVE_INFINITY) {
+      const cutoff = now - this.updateLogRetentionMs;
+      // updateLog is roughly time-ordered; do an in-place filter.
+      let writeIdx = 0;
+      for (let readIdx = 0; readIdx < this.updateLog.length; readIdx += 1) {
+        const u = this.updateLog[readIdx];
+        if (u.timestamp > cutoff) {
+          this.updateLog[writeIdx] = u;
+          writeIdx += 1;
+        } else {
+          updatesEvicted += 1;
+        }
+      }
+      this.updateLog.length = writeIdx;
+    }
+
+    return { tombstonesEvicted, updatesEvicted };
   }
 
   // ---------------------------------------------------------------------------
@@ -128,7 +258,11 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
     const now = Date.now();
 
     this.entries.delete(entityId);
-    this.tombstones.set(entityId, { logicalTs: ts, authorNodeId: this.nodeId });
+    this.tombstones.set(entityId, {
+      logicalTs: ts,
+      authorNodeId: this.nodeId,
+      deletedAt: now,
+    });
 
     const update: EntityUpdate = {
       entityId,
@@ -290,15 +424,24 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
         case 'DELETE': {
           const existing = this.entries.get(update.entityId);
           const existingTomb = this.tombstones.get(update.entityId);
+          const nowMs = Date.now();
 
           // Check whether the incoming DELETE beats what we have
           if (existing && !this.winsOver(existing.logicalTs, existing.authorNodeId, incomingTs, authorNodeId)) {
             this.entries.delete(update.entityId);
-            this.tombstones.set(update.entityId, { logicalTs: incomingTs, authorNodeId });
+            this.tombstones.set(update.entityId, {
+              logicalTs: incomingTs,
+              authorNodeId,
+              deletedAt: nowMs,
+            });
           } else if (!existing) {
             // No live entry; update tombstone if incoming is newer
             if (!existingTomb || !this.winsOver(existingTomb.logicalTs, existingTomb.authorNodeId, incomingTs, authorNodeId)) {
-              this.tombstones.set(update.entityId, { logicalTs: incomingTs, authorNodeId });
+              this.tombstones.set(update.entityId, {
+                logicalTs: incomingTs,
+                authorNodeId,
+                deletedAt: nowMs,
+              });
             }
           }
           break;
