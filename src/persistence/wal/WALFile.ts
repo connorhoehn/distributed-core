@@ -5,7 +5,7 @@ import { WALEntry, WALFile } from './types';
 export class WALFileImpl implements WALFile {
   private filePath: string;
   private fileHandle: fs.FileHandle | null = null;
-  private isOpen: boolean = false;
+  private isOpen = false;
 
   constructor(filePath: string) {
     this.filePath = filePath;

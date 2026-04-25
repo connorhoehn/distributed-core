@@ -188,7 +188,7 @@ export class MembershipTable extends EventEmitter {
   /**
    * Mark node as suspect
    */
-  markSuspect(nodeId: string, timeout: number = 5000): boolean {
+  markSuspect(nodeId: string, timeout = 5000): boolean {
     const member = this.members.get(nodeId);
     if (!member || member.status !== 'ALIVE') {
       return false;
@@ -225,7 +225,7 @@ export class MembershipTable extends EventEmitter {
   /**
    * Remove dead nodes older than threshold
    */
-  pruneDeadNodes(maxAge: number = 30000): number {
+  pruneDeadNodes(maxAge = 30000): number {
     const now = Date.now();
     let pruned = 0;
 

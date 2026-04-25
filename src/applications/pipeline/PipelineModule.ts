@@ -69,6 +69,13 @@ export interface PipelineModuleConfig extends ApplicationModuleConfig {
   llmClient: LLMClient;
   /** Number of runs kept in the active map before eviction. Default: 1000. */
   maxActiveRuns?: number;
+  /**
+   * H2 fix: maximum number of completed-run snapshots to keep in memory.
+   * Once exceeded, the oldest entry (FIFO, Map insertion order) is evicted.
+   * `getRun()` returns null cleanly for evicted runs.
+   * Default: 1000.
+   */
+  maxCompletedRuns?: number;
   /** Checkpoint every N events emitted per run. Default: 10. */
   checkpointEveryN?: number;
   /** PubSub topic for the pipeline EventBus. Default: 'pipeline.events'. */
@@ -115,6 +122,9 @@ export class PipelineModule extends ApplicationModule {
 
   private readonly pipelineConfig: PipelineModuleConfig;
 
+  /** H2 fix: cap on completedRuns entries; oldest entry evicted when exceeded. */
+  private readonly maxCompletedRuns: number;
+
   private metrics: PipelineMetricsState = {
     runsStarted: 0,
     runsCompleted: 0,
@@ -134,6 +144,7 @@ export class PipelineModule extends ApplicationModule {
     });
     this.pipelineConfig = config;
     this.llmClient = config.llmClient;
+    this.maxCompletedRuns = config.maxCompletedRuns ?? 1000;
   }
 
   // -------------------------------------------------------------------------
@@ -290,6 +301,18 @@ export class PipelineModule extends ApplicationModule {
       health: ResourceHealth.HEALTHY,
     };
 
+    // H1 fix: capture the llm:response subscription handle so it can be
+    // unsubscribed alongside the three lifecycle subs when the run terminates.
+    // Previously this subscription leaked one permanent handler per LLM-containing
+    // run, accumulating forever on the shared EventBus.
+
+    // Track LLM token usage. Handle is captured so it can be cleaned up below.
+    const llmResponseSub = this.eventBus.subscribe('pipeline:llm:response', async (event) => {
+      if (event.payload.runId !== runId) return;
+      this.metrics.llmTokensIn += event.payload.tokensIn;
+      this.metrics.llmTokensOut += event.payload.tokensOut;
+    });
+
     // Subscribe to terminal events to update our metrics and move to completed.
     const completedSub = this.eventBus.subscribe('pipeline:run:completed', async (event) => {
       if (event.payload.runId !== runId) return;
@@ -300,6 +323,7 @@ export class PipelineModule extends ApplicationModule {
       this.eventBus.unsubscribe(completedSub);
       this.eventBus.unsubscribe(failedSub);
       this.eventBus.unsubscribe(cancelledSub);
+      this.eventBus.unsubscribe(llmResponseSub);
     });
 
     const failedSub = this.eventBus.subscribe('pipeline:run:failed', async (event) => {
@@ -309,6 +333,7 @@ export class PipelineModule extends ApplicationModule {
       this.eventBus.unsubscribe(completedSub);
       this.eventBus.unsubscribe(failedSub);
       this.eventBus.unsubscribe(cancelledSub);
+      this.eventBus.unsubscribe(llmResponseSub);
     });
 
     const cancelledSub = this.eventBus.subscribe('pipeline:run:cancelled', async (event) => {
@@ -318,13 +343,7 @@ export class PipelineModule extends ApplicationModule {
       this.eventBus.unsubscribe(completedSub);
       this.eventBus.unsubscribe(failedSub);
       this.eventBus.unsubscribe(cancelledSub);
-    });
-
-    // Track LLM token usage.
-    this.eventBus.subscribe('pipeline:llm:response', async (event) => {
-      if (event.payload.runId !== runId) return;
-      this.metrics.llmTokensIn += event.payload.tokensIn;
-      this.metrics.llmTokensOut += event.payload.tokensOut;
+      this.eventBus.unsubscribe(llmResponseSub);
     });
 
     // Fire-and-forget: run() returns a Promise that resolves when the run
@@ -611,6 +630,14 @@ export class PipelineModule extends ApplicationModule {
       const run = executor.getCurrentRun();
       this.completedRuns.set(runId, run);
       this.activeExecutors.delete(runId);
+
+      // H2 fix: FIFO eviction to prevent unbounded memory growth. Map iterates
+      // in insertion order, so keys().next().value is always the oldest entry.
+      while (this.completedRuns.size > this.maxCompletedRuns) {
+        const oldest = this.completedRuns.keys().next().value;
+        if (oldest === undefined) break;
+        this.completedRuns.delete(oldest);
+      }
     }
   }
 }

@@ -42,10 +42,10 @@ export class CrdtEntityRegistry extends EventEmitter implements EntityRegistry {
   private readonly updateLog: EntityUpdate[] = [];
 
   private readonly nodeId: string;
-  private isRunning: boolean = false;
+  private isRunning = false;
 
   /** Logical clock — monotonically increasing per-node counter. */
-  private logicalClock: number = 0;
+  private logicalClock = 0;
 
   constructor(nodeId: string) {
     super();

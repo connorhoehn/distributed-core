@@ -79,7 +79,50 @@ Don't drop the websocket. Cancellation must hit the module API.
 
 Flow: frontend → bridge → `pipelineModule.deleteResource(runId)` → executor's `AbortSignal` fires → in-flight LLM calls abort → final `pipeline.run.cancelled` event on the bus.
 
-## 5. LLMClient injection
+## 5. Prompt template interpolation
+
+`LLMNodeData.userPromptTemplate` and `LLMNodeData.systemPrompt` support `{{context.X}}` placeholder substitution. Substitution is performed by `PipelineExecutor` before passing prompts to `LLMClient.stream()`.
+
+### Syntax
+
+```
+{{context.<path>}}
+```
+
+- `<path>` is a dot-separated chain: `context.body`, `context.pr.title`, `context.steps.myStep`
+- Whitespace inside the braces is ignored: `{{ context.body }}` is equivalent to `{{context.body}}`
+
+### Resolution rules
+
+1. Paths are resolved against the live run context at the time the LLM step executes. The context includes both the trigger payload and any outputs accumulated by preceding steps (see §17.8).
+2. **Unresolved paths** — where any segment is missing, null, or not an object — resolve to an empty string. No error is thrown and no run failure is raised. Sending an empty placeholder to the LLM is less harmful than aborting a run mid-flight.
+3. Non-string values are coerced via `String()` — numbers, booleans, and other primitives stringify normally.
+
+### Examples
+
+```
+userPromptTemplate: "Please review: {{context.body}}"
+// context = { body: "hello world" }  →  "Please review: hello world"
+
+userPromptTemplate: "PR '{{context.pr.title}}' opened by {{context.pr.author}}"
+// context = { pr: { title: "Add feature", author: "alice" } }
+// →  "PR 'Add feature' opened by alice"
+
+systemPrompt: "You are reviewing code for {{context.repo}}."
+// context = { repo: "distributed-core" }
+// →  "You are reviewing code for distributed-core."
+
+userPromptTemplate: "Value: {{context.missing}}"
+// context = {}  →  "Value: "  (empty, no error)
+```
+
+### Gateway bridge note
+
+The interpolation happens server-side inside `PipelineExecutor.execLLM()` before any event is emitted. The `pipeline:llm:prompt` event carries the **already-interpolated** prompt — the frontend never sees raw `{{...}}` markup. If you log or display prompts from the event stream, you are always showing the resolved text.
+
+---
+
+## 6. LLMClient injection
 
 `LLMClient` is a pluggable interface. For development or deterministic tests, register:
 
@@ -87,7 +130,7 @@ Flow: frontend → bridge → `pipelineModule.deleteResource(runId)` → executo
 - `RecordReplayLLMClient` — captures real calls, replays them on subsequent runs
 - Anthropic / Bedrock implementations — real API calls, picked via `PIPELINE_LLM_PROVIDER` env var
 
-## 6. Metrics
+## 7. Metrics
 
 `pipelineModule.getMetrics()` returns aggregate counters:
 ```ts
@@ -99,7 +142,7 @@ Flow: frontend → bridge → `pipelineModule.deleteResource(runId)` → executo
 
 Poll at 1Hz for dashboards. Don't subscribe to individual token events for dashboard purposes — the cost scales with token rate.
 
-## 7. Type drift warning
+## 8. Type drift warning
 
 `src/applications/pipeline/types.ts` is a **standalone mirror** of `websocket-gateway/frontend/src/types/pipeline.ts` — no cross-import.
 
@@ -111,7 +154,7 @@ Type evolution options, in order of effort:
 
 (1) is fine for now. Revisit if the types evolve fast.
 
-## 8. Back-pressure
+## 9. Back-pressure
 
 If the frontend can't keep up with a high-token-rate pipeline, wrap event forwarding in `BackpressureController` (`src/gateway/backpressure/`).
 
@@ -122,7 +165,7 @@ Strategy choices:
 
 Pick based on UX. For token streams, `drop-oldest` with a small queue (~100) is usually right — the user sees smooth trailing output even under load.
 
-## 9. Contract test as shared source of truth
+## 10. Contract test as shared source of truth
 
 `src/applications/pipeline/__tests__/pipelineExecutor.contract.test.ts` is a port of the websocket-gateway `pipelineExecutor.contract.test.ts`. Both implementations (`MockExecutor` in frontend, `PipelineExecutor` in distributed-core) must pass.
 
@@ -130,7 +173,7 @@ Pick based on UX. For token streams, `drop-oldest` with a small queue (~100) is 
 
 This keeps the in-browser preview and the server-side executor behaviorally identical — which is the whole point of having both.
 
-## 10. Dependencies
+## 11. Dependencies
 
 distributed-core adds:
 - `@anthropic-ai/sdk`

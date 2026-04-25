@@ -31,9 +31,9 @@ export class DurableQueueManager extends EventEmitter {
   private pollTimers: Map<string, NodeJS.Timeout> = new Map();
   private visibilityTimers: Map<string, NodeJS.Timeout> = new Map();
   private stats: Map<string, QueueStats> = new Map();
-  private consumerIdCounter: number = 0;
+  private consumerIdCounter = 0;
   private roundRobinIndex: Map<string, number> = new Map();
-  private initialized: boolean = false;
+  private initialized = false;
 
   constructor(localNodeId: string, config?: DurableQueueConfig) {
     super();

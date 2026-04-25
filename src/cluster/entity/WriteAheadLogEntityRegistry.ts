@@ -26,10 +26,10 @@ export class WriteAheadLogEntityRegistry extends EventEmitter implements EntityR
   private checkpointWriter: CheckpointWriterImpl;
   private checkpointReader: CheckpointReaderImpl;
   private nodeId: string;
-  private isRunning: boolean = false;
-  private globalVersion: number = 0;
+  private isRunning = false;
+  private globalVersion = 0;
   private checkpointTimer: NodeJS.Timeout | null = null;
-  private lastCheckpointLSN: number = 0;
+  private lastCheckpointLSN = 0;
   private config: WALConfig & CheckpointConfig;
 
   constructor(nodeId: string, config: WALConfig & CheckpointConfig = {}) {

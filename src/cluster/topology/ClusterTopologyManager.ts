@@ -210,6 +210,11 @@ export class ClusterTopologyManager extends EventEmitter {
   private stateAggregator: StateAggregator;
   private metricsTracker: MetricsTracker;
 
+  // Bound handler references stored once so start() and stop() use the same function identity.
+  private readonly _boundHandleNodeJoined: (node: NodeInfo) => void;
+  private readonly _boundHandleNodeLeft: (nodeId: string) => void;
+  private readonly _boundHandleNodeUpdated: (node: NodeInfo) => void;
+
   /**
    * Emit both legacy and canonical event names during the deprecation window.
    * Callers should migrate to the new name; old name support will be removed in
@@ -253,7 +258,12 @@ export class ClusterTopologyManager extends EventEmitter {
     this.cluster = cluster;
     this.stateAggregator = stateAggregator;
     this.metricsTracker = metricsTracker;
-    
+
+    // Build bound handlers once so start() and stop() share the same references.
+    this._boundHandleNodeJoined = this.handleNodeJoined.bind(this);
+    this._boundHandleNodeLeft = this.handleNodeLeft.bind(this);
+    this._boundHandleNodeUpdated = this.handleNodeUpdated.bind(this);
+
     if (config) {
       this.updateIntervalMs = config.updateIntervalMs || this.updateIntervalMs;
       this.scalingCriteria = { ...this.scalingCriteria, ...config.scalingCriteria };
@@ -276,10 +286,10 @@ export class ClusterTopologyManager extends EventEmitter {
     // Unref the interval so it doesn't keep the process alive
     this.topologyUpdateInterval.unref();
     
-    // Listen for cluster events with bound handlers
-    this.cluster.on('member-joined', this.handleNodeJoined.bind(this));
-    this.cluster.on('member-left', this.handleNodeLeft.bind(this));
-    this.cluster.on('member-updated', this.handleNodeUpdated.bind(this));
+    // Listen for cluster events using the canonical colon-form event names.
+    this.cluster.on('member:joined', this._boundHandleNodeJoined);
+    this.cluster.on('member:left', this._boundHandleNodeLeft);
+    this.cluster.on('member:updated', this._boundHandleNodeUpdated);
     
     this.emitRenamed('started', 'lifecycle:started');
   }
@@ -293,10 +303,10 @@ export class ClusterTopologyManager extends EventEmitter {
       this.topologyUpdateInterval = undefined;
     }
 
-    // Remove event listeners to prevent memory leaks
-    this.cluster.removeListener('member-joined', this.handleNodeJoined.bind(this));
-    this.cluster.removeListener('member-left', this.handleNodeLeft.bind(this));
-    this.cluster.removeListener('member-updated', this.handleNodeUpdated.bind(this));
+    // Remove event listeners using the same bound references registered in start().
+    this.cluster.removeListener('member:joined', this._boundHandleNodeJoined);
+    this.cluster.removeListener('member:left', this._boundHandleNodeLeft);
+    this.cluster.removeListener('member:updated', this._boundHandleNodeUpdated);
 
     this.emitRenamed('stopped', 'lifecycle:stopped');
   }
@@ -939,7 +949,7 @@ export class ClusterTopologyManager extends EventEmitter {
     const reasoning: string[] = [];
     const requirements = roomMetadata.highAvailability.requirements;
     
-    let candidateNodes = availableNodes.filter(node => {
+    const candidateNodes = availableNodes.filter(node => {
       // Filter by region if specified
       if (roomMetadata.geographic.allowedRegions) {
         return roomMetadata.geographic.allowedRegions.includes(node.region);

@@ -2,9 +2,9 @@ import crypto from 'crypto';
 import { WALEntry, EntityUpdate, WALCoordinator } from './types';
 
 export class WALCoordinatorImpl implements WALCoordinator {
-  private currentLSN: number = 0;
+  private currentLSN = 0;
 
-  constructor(initialLSN: number = 0) {
+  constructor(initialLSN = 0) {
     this.currentLSN = initialLSN;
   }
 

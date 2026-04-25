@@ -105,7 +105,7 @@ export class StateReconciler extends EventEmitter {
   async resolveConflict(
     conflict: StateConflict, 
     strategy?: ResolutionStrategy,
-    dryRun: boolean = false
+    dryRun = false
   ): Promise<ResolutionResult> {
     const effectiveStrategy = strategy || this.getStrategyForConflict(conflict);
     
@@ -149,7 +149,7 @@ export class StateReconciler extends EventEmitter {
    */
   async resolveConflicts(
     conflicts: StateConflict[], 
-    dryRun: boolean = false
+    dryRun = false
   ): Promise<ResolutionResult[]> {
     const results: ResolutionResult[] = [];
     

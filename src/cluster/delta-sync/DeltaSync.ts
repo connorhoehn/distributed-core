@@ -571,7 +571,7 @@ export class DeltaSyncEngine extends EventEmitter {
   /**
    * Clean up completed sessions
    */
-  cleanup(maxAge: number = 300000): void { // 5 minutes default
+  cleanup(maxAge = 300000): void { // 5 minutes default
     const now = Date.now();
     
     for (const [sessionId, session] of this.activeSessions) {

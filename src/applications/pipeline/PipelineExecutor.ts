@@ -601,7 +601,7 @@ export class PipelineExecutor {
       case 'trigger':
         return this.execTrigger(node.data);
       case 'llm':
-        return this.execLLM(node.id, node.data);
+        return this.execLLM(node.id, node.data, context);
       case 'transform':
         return this.execTransform(node.data);
       case 'condition':
@@ -627,7 +627,11 @@ export class PipelineExecutor {
     return { status: 'completed', output: this.triggerPayload, sourceHandle: 'out' };
   }
 
-  private async execLLM(stepId: string, data: LLMNodeData): Promise<StepOutcome> {
+  private async execLLM(
+    stepId: string,
+    data: LLMNodeData,
+    context: Record<string, unknown>,
+  ): Promise<StepOutcome> {
     // Fail-fast roll — matches the mock's behaviour (§8.3): don't start
     // streaming into a response that we'll never land.
     if (Math.random() < this.failureRateLLM) {
@@ -639,7 +643,13 @@ export class PipelineExecutor {
       };
     }
 
-    const prompt = data.userPromptTemplate;
+    // H3 fix: interpolate {{context.X}} and {{context.X.Y}} paths against the
+    // current run context before sending to the LLM provider. Unresolved paths
+    // collapse to empty string — see `interpolate()` below.
+    const prompt = interpolate(data.userPromptTemplate, context);
+    const systemPrompt = data.systemPrompt !== undefined
+      ? interpolate(data.systemPrompt, context)
+      : data.systemPrompt;
 
     await this.emit('pipeline:llm:prompt', {
       runId: this.runId,
@@ -659,7 +669,7 @@ export class PipelineExecutor {
     this.cancelHooks.add(cancelStream);
 
     try {
-      for await (const chunk of this.llmClient.stream(data.model, data.systemPrompt, prompt, {
+      for await (const chunk of this.llmClient.stream(data.model, systemPrompt, prompt, {
         temperature: data.temperature,
         maxTokens: data.maxTokens,
         signal,
@@ -1202,6 +1212,26 @@ function readPath(obj: Record<string, unknown>, path: string): unknown {
     cur = (cur as Record<string, unknown>)[key];
   }
   return cur;
+}
+
+/**
+ * H3 fix: resolve `{{context.X}}` and `{{context.X.Y}}` placeholders against
+ * the current run context. Unresolved paths (missing or null/undefined values)
+ * collapse to empty string — converting "missing context" to a run failure
+ * would be worse than sending an empty placeholder to the LLM.
+ */
+function interpolate(template: string, context: Record<string, unknown>): string {
+  return template.replace(/\{\{\s*context\.([\w.]+)\s*\}\}/g, (_match, path: string) => {
+    const segments = path.split('.');
+    let value: unknown = context;
+    for (const seg of segments) {
+      if (value === null || typeof value !== 'object' || !(seg in (value as object))) {
+        return '';
+      }
+      value = (value as Record<string, unknown>)[seg];
+    }
+    return value === undefined || value === null ? '' : String(value);
+  });
 }
 
 function deepMerge(

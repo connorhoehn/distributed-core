@@ -315,4 +315,61 @@ describe('DistributedLock', () => {
       expect(count).toBe(0);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Fix 5 — _onExpired silent error swallow (audit H3)
+  // -------------------------------------------------------------------------
+  describe('TTL expiry release error handling (audit fix H3)', () => {
+    it('emits lock:release-failed when releaseEntity rejects on TTL expiry', async () => {
+      const metricsRegistry = new MetricsRegistry('node-1');
+      const failingLock = new DistributedLock(registry, 'node-1', {
+        defaultTtlMs: 1_000,
+        acquireTimeoutMs: 500,
+        retryIntervalMs: 100,
+        metrics: metricsRegistry,
+      });
+
+      // Acquire a lock so it is in heldLocks.
+      const handle = await failingLock.tryAcquire('expiry-fail-lock', { ttlMs: 500 });
+      expect(handle).not.toBeNull();
+
+      // Make the registry reject the next releaseEntity call.
+      jest.spyOn(registry, 'releaseEntity').mockRejectedValueOnce(new Error('network error'));
+
+      const emitted: unknown[] = [];
+      failingLock.on('lock:release-failed', (payload) => { emitted.push(payload); });
+
+      // Advance timers to trigger TTL expiry.
+      jest.advanceTimersByTime(600);
+      // Flush microtask queue so the promise rejection handler runs.
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(emitted).toHaveLength(1);
+      const payload = emitted[0] as { lockId: string; reason: string; error: Error };
+      expect(payload.lockId).toBe('expiry-fail-lock');
+      expect(payload.reason).toBe('ttl-expiry-cleanup');
+      expect(payload.error).toBeInstanceOf(Error);
+    });
+
+    it('increments lock.release_failed.count metric on TTL expiry release failure', async () => {
+      const metricsRegistry = new MetricsRegistry('node-1');
+      const failingLock = new DistributedLock(registry, 'node-1', {
+        defaultTtlMs: 1_000,
+        acquireTimeoutMs: 500,
+        retryIntervalMs: 100,
+        metrics: metricsRegistry,
+      });
+
+      await failingLock.tryAcquire('metric-fail-lock', { ttlMs: 500 });
+
+      jest.spyOn(registry, 'releaseEntity').mockRejectedValueOnce(new Error('disk error'));
+
+      jest.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(metricsRegistry.counter('lock.release_failed.count').get()).toBe(1);
+    });
+  });
 });

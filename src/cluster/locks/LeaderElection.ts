@@ -17,7 +17,7 @@ export class LeaderElection extends EventEmitter implements LifecycleAware {
   private readonly config: Required<LeaderElectionConfig>;
   private currentHandle: LockHandle | null = null;
   private renewTimer: NodeJS.Timeout | null = null;
-  private isRunning: boolean = false;
+  private isRunning = false;
 
   constructor(groupId: string, nodeId: string, lock: DistributedLock, config?: LeaderElectionConfig) {
     super();

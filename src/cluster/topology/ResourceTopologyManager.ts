@@ -224,9 +224,9 @@ export class ResourceTopologyManager extends EventEmitter {
     const resourcesByNode = new Map<string, ResourceMetadata[]>();
     
     let totalResources = 0;
-    let healthyResources = 0;
-    let degradedResources = 0;
-    let unhealthyResources = 0;
+    const healthyResources = 0;
+    const degradedResources = 0;
+    const unhealthyResources = 0;
     
     if (resourceType) {
       // Get specific resource type

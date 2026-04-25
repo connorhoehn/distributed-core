@@ -156,7 +156,7 @@ sending un-substituted markup to the model.
   a defect. It is noted here because the deprecation bridge doubles the publish cost
   for every token. Once the dot-form aliases are removed (see `EVENT-NAME-AUDIT.md`),
   the cost halves. A medium-term mitigation is to batch-buffer token events and
-  flush asynchronously, as recommended in `PIPELINE-INTEGRATION.md §8`.
+  flush asynchronously, as recommended in `PIPELINE-INTEGRATION.md §9`.
 
 ---
 

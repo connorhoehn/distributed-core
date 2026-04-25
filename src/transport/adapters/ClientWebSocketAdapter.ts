@@ -359,7 +359,7 @@ export class ClientWebSocketAdapter extends EventEmitter {
   /**
    * Disconnect a specific client
    */
-  disconnectClient(clientId: string, code: number = 1000, reason: string = 'Disconnected by server'): boolean {
+  disconnectClient(clientId: string, code = 1000, reason = 'Disconnected by server'): boolean {
     const connection = this.connections.get(clientId);
     if (!connection) {
       return false;

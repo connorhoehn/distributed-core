@@ -311,7 +311,7 @@ export class MetricsTracker extends EventEmitter {
    * Collect network metrics
    */
   private async collectNetworkMetrics(): Promise<NetworkMetrics> {
-    let roundTripTimes = new Map<string, number>();
+    const roundTripTimes = new Map<string, number>();
     let activeConnections = 0;
     let failedConnections = 0;
     let averageLatency = 0;
@@ -357,7 +357,7 @@ export class MetricsTracker extends EventEmitter {
    * Collect connection pool metrics
    */
   private async collectConnectionMetrics(): Promise<ConnectionMetrics> {
-    let totalStats = {
+    const totalStats = {
       totalAcquired: 0,
       totalReleased: 0,
       totalCreated: 0,
@@ -600,7 +600,7 @@ export class MetricsTracker extends EventEmitter {
   /**
    * Get recent alerts
    */
-  getRecentAlerts(limit: number = 50): Alert[] {
+  getRecentAlerts(limit = 50): Alert[] {
     return this.alerts.slice(-limit);
   }
 
@@ -691,7 +691,7 @@ export class MetricsTracker extends EventEmitter {
    * @param value - Value to increment by (default: 1)
    * @param tags - Optional tags for the counter
    */
-  incrementCounter(counterName: string, value: number = 1, tags?: Record<string, string>): void {
+  incrementCounter(counterName: string, value = 1, tags?: Record<string, string>): void {
     const timestamp = Date.now();
     
     // Create a counter event

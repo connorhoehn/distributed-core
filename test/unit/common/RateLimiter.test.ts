@@ -177,4 +177,112 @@ describe('RateLimiter', () => {
       expect(result.retryAfter!).toBeLessThanOrEqual(expectedRetryAfter + 1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Fix 3 — Unbounded bucket growth (audit H3)
+  // -------------------------------------------------------------------------
+  describe('bucket eviction (audit fix H3)', () => {
+    it('getBucketCount() returns the current number of tracked buckets', () => {
+      const limiter = new RateLimiter({ maxRequests: 5, windowMs: 1000 });
+      expect(limiter.getBucketCount()).toBe(0);
+
+      limiter.check('key-a');
+      expect(limiter.getBucketCount()).toBe(1);
+
+      limiter.check('key-b');
+      expect(limiter.getBucketCount()).toBe(2);
+
+      limiter.reset('key-a');
+      expect(limiter.getBucketCount()).toBe(1);
+    });
+
+    it('idle buckets are evicted once maxBuckets is exceeded and idleEvictMs has elapsed', () => {
+      const maxBuckets = 5;
+      const idleEvictMs = 60_000;
+      const windowMs = 1000;
+      const maxRequests = 10;
+      const limiter = new RateLimiter({
+        maxRequests,
+        windowMs,
+        maxBuckets,
+        idleEvictMs,
+      });
+
+      // Create buckets — each check consumes exactly 1 token (burstLimit - 1 remaining).
+      for (let i = 0; i < maxBuckets + 2; i++) {
+        limiter.check(`key-${i}`);
+      }
+      expect(limiter.getBucketCount()).toBe(maxBuckets + 2);
+
+      // Advance time by enough for:
+      //  1. Tokens to fully refill  (1 token / refillRate = windowMs / maxRequests ms)
+      //  2. idleEvictMs to elapse
+      // Both conditions are required for a bucket to be eviction-eligible.
+      const refillTimeMs = Math.ceil(windowMs / maxRequests) + 1;
+      jest.advanceTimersByTime(idleEvictMs + refillTimeMs);
+
+      // Force Math.random to return a value that triggers eviction (< 0.01).
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.005);
+      try {
+        limiter.check('trigger-key');
+      } finally {
+        randomSpy.mockRestore();
+      }
+
+      // Idle-and-full buckets should have been evicted; only trigger-key should remain.
+      expect(limiter.getBucketCount()).toBeLessThan(maxBuckets + 3);
+    });
+
+    it('partially-consumed buckets are NOT evicted even after idleEvictMs elapses', () => {
+      // Use a high burstLimit vs refill rate so partial consumption keeps tokens < burstLimit
+      // even after a long idle window.
+      const limiter = new RateLimiter({
+        maxRequests: 1,    // refillRate = 0.001 tokens/ms (very slow)
+        windowMs: 1000,
+        burstLimit: 100,   // large burst; one check consumes 1 token leaving 99/100
+        maxBuckets: 2,
+        idleEvictMs: 1_000,
+      });
+
+      // Drain one token — bucket now has 99/100 tokens.
+      limiter.check('partial-key');
+
+      // Advance past idleEvictMs but NOT enough to refill to 100 tokens.
+      // At refillRate=0.001, to refill 1 token takes 1000ms. We advance 1001ms
+      // (just past idleEvictMs) so only ~1 token refills → still 100/100 at boundary.
+      // Use 999ms to stay just under the refill threshold:
+      // 99 + 999 * 0.001 = 99.999 < 100 → still not full.
+      jest.advanceTimersByTime(1_500); // past idleEvictMs but theoreticalTokens = 99 + 1.5 = 100.5 → capped at 100
+
+      // The test above actually reaches burstLimit. Let us instead drain more tokens.
+      // Reset and use a scenario where tokens can never reach full within idleEvictMs:
+      // Drain all tokens (100), then advance by idleEvictMs. With refillRate=0.001,
+      // 1000ms only refills 1 token (0 + 1000 * 0.001 = 1 < 100). Not full → not evicted.
+      const limiter2 = new RateLimiter({
+        maxRequests: 1,
+        windowMs: 1000,
+        burstLimit: 100,
+        maxBuckets: 2,
+        idleEvictMs: 1_000,
+      });
+
+      for (let i = 0; i < 100; i++) {
+        limiter2.check('not-full-key');
+      }
+
+      jest.advanceTimersByTime(1_001); // past idleEvictMs; tokens = 0 + 1001*0.001 = 1.001 < 100 → NOT full
+
+      const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0.005);
+      try {
+        limiter2.check('extra-key-1');
+        limiter2.check('extra-key-2');
+        limiter2.check('eviction-trigger');
+      } finally {
+        randomSpy.mockRestore();
+      }
+
+      // not-full-key tokens < burstLimit → NOT evicted.
+      expect(limiter2.getStats('not-full-key')).not.toBeNull();
+    });
+  });
 });

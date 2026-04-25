@@ -579,6 +579,162 @@ describe('PipelineModule Phase-4 API', () => {
   });
 
   // -------------------------------------------------------------------------
+  // H2: completedRuns FIFO eviction
+  // -------------------------------------------------------------------------
+
+  describe('completedRuns FIFO eviction (H2)', () => {
+    it('evicts oldest entries when exceeding maxCompletedRuns', async () => {
+      const clusterNodeId = `node-${randomUUID()}`;
+      const pubsub = makeLocalPubSub();
+
+      const resourceRegistry = {
+        registerResourceType: () => { /* no-op */ },
+        getResourcesByType: () => [],
+      };
+      const topologyManager = {};
+      const moduleRegistry = {
+        registerModule: async () => { /* no-op */ },
+        unregisterModule: async () => { /* no-op */ },
+        getModule: () => undefined,
+        getAllModules: () => [],
+        getModulesByResourceType: () => [],
+      };
+      const clusterManagerEvents = new EventEmitter();
+      const clusterManager = {
+        localNodeId: clusterNodeId,
+        on: clusterManagerEvents.on.bind(clusterManagerEvents),
+        off: clusterManagerEvents.off.bind(clusterManagerEvents),
+        emit: clusterManagerEvents.emit.bind(clusterManagerEvents),
+        _emitter: clusterManagerEvents,
+      };
+      const logger = {
+        info: () => { /* no-op */ },
+        warn: () => { /* no-op */ },
+        error: () => { /* no-op */ },
+        debug: () => { /* no-op */ },
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const context: ApplicationModuleContext = {
+        clusterManager: clusterManager as any,
+        resourceRegistry: resourceRegistry as any,
+        topologyManager: topologyManager as any,
+        moduleRegistry: moduleRegistry as any,
+        configuration: { pubsub },
+        logger,
+      };
+
+      // maxCompletedRuns: 3 — drive 5 runs, assert oldest 2 are evicted.
+      const module = new PipelineModule({
+        moduleId: 'pipeline-eviction',
+        moduleName: 'Pipeline',
+        version: '1.0.0',
+        resourceTypes: ['pipeline-run'],
+        configuration: {},
+        llmClient: makeFakeLLMClient(),
+        maxCompletedRuns: 3,
+      });
+      await module.initialize(context);
+      await module.start();
+
+      try {
+        const runIds: string[] = [];
+        for (let i = 0; i < 5; i++) {
+          const resource = await module.createResource({
+            applicationData: {
+              definition: makeSimplePipeline(`pipe-evict-${i}`),
+              speedMultiplier: 0.02,
+            },
+          });
+          runIds.push(resource.resourceId);
+          // Wait for each run to reach terminal state before starting the next,
+          // so insertion order in completedRuns is deterministic.
+          await sleep(300);
+        }
+
+        // The first two runs (runIds[0], runIds[1]) should have been evicted.
+        expect(module.getRun(runIds[0]!)).toBeNull();
+        expect(module.getRun(runIds[1]!)).toBeNull();
+
+        // The last three runs should still be present.
+        expect(module.getRun(runIds[2]!)).not.toBeNull();
+        expect(module.getRun(runIds[3]!)).not.toBeNull();
+        expect(module.getRun(runIds[4]!)).not.toBeNull();
+      } finally {
+        await module.stop();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // H1: no orphan EventBus subscription after run terminal
+  // -------------------------------------------------------------------------
+
+  describe('EventBus subscription cleanup (H1)', () => {
+    it('no llm:response subscription remains after run reaches terminal state', async () => {
+      const { module, stop } = await makePipelineModule();
+      try {
+        const bus = module.getEventBus();
+
+        // Snapshot the subscription count on 'pipeline:llm:response' before any run.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const busAny = bus as any;
+        const countBefore: number = busAny._typeHandlers.get('pipeline:llm:response')?.size ?? 0;
+
+        // Start a run that contains an LLM node so the llm:response subscription
+        // is created inside createResource().
+        const llmPipeline = (() => {
+          const now = new Date().toISOString();
+          return {
+            id: 'pipe-llm-sub-leak',
+            name: 'LLM sub leak test',
+            version: 1,
+            status: 'published' as const,
+            publishedVersion: 1,
+            nodes: [
+              { id: 'trigger-1', type: 'trigger' as const, position: { x: 0, y: 0 }, data: { type: 'trigger' as const, triggerType: 'manual' as const } },
+              {
+                id: 'llm-1', type: 'llm' as const, position: { x: 200, y: 0 },
+                data: {
+                  type: 'llm' as const,
+                  provider: 'test-provider',
+                  model: 'test-model',
+                  systemPrompt: 'Be helpful.',
+                  userPromptTemplate: 'Say hello.',
+                  streaming: true,
+                },
+              },
+            ],
+            edges: [
+              { id: 'e1', source: 'trigger-1', sourceHandle: 'out', target: 'llm-1', targetHandle: 'in' },
+            ],
+            createdAt: now,
+            updatedAt: now,
+            createdBy: 'test',
+          };
+        })();
+
+        await module.createResource({
+          applicationData: {
+            definition: llmPipeline,
+            speedMultiplier: 0.02,
+          },
+        });
+
+        // Wait for the run to reach terminal state — at that point the terminal
+        // handler should have unsubscribed llmResponseSub.
+        await sleep(500);
+
+        const countAfter: number = busAny._typeHandlers.get('pipeline:llm:response')?.size ?? 0;
+
+        // The count must have returned to the pre-run baseline (i.e., no leak).
+        expect(countAfter).toBe(countBefore);
+      } finally {
+        await stop();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // pipeline.run.reassigned emitted alongside pipeline.run.orphaned
   // -------------------------------------------------------------------------
 

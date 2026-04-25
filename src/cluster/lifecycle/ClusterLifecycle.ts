@@ -16,8 +16,8 @@ import { NodeInfo } from '../types';
 export class ClusterLifecycle extends EventEmitter implements IClusterLifecycle, IRequiresContext {
   private config: LifecycleConfig;
   private context?: IClusterManagerContext;
-  private isStarted: boolean = false;
-  private isDraining: boolean = false;
+  private isStarted = false;
+  private isDraining = false;
 
   constructor(config?: Partial<LifecycleConfig>) {
     super();

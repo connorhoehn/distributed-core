@@ -5,7 +5,7 @@ import { ResourceRouter } from '../../routing/ResourceRouter';
 import { RouteTarget } from '../../routing/types';
 import { LifecycleAware } from '../../common/LifecycleAware';
 
-export interface ClusterLeaderElectionConfig extends LeaderElectionConfig {}
+export type ClusterLeaderElectionConfig = LeaderElectionConfig
 
 export class ClusterLeaderElection extends EventEmitter implements LifecycleAware {
   private readonly groupId: string;

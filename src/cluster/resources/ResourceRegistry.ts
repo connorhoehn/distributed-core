@@ -16,10 +16,7 @@ import {
  * This allows us to leverage the existing EntityRegistry infrastructure
  * for resource management while maintaining the resource-specific API
  */
-interface ResourceEntityRecord extends EntityRecord {
-  // EntityRecord has: entityId, ownerNodeId, version, createdAt, lastUpdated, metadata
-  // We map ResourceMetadata into the metadata field
-}
+type ResourceEntityRecord = EntityRecord
 
 /**
  * Configuration for the ResourceRegistry

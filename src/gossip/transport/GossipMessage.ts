@@ -55,8 +55,8 @@ export class GossipMessage extends EventEmitter {
   public readonly header: MessageHeader;
   public readonly payload: MessagePayload;
   public readonly metrics: MessageMetrics;
-  private _isDelivered: boolean = false;
-  private _isExpired: boolean = false;
+  private _isDelivered = false;
+  private _isExpired = false;
 
   constructor(
     type: MessageType,

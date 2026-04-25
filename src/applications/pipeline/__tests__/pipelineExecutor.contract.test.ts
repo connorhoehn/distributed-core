@@ -917,6 +917,144 @@ describe('PipelineExecutor contract', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Template interpolation (H3 fix)
+  // ---------------------------------------------------------------------------
+
+  describe('Template interpolation (H3)', () => {
+    /**
+     * Builds an LLMClient that records every call to stream() and returns a
+     * single-chunk response, allowing tests to inspect the exact prompt and
+     * system prompt forwarded to the provider.
+     */
+    function makeCapturingLLMClient(): {
+      client: LLMClient;
+      calls: Array<{ model: string; system: string | undefined; user: string }>;
+    } {
+      const calls: Array<{ model: string; system: string | undefined; user: string }> = [];
+      const client: LLMClient = {
+        stream(model, system, user) {
+          calls.push({ model, system, user });
+          return {
+            async *[Symbol.asyncIterator]() {
+              yield { done: true, response: 'ok', tokensIn: 1, tokensOut: 1 } as LLMChunk;
+            },
+          };
+        },
+      };
+      return { client, calls };
+    }
+
+    test('interpolates {{context.X}} in user prompt before calling LLMClient', async () => {
+      const { client, calls } = makeCapturingLLMClient();
+
+      const t = triggerNode();
+      const l: PipelineNode = {
+        ...llmNode(),
+        data: {
+          type: 'llm',
+          provider: 'test-provider',
+          model: 'test-model',
+          systemPrompt: 'Be helpful.',
+          userPromptTemplate: 'Review: {{context.body}}',
+          streaming: true,
+        } as LLMNodeData,
+      };
+      const def = buildPipeline({ nodes: [t, l], edges: [makeEdge(t.id, l.id)] });
+
+      await collectEvents(def, {
+        llmClient: client,
+        triggerPayload: { body: 'hello world' },
+        speedMultiplier: 0.02,
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.user).toBe('Review: hello world');
+    });
+
+    test('interpolates nested {{context.X.Y}} paths', async () => {
+      const { client, calls } = makeCapturingLLMClient();
+
+      const t = triggerNode();
+      const l: PipelineNode = {
+        ...llmNode(),
+        data: {
+          type: 'llm',
+          provider: 'test-provider',
+          model: 'test-model',
+          systemPrompt: 'Be helpful.',
+          userPromptTemplate: 'Title: {{context.pr.title}}',
+          streaming: true,
+        } as LLMNodeData,
+      };
+      const def = buildPipeline({ nodes: [t, l], edges: [makeEdge(t.id, l.id)] });
+
+      await collectEvents(def, {
+        llmClient: client,
+        triggerPayload: { pr: { title: 'Add feature X' } },
+        speedMultiplier: 0.02,
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.user).toBe('Title: Add feature X');
+    });
+
+    test('missing context path resolves to empty string', async () => {
+      const { client, calls } = makeCapturingLLMClient();
+
+      const t = triggerNode();
+      const l: PipelineNode = {
+        ...llmNode(),
+        data: {
+          type: 'llm',
+          provider: 'test-provider',
+          model: 'test-model',
+          systemPrompt: 'Be helpful.',
+          userPromptTemplate: 'Value: {{context.missing}}',
+          streaming: true,
+        } as LLMNodeData,
+      };
+      const def = buildPipeline({ nodes: [t, l], edges: [makeEdge(t.id, l.id)] });
+
+      // triggerPayload does NOT include 'missing' — should resolve to ''
+      await collectEvents(def, {
+        llmClient: client,
+        triggerPayload: { other: 'irrelevant' },
+        speedMultiplier: 0.02,
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.user).toBe('Value: ');
+    });
+
+    test('system prompt is also interpolated', async () => {
+      const { client, calls } = makeCapturingLLMClient();
+
+      const t = triggerNode();
+      const l: PipelineNode = {
+        ...llmNode(),
+        data: {
+          type: 'llm',
+          provider: 'test-provider',
+          model: 'test-model',
+          systemPrompt: 'You are reviewing for {{context.repo}}.',
+          userPromptTemplate: 'Summarise the diff.',
+          streaming: true,
+        } as LLMNodeData,
+      };
+      const def = buildPipeline({ nodes: [t, l], edges: [makeEdge(t.id, l.id)] });
+
+      await collectEvents(def, {
+        llmClient: client,
+        triggerPayload: { repo: 'distributed-core' },
+        speedMultiplier: 0.02,
+      });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.system).toBe('You are reviewing for distributed-core.');
+    });
+  });
+
   describe('Context accumulation (§17.8)', () => {
     test('each step output is written to context.steps[stepId]', async () => {
       const t = triggerNode();

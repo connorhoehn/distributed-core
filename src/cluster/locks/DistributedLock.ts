@@ -1,6 +1,8 @@
+import { EventEmitter } from 'events';
 import { EntityRegistry } from '../entity/types';
 import { MetricsRegistry } from '../../monitoring/metrics/MetricsRegistry';
 import { TimeoutError, NotOwnedError } from '../../common/errors';
+import { defaultLogger } from '../../common/logger';
 
 export interface LockHandle {
   lockId: string;
@@ -20,7 +22,7 @@ const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 5_000;
 const DEFAULT_RETRY_INTERVAL_MS = 100;
 
-export class DistributedLock {
+export class DistributedLock extends EventEmitter {
   private readonly registry: EntityRegistry;
   private readonly localNodeId: string;
   private readonly config: Required<Omit<DistributedLockConfig, 'metrics'>>;
@@ -29,6 +31,7 @@ export class DistributedLock {
   private readonly ttlTimers = new Map<string, NodeJS.Timeout>();
 
   constructor(registry: EntityRegistry, localNodeId: string, config?: DistributedLockConfig) {
+    super();
     this.registry = registry;
     this.localNodeId = localNodeId;
     this.metrics = config?.metrics ?? null;
@@ -165,7 +168,11 @@ export class DistributedLock {
     this.heldLocks.delete(lockId);
     this.metrics?.counter('lock.expired.count').inc();
     this.metrics?.gauge('lock.hold.gauge').set(this.heldLocks.size);
-    this.registry.releaseEntity(lockId).catch(() => {});
+    this.registry.releaseEntity(lockId).catch((err: unknown) => {
+      defaultLogger.warn(`[DistributedLock] release on TTL expiry failed for ${lockId}`, err);
+      this.emit('lock:release-failed', { lockId, reason: 'ttl-expiry-cleanup', error: err });
+      this.metrics?.counter('lock.release_failed.count').inc();
+    });
   }
 
   private _sleep(ms: number): Promise<void> {

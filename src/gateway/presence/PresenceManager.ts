@@ -17,7 +17,7 @@ export class PresenceManager extends EventEmitter {
   private ttlTimer: NodeJS.Timeout | null = null;
   private messageListener: (message: Message) => void;
   private config: Required<PresenceConfig>;
-  private lastSyncTimestamp: number = 0;
+  private lastSyncTimestamp = 0;
 
   constructor(
     private readonly localNodeId: string,

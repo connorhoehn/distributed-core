@@ -10,8 +10,8 @@ import { FrameworkLogger } from '../../common/logger';
 export class InMemoryEntityRegistry extends EventEmitter implements EntityRegistry {
   private entities: Map<string, EntityRecord> = new Map();
   private nodeId: string;
-  private isRunning: boolean = false;
-  private globalVersion: number = 0;
+  private isRunning = false;
+  private globalVersion = 0;
   private logger: FrameworkLogger;
 
   constructor(nodeId: string, logConfig?: { enableTestMode?: boolean }) {

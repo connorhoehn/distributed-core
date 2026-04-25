@@ -944,3 +944,103 @@ describe('autoCompactIntervalMs', () => {
     await bus.stop();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix 1 — WAL flush ordering: WAL is synced before pubsub.publish resolves
+// Fix 2 — Compaction concurrency: concurrent publish + compact both succeed
+// ---------------------------------------------------------------------------
+describe('WAL durability and compaction safety (audit fixes H1 + H2)', () => {
+  const walPaths: string[] = [];
+
+  function freshWal(): string {
+    const p = tempWalPath();
+    walPaths.push(p);
+    return p;
+  }
+
+  afterEach(async () => {
+    jest.useRealTimers();
+    for (const p of walPaths.splice(0)) {
+      try { fs.unlinkSync(p); } catch { /* ignore */ }
+    }
+  });
+
+  it('Fix 1: WAL contains event before pubsub.publish resolves', async () => {
+    const walPath = freshWal();
+    const publishOrder: string[] = [];
+
+    // Intercept pubsub.publish so we can check WAL state inside it
+    let checkInsidePublish: (() => Promise<void>) | null = null;
+    const pubsub = makePubSub();
+    const origPublish = (pubsub.publish as jest.Mock).getMockImplementation();
+    pubsub.publish = jest.fn(async (topic: string, payload: unknown) => {
+      if (checkInsidePublish) await checkInsidePublish();
+      if (origPublish) await origPublish(topic, payload);
+      publishOrder.push('pubsub-done');
+    });
+
+    const bus = new EventBus<TestEvents>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+      walSyncIntervalMs: 0,  // disable background sync so only explicit sync counts
+    });
+    await bus.start();
+
+    // When pubsub.publish fires, the WAL must already contain the event.
+    let walHadEventBeforePublish = false;
+    checkInsidePublish = async () => {
+      const { WALReaderImpl } = await import('../../../src/persistence/wal/WALReader');
+      const reader = new WALReaderImpl(walPath);
+      await reader.initialize();
+      try {
+        const entries = await reader.readAll();
+        walHadEventBeforePublish = entries.some(
+          (e: any) => e.data.metadata?._eventBus === true,
+        );
+      } finally {
+        await reader.close();
+      }
+      publishOrder.push('wal-checked');
+    };
+
+    await bus.publish('user.created', { userId: 'u1' });
+
+    expect(walHadEventBeforePublish).toBe(true);
+    expect(publishOrder[0]).toBe('wal-checked');
+    expect(publishOrder[1]).toBe('pubsub-done');
+
+    await bus.stop();
+  });
+
+  it('Fix 2: concurrent publish + compact both succeed; post-compact WAL contains the concurrent event', async () => {
+    const walPath = freshWal();
+    const pubsub = makePubSub();
+
+    type Multi = { 'type.a': { v: number } };
+    const bus = new EventBus<Multi>(pubsub as any, 'node-1', {
+      topic: 'events:test',
+      walFilePath: walPath,
+      walSyncIntervalMs: 0,
+    });
+    await bus.start();
+
+    // Publish two events, then kick off compact and a concurrent publish simultaneously.
+    await bus.publish('type.a', { v: 1 });
+    await bus.publish('type.a', { v: 2 });
+
+    // Run compact and a third publish concurrently.
+    const [, thirdEvent] = await Promise.all([
+      bus.compact({ keepLastNPerType: 10 }),
+      bus.publish('type.a', { v: 3 }),
+    ]);
+
+    // After both settle, replay should contain the third event.
+    const replayed: BusEvent[] = [];
+    await bus.replay(0, async (e) => { replayed.push(e); });
+
+    expect(replayed.some((e) => (e.payload as { v: number }).v === 3)).toBe(true);
+    expect(thirdEvent.type).toBe('type.a');
+
+    await bus.stop();
+  });
+});
