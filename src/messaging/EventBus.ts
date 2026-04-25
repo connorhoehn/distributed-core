@@ -95,6 +95,12 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
   private _autoCompactTimer: ReturnType<typeof setInterval> | null = null;
   private _inflightCompaction: Promise<unknown> | null = null;
 
+  /**
+   * Set during the writer-swap window of compact(). publish() awaits this
+   * before touching _walWriter so no event is silently dropped.
+   */
+  private _compactionInFlight: Promise<void> | null = null;
+
   private readonly _stats = { published: 0, received: 0, subscriptions: 0 };
 
   constructor(pubsub: PubSubManager, localNodeId: string, config: EventBusConfig) {
@@ -202,6 +208,12 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
       version: this._versionCounter,
     };
 
+    // H2: serialise behind any in-progress compaction so _walWriter is never
+    // observed as null between the close/reopen window inside compact().
+    if (this._compactionInFlight) {
+      await this._compactionInFlight;
+    }
+
     if (this._walWriter) {
       await this._walWriter.append({
         entityId: `event:${event.type}`,
@@ -213,6 +225,9 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
           event: JSON.stringify(event),
         },
       });
+      // H1: flush buffered WAL data to disk BEFORE broadcasting to subscribers
+      // so that a crash after publish cannot produce a WAL gap.
+      await this._walWriter.sync();
     }
 
     await this.pubsub.publish(this.config.topic, event);

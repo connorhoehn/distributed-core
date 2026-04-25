@@ -57,6 +57,9 @@ export { ApplicationModule } from './applications/ApplicationModule';
 export { ApplicationRegistry } from './applications/ApplicationRegistry';
 export * from './applications/types';
 
+// Pipeline application module
+export * from './applications/pipeline';
+
 // Transport modules
 export * from './transport/Transport';
 export { GossipMessage } from './gossip/transport/GossipMessage';
