@@ -129,12 +129,12 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
       await this._walWriter.initialize();
 
       // Restore version counter from existing WAL entries to avoid collisions on restart.
+      // Stream entries; only the running max is retained — O(1) memory regardless of WAL size.
       const reader = new WALReaderImpl(this.config.walFilePath);
       await reader.initialize();
       try {
-        const entries = await reader.readAll();
         let maxVersion = 0;
-        for (const entry of entries) {
+        for await (const entry of reader.readEntries()) {
           if (entry.data.metadata?._eventBus === true && entry.data.version > maxVersion) {
             maxVersion = entry.data.version;
           }
@@ -400,30 +400,52 @@ export class EventBus<EventMap extends Record<string, unknown> = Record<string, 
     let entriesBefore: number;
 
     try {
-      const walEntries = await reader.readAll();
-      const busEntries = walEntries.filter(
-        (e) => e.data.metadata?._eventBus === true,
-      );
-      entriesBefore = busEntries.length;
+      // Stream entries and keep only the top-N highest versions per type.
+      // Memory is bounded to O(keepLastNPerType * #types) instead of O(total WAL).
+      const topByType = new Map<string, BusEvent[]>();
+      let count = 0;
 
-      const parsed = busEntries.map((e) => JSON.parse(e.data.metadata!.event as string) as BusEvent);
+      for await (const entry of reader.readEntries()) {
+        if (entry.data.metadata?._eventBus !== true) continue;
+        count++;
+        if (keepLastNPerType <= 0) continue;
+        const event = JSON.parse(entry.data.metadata!.event as string) as BusEvent;
 
-      const byType = new Map<string, BusEvent[]>();
-      for (const event of parsed) {
-        const group = byType.get(event.type);
-        if (group) {
-          group.push(event);
-        } else {
-          byType.set(event.type, [event]);
+        let bucket = topByType.get(event.type);
+        if (!bucket) {
+          bucket = [];
+          topByType.set(event.type, bucket);
+        }
+
+        // Insert keeping bucket sorted ascending by version, bounded to keepLastNPerType.
+        if (bucket.length < keepLastNPerType) {
+          let lo = 0;
+          let hi = bucket.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (bucket[mid].version < event.version) lo = mid + 1;
+            else hi = mid;
+          }
+          bucket.splice(lo, 0, event);
+        } else if (event.version > bucket[0].version) {
+          // Replaces the lowest kept version.
+          bucket.shift();
+          let lo = 0;
+          let hi = bucket.length;
+          while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (bucket[mid].version < event.version) lo = mid + 1;
+            else hi = mid;
+          }
+          bucket.splice(lo, 0, event);
         }
       }
 
+      entriesBefore = count;
       const kept: BusEvent[] = [];
-      for (const [, events] of byType) {
-        const sorted = events.slice().sort((a, b) => b.version - a.version);
-        kept.push(...sorted.slice(0, keepLastNPerType));
+      for (const events of topByType.values()) {
+        kept.push(...events);
       }
-
       allEntries = kept;
     } finally {
       await reader.close();
