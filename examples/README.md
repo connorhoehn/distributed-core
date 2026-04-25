@@ -1,6 +1,6 @@
 # distributed-core Examples
 
-Four example applications demonstrating the core primitives of the distributed-core library.
+Six example applications demonstrating the core primitives of the distributed-core library.
 
 ## Prerequisites
 
@@ -54,6 +54,40 @@ cd examples/management-agent
 npm install
 npx ts-node src/index.ts
 npm test
+```
+
+### 5. cluster-collab (Collaborative Counter)
+
+The canonical multi-node demonstration. Multiple clients connect to one of three
+in-process nodes; each counter is owned by exactly one node; ownership propagates
+via `EntityRegistrySyncAdapter` over an in-memory PubSub bus; when a node dies its
+counters are automatically reclaimed by surviving nodes via `AutoReclaimPolicy`.
+Composes nine primitives: `EntityRegistry`, `EntityRegistrySyncAdapter`,
+`ResourceRouter`, `DistributedSession`, `SharedStateManager`, `AutoReclaimPolicy`,
+`ConnectionRegistry`, `EventBus`, and `MetricsRegistry`. Completes in ~4 seconds
+and prints a timestamped human-readable trace of every phase (startup, client
+connect, updates, node kill, reclaim, final metrics snapshot).
+
+```bash
+tsx examples/cluster-collab/run.ts
+```
+
+### 6. live-video (Streaming Workload Stub)
+
+A realistic stub of a live-video SFU (Selective Forwarding Unit) built entirely
+from distributed-core primitives — no real WebRTC or video frames. Timer-driven
+"media telemetry" packets exercise `BackpressureController` at ~100 Hz per
+simulated client. Composes twelve primitives: `ResourceRouter`,
+`DistributedSession`, `SharedStateManager`, `AutoReclaimPolicy`,
+`ConnectionRegistry`, `DistributedLock`, `ClusterLeaderElection`, `EventBus`,
+`MetricsRegistry`, `BackpressureController`, `EntityRegistrySyncAdapter`, and a
+domain `TranscoderLock` wrapper. Demonstrates that exclusive ownership, high-
+frequency writes, and hard failover all compose from the same primitives as the
+CRDT-friendly cluster-collab example without modification to any primitive.
+Completes in ~6 seconds and exits 0.
+
+```bash
+tsx examples/live-video/run.ts
 ```
 
 ## Shared Utilities

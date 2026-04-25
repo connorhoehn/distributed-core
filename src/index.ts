@@ -127,6 +127,8 @@ export {
   MisdirectedError,
   TimeoutError,
   ForwardingServer,
+  HttpsForwardingTransport,
+  HttpsForwardingServer,
 } from './routing';
 export type {
   RouteTarget,
@@ -141,19 +143,26 @@ export type {
   HttpForwardingTransportConfig,
   ForwardingServerConfig,
   ForwardingHandler,
+  HttpsForwardingTransportConfig,
+  HttpsForwardingServerConfig,
 } from './routing';
 
-// Entity registries — cross-node sync adapter
+// Entity registries — cross-node sync adapter + bootstrap
 export { EntityRegistrySyncAdapter } from './cluster/entity/EntityRegistrySyncAdapter';
 export type { EntityRegistrySyncAdapterConfig } from './cluster/entity/EntityRegistrySyncAdapter';
+export { EntityRegistryBootstrapper } from './cluster/entity/EntityRegistryBootstrapper';
+export type { EntityRegistryBootstrapperConfig, BootstrapResult } from './cluster/entity/EntityRegistryBootstrapper';
 
 // Distributed coordination — locks, leader election, sessions, quorum, failure
 export { DistributedLock, LeaderElection, ClusterLeaderElection, QuorumDistributedLock } from './cluster/locks';
 export type { LockHandle, DistributedLockConfig, LeaderElectionConfig, ClusterLeaderElectionConfig, QuorumDistributedLockConfig } from './cluster/locks';
 export { DistributedSession } from './cluster/sessions';
 export type { DistributedSessionConfig, SessionInfo } from './cluster/sessions';
-export { FailureDetectorBridge } from './cluster/failure';
-export type { FailureDetectorBridgeTargets, FailureDetectorBridgeConfig } from './cluster/failure';
+export { FailureDetectorBridge, PubSubHeartbeatSource } from './cluster/failure';
+export type { FailureDetectorBridgeTargets, FailureDetectorBridgeConfig, PubSubHeartbeatSourceConfig, HeartbeatPayload } from './cluster/failure';
+
+// Persistence atomicity helpers
+export { atomicWriteFile, fsyncFile } from './persistence/atomicWrite';
 
 // Distributed configuration and service discovery
 export { ConfigManager, ConfigValidationError, UnknownConfigKeyError } from './cluster/config';

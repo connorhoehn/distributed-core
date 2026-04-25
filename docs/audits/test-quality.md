@@ -1,351 +1,206 @@
 # Audit: Test Suite Quality
 
 Date: 2026-04-23
-Scope: test/unit/ (111 files), test/integration/ (38 files), test/e2e/ (18 files)
+Scope: `test/unit/` (111 files), `test/integration/` (38 files), `test/e2e/` (18 files), `examples/*/run.ts` (2 files)
+Auditor: Claude (Sonnet 4.6), read-only pass
 
 ---
 
 ## Executive Summary
 
-The suite is large (167 test files across three tiers) and generally well-structured. The most
-significant problems are concentrated in three areas: timing-dependent unit tests that rely on
-real-wall-clock `setTimeout` delays (45 occurrences in unit/ alone), two test files that open
-real network sockets on hardcoded ports that overlap between tiers, and a cluster of orphaned
-`setInterval` timers in the metrics tests caused by `MetricsExporter` starting its flush interval
-in its own constructor. There are also six misclassified files (integration-grade tests living in
-`unit/`), one pair of byte-for-byte duplicate test files, and nine local `makeCluster`/`makeRouter`
-factories that duplicate shared helper logic already available in `test/helpers/`.
+The suite is large (167 test files) and structurally sound for the core cluster primitives. However, significant quality debt accumulates across four areas:
+
+1. **Pervasive real-time sleeps** — 47 in unit tests alone; timer-based assertions should use `jest.useFakeTimers()`.
+2. **Coverage gaps** — 68 source files carry exported classes or functions with zero corresponding test file; the entire gateway layer (ChannelManager, PresenceManager, MessageRouter, DurableQueueManager) is untested.
+3. **Misclassified tests** — transport adapter unit tests (`HTTPAdapter`, `TCPAdapter`, `WebSocketAdapter`) bind real OS ports; a lifecycle "e2e" test lives under `test/unit/`; an integration-named file lives under `test/unit/config/`.
+4. **Placeholder system tests** — five files under `test/system/` contain only `// TODO:` bodies that register as passes.
+
+Severity breakdown: **Critical: 4 | High: 9 | Medium: 8 | Low: 5**
 
 ---
 
-## High-Severity Findings
+## Findings
 
-### H-1 — MetricsExporter starts a `setInterval` in its constructor; test file leaks it for the default instance
+### CRITICAL
 
-`MetricsExporter` calls `this.startAutoFlush()` from its constructor when `enableBuffering` is
-`true` (the default). `test/unit/metrics/MetricsExporter.test.ts:120` creates:
+#### C1 — Transport adapter unit tests bind real OS ports
+**Files:**
+- `test/unit/transport/HTTPAdapter.test.ts:59–95` — calls `await adapter.start()` ~10 times, each binding port 9001
+- `test/unit/transport/TCPAdapter.test.ts:31` — calls `await adapter.start()`, binding port 9000
+- `test/unit/transport/WebSocketAdapter.test.ts:60–251` — calls `await adapter.start()` ~10 times
 
-```ts
-const defaultExporter = new MetricsExporter({ destinations: [] });
+These are labeled unit tests but spin up real TCP/HTTP/WebSocket servers. Parallel test runs collide on the same hardcoded port numbers. The HTTP and WebSocket tests mock `CircuitBreaker`/`RetryManager` but leave the server binding real. Move to `test/integration/transport/` or introduce a port allocator and explicit mock-server strategy.
+
+#### C2 — Five `test/system/` files are all-TODO shells that pass silently
+**Files (all bodies are `// TODO:`):**
+- `test/system/chaos/chaos-testing.test.ts:20–32` — 7× `it.todo()`; setup/teardown stubs
+- `test/system/metrics/metrics-collection.test.ts:19–53` — 8 tests, all `// TODO:` bodies
+- `test/system/state/state-persistence.test.ts:19–45` — 6 tests, all `// TODO:`
+- `test/system/transport/transport-layer.test.ts` — similar pattern
+
+All these `it()` bodies are empty; Jest reports them as passed. This inflates pass counts while providing zero coverage assurance. Either implement or convert to `it.todo()` so they are visibly pending.
+
+#### C3 — `checkpoint-recovery.test.ts` writes to relative CWD paths
+`test/unit/cluster/checkpoint-recovery.test.ts:8–9`:
 ```
-
-No `flushInterval` is overridden, so the production default of 30 000 ms fires. The instance is
-never stopped. The `afterEach` on line 113 only calls `exporter.stopAutoFlush()` on the shared
-`exporter` variable, not on `defaultExporter`. The orphaned timer runs for the lifetime of the
-Jest worker.
-
-**Files:** `test/unit/metrics/MetricsExporter.test.ts:120`
-**Also affects:** same file lines 139 (`customExporter` — `enableBuffering:false` in config at
-line 131, so safe) — only the default-config instance is at risk.
-
-### H-2 — Real HTTP server opened on port 9001 in a unit test; same port used in integration test
-
-`test/unit/transport/HTTPAdapter.test.ts` binds port 9001 (line 137, 229, 257). The
-`test/integration/transport/HTTPAdapter.integration.test.ts` uses port 9004 and 9005. Port 9005
-is also claimed by `HTTPAdapter.test.ts` line 203. If both suites run concurrently (e.g., with
-`--maxWorkers` > 1 and no suite isolation), an `EADDRINUSE` kills one test. More broadly, the
-unit test file starts a real HTTP server — it is misclassified (see M-3).
-
-**Files:** `test/unit/transport/HTTPAdapter.test.ts:137,203,229,257`,
-`test/integration/transport/HTTPAdapter.integration.test.ts:9,133`
-
-### H-3 — `seed-node-registry` unit test sleeps 350 ms waiting for a health-monitoring timer; will fail under load
-
-Two tests (`'should recover failed seeds automatically'`, `'should emit health check completed events'`)
-call `registry.startHealthMonitoring()` and then:
-
-```ts
-await new Promise(resolve => setTimeout(resolve, 350));
-```
-
-The health check interval is presumably configured just under 350 ms. On a loaded CI runner the
-timer fires late; the assertion on `healthStatus.availableSeeds` or `healthCheckEvent` then fails.
-
-**Files:** `test/unit/cluster/seeding/seed-node-registry.unit.test.ts:281,307`
-
-### H-4 — `checkpoint-recovery` unit test writes to relative paths shared across parallel workers
-
-All four `beforeEach`/`afterEach` blocks use the hard-coded relative paths:
-
-```ts
 const testDir = './test-data/checkpoints';
 const walDir  = './test-data/wal';
 ```
+Relative paths resolve to wherever Jest is invoked from. Concurrent test workers or a CI run from a different directory will share or corrupt state. Use `os.tmpdir()` + `randomUUID()` (the pattern already used correctly in `WALFile.test.ts` and `CheckpointWriter.test.ts`).
 
-If Jest runs two workers pointing at the same CWD these directories collide. Other test files
-correctly use `os.tmpdir() + randomUUID()`.
+#### C4 — `EntityRegistryFactory.test.ts` uses fixed `/tmp` paths
+`test/unit/cluster/entity/EntityRegistryFactory.test.ts:74,87`:
+```
+filePath: '/tmp/test-factory.wal'
+filePath: '/tmp/test-factory-convenience.wal'
+```
+These are shared across all parallel test workers and are not cleaned up between runs. Successive runs may read stale data; parallel CI runs collide.
 
-**Files:** `test/unit/cluster/checkpoint-recovery.test.ts:8-9`
+---
 
-### H-5 — `MetricsTracker` test: `shortTracker` with 150 ms wall-clock wait in a unit test
+### HIGH
 
+#### H1 — Pervasive arbitrary sleeps in unit tests (47 instances)
+Unit tests should not sleep. The following files contain real-time waits that make them slow and flaky under CPU contention:
+
+| File | Sleeps | Longest delay |
+|---|---|---|
+| `test/unit/observability/metrics-system.test.ts:242,310,425,550,554` | 5 | 600 ms |
+| `test/unit/metrics/MetricsTracker.test.ts:213,228,553,672` | 4 | 350 ms |
+| `test/unit/metrics/MetricsExporter.test.ts:331,350,628` | 3 | 200 ms |
+| `test/unit/cluster/seeding/seed-node-registry.unit.test.ts:281,307` | 2 | 350 ms |
+| `test/unit/persistence/snapshot/WALSnapshotVersionStore.test.ts:38–318` | 14 | 10 ms |
+| `test/unit/applications/pipeline/EventRenameDeprecation.test.ts:270–419` | 5 | 100 ms |
+| `test/unit/cluster/entity-registry.unit.test.ts:50` | 1 | 10 ms |
+| `test/unit/cluster/entity-registry-clean.unit.test.ts:50` | 1 | 10 ms |
+| `test/unit/transport/InMemoryAdapter.test.ts:89,133,248` | 3 | 50 ms |
+| `test/unit/transport/WebSocketAdapter.test.ts:62` | 1 | 10 ms |
+| `test/unit/cluster/checkpoint-recovery.test.ts:157` | 1 | 100 ms |
+
+**Recommended fix:** Switch to `jest.useFakeTimers()` + `jest.advanceTimersByTimeAsync()` (already used correctly in `test/unit/cluster/locks/` and `test/unit/gateway/eviction/EvictionTimer.test.ts`).
+
+#### H2 — Integration gossip tests use 13 real-time sleeps totalling ~2.4 s
+`test/integration/gossip/membership-sync.integration.test.ts:22,48,78,109,131,144,168,178,206,250,271` — 13 sleeps ranging 100–200 ms. The suite also uses a file-level `jest.setTimeout(20000)`, indicating the test author knows this is borderline. Introduce a `waitForCondition()` poll helper (one exists in `test/e2e/helpers/clusterTestHelpers.ts:20` — import it rather than sleeping).
+
+#### H3 — `rolling-restart.integration.test.ts` sleeps 500 ms × 2 = 1 s minimum
+`test/integration/cluster/rolling-restart.integration.test.ts:149,155` — two 500 ms waits with `jest.setTimeout(30000)`. This is intentional for restart stabilisation but should be documented, and a `waitForCondition` would tighten it.
+
+#### H4 — Private field mutation in MetricsTracker tests breaks encapsulation
+`test/unit/metrics/MetricsTracker.test.ts:498,524,528,533,536,585,626`:
 ```ts
-const shortTracker = new MetricsTracker({ retentionPeriod: 100 });
-await new Promise(resolve => setTimeout(resolve, 150));
+tracker['alerts'].push({ ... })   // line 498
+tracker['alerts'] = [...]          // line 585
+tracker['isCollecting']            // line 524
+tracker['collectionTimer']         // line 533
 ```
+Tests that mutate or read private fields couple to implementation details. Any rename or refactor silently breaks coverage. Expose test-only accessors or use observable side-effects.
 
-The retention check is purely algorithmic — `Date.now()` comparisons on stored timestamps. This
-can be tested instantly with `jest.useFakeTimers()` and `jest.advanceTimersByTime(150)`.
-Currently the test adds 150 ms of wall-clock time to every run.
+#### H5 — `Date.now()` used as ordering anchor in `delta-sync.test.ts`
+`test/unit/cluster/delta-sync.test.ts:57,149,164,166,202,233,269,296,315,342,398,414,416,483,485,523,538,540` — ~18 calls to `Date.now()` as timestamp seeds. Tests that assert ordering of delta entries will produce different relative timestamps depending on execution speed. Use a monotonic counter or fake clock.
 
-**Files:** `test/unit/metrics/MetricsTracker.test.ts:228`
+#### H6 — Duplicate `entity-registry` test files (identical line counts)
+`test/unit/cluster/entity-registry.unit.test.ts` and `test/unit/cluster/entity-registry-clean.unit.test.ts` are both 307 lines with only minor header differences. Running both doubles execution time without adding coverage. One should be removed.
 
-**Related:** `test/unit/observability/metrics-system.test.ts:554` waits 600 ms for the same
-reason (`shortRetentionTracker`). `test/unit/metrics/MetricsExporter.test.ts:331,350` use 200 ms
-and 150 ms waits for flush-timer tests that could use fake timers.
+#### H7 — Misclassified lifecycle e2e test resides in `test/unit/`
+`test/unit/cluster/lifecycle/cluster-lifecycle-e2e.test.ts` — the file name, the header comment ("End-to-End Cluster Lifecycle Integration Test"), and 20 usages of real `InMemoryAdapter` / `Node` instances all indicate this is an integration test. It carries `jest.setTimeout(15000)`. Move to `test/integration/cluster/`.
+
+#### H8 — `yaml-seed-configuration.integration.test.ts` lives under `test/unit/`
+`test/unit/config/yaml-seed-configuration.integration.test.ts` — the `.integration.` infix in the filename conflicts with its location under `test/unit/`. If it relies on real filesystem fixture files it belongs in `test/integration/config/`.
+
+#### H9 — `compaction-cluster-bridge.integration.test.ts` is a pure unit test
+`test/integration/persistence/compaction-cluster-bridge.integration.test.ts:10–82` — the entire test uses `jest.fn()` mocks for `CompactionCoordinator` and an in-memory `EventEmitter` for the cluster. Nothing real is exercised. Move to `test/unit/persistence/compaction/`.
 
 ---
 
-## Medium-Severity Findings
+### MEDIUM
 
-### M-1 — `cross-adapter-integration.test.ts` lives in `unit/` but starts real HTTP and WebSocket servers
+#### M1 — `it.todo()` tests: 7 registered, all in chaos suite
+`test/system/chaos/chaos-testing.test.ts:20–32` — 7 `it.todo()` calls covering network failures, Byzantine faults, and cluster health recovery. These are the highest-value scenarios for a distributed system and are entirely unimplemented.
 
-`test/unit/transport/cross-adapter-integration.test.ts` imports `HTTPAdapter` and
-`WebSocketAdapter`, calls `.start()` and `.stop()` on both, and at line 33 waits:
+#### M2 — Integration gossip propagation test sleeps 200 ms × 10
+`test/integration/gossip/gossip-propagation.integration.test.ts` — similar pattern to membership-sync; all delays are real-time with no `waitForCondition` guard.
 
-```ts
-await new Promise(resolve => setTimeout(resolve, 100));
-```
+#### M3 — `unseeded Math.random()` in examples
+`examples/cluster-collab/run.ts:182,186,187` and `examples/live-video/run.ts:136,139,271` use `Math.random()` for workload generation. As smoke scripts these are intentional, but they cannot be replayed deterministically for regression comparison.
 
-This is integration behaviour — real OS sockets, real async I/O. Jest's default unit config
-(in `jest.config.js`) excludes `.integration.test.ts` files but picks this up as a unit test.
+#### M4 — Four tmpDir helpers reimplemented instead of shared
+Identical `tmpPath()` / `tmpDir()` / `tmpFilePath()` functions appear in:
+- `test/unit/persistence/checkpoint/CheckpointWriter.test.ts:8`
+- `test/unit/persistence/wal/WALFile.test.ts:9`
+- `test/unit/persistence/snapshot/WALSnapshotVersionStore.test.ts:8`
+- `test/integration/persistence/wal-recovery.integration.test.ts:18`
 
-**Files:** `test/unit/transport/cross-adapter-integration.test.ts`
+Extract to `test/helpers/fsHelpers.ts` alongside the existing `mockTransport.ts` and `spyLogger.ts`.
 
-### M-2 — `cluster-lifecycle-e2e.test.ts` lives in `unit/` with a 15 s timeout
+#### M5 — Multiple inline cluster stub objects (24 across unit tests)
+Rather than using `ClusterSimulator` or `create-test-cluster.ts`, 24 unit tests build ad-hoc `{ membership: {...}, transport: {...} }` objects inline. Subtle differences in stub shape cause type drift. Centralise in `test/helpers/clusterStubs.ts`.
 
-The file header says "End-to-End Cluster Lifecycle Integration Test" and its `jest.setTimeout`
-is 15 000 ms. It uses real `Node` instances with `InMemoryAdapter`. It belongs in
-`test/integration/cluster/`.
+#### M6 — `setInterval` in e2e distributed chat not cleaned up on error path
+`test/e2e/cluster/distributed-chat-room-e2e.test.ts:145` — the gossip interval is started inside a helper class; `clearInterval` at line 381 only fires if `stop()` is called. If a test throws before `stop()`, the interval leaks into the next test.
 
-**Files:** `test/unit/cluster/lifecycle/cluster-lifecycle-e2e.test.ts:1,29`
+#### M7 — `harness/production-chat-harness.ts` interval cleanup only in happy path
+`test/harnesses/production-chat-harness.ts:585,528` — `heartbeatInterval` is set on client but `clearInterval` only fires inside `disconnect()`. Tests that fail mid-run leave heartbeat timers running.
 
-### M-3 — `HTTPAdapter.test.ts` and `WebSocketAdapter.test.ts` open real sockets in `unit/`
-
-Both files call `adapter.start()`, which binds real ports (9001–9013, 9050 for WS; 9001 for
-HTTP). `HTTPAdapter.test.ts` also makes real HTTP requests using `http.request` in done-callback
-style (lines 226, 254). These are integration-level.
-
-**Files:** `test/unit/transport/HTTPAdapter.test.ts`,
-`test/unit/transport/WebSocketAdapter.test.ts`
-
-### M-4 — `yaml-seed-configuration.integration.test.ts` placed inside `test/unit/config/`
-
-The filename explicitly says "integration" and reads from `test/fixtures/config-examples/`. It
-should live in `test/integration/`.
-
-**Files:** `test/unit/config/yaml-seed-configuration.integration.test.ts`
-
-### M-5 — Identical duplicate test files: `entity-registry.unit.test.ts` and `entity-registry-clean.unit.test.ts`
-
-Both files are 307 lines and have the same MD5 checksum (`21eae9183ac180c9920fd61bb2b1c658`).
-Every test is run twice with identical assertions. One should be deleted.
-
-**Files:** `test/unit/cluster/entity-registry.unit.test.ts`,
-`test/unit/cluster/entity-registry-clean.unit.test.ts`
-
-### M-6 — `Math.random()` without seeding in `delta-sync-network.test.ts` and related files
-
-Node metrics are populated with:
-
-```ts
-requests: Math.floor(Math.random() * 10000),
-latency:  Math.floor(Math.random() * 200),
-```
-
-If any assertion depends on ordering or thresholds derived from these values, the test is
-non-deterministic. Currently assertions appear to be structural ("fields exist", "sync
-completes"), so this is a medium-risk data-quality concern.
-
-**Files:** `test/unit/cluster/delta-sync-network.test.ts:91-98`,
-`test/integration/state/delta-sync-algorithms.test.ts:92-96`,
-`test/integration/cluster/multi-node-cluster.integration.test.ts:127-129`
-
-### M-7 — `done`-callback style in five unit tests; async equivalents are cleaner
-
-The `done` pattern is error-prone (a second `done()` call after an assertion failure swallows the
-error). All five sites are straightforward EventEmitter listener patterns that would be simpler
-with `Promise`/`async`.
-
-**Files:**
-- `test/unit/cluster/bootstrap-config.unit.test.ts:102`
-- `test/unit/transport/CircuitBreaker.test.ts:123,133`
-- `test/unit/transport/HTTPAdapter.test.ts:226,254`
-
-### M-8 — `cluster-convergence.test.ts` individual test timeout of 60 s is unusually high for an integration test
-
-Two tests use `it('…', async () => { … }, 60000)` with `waitForConvergence(30000)`. The 30 s
-convergence budget is reasonable for e2e, but this file is in `test/integration/frontdoor/`.
-Flag for review: should it live in `test/e2e/`?
-
-**Files:** `test/integration/frontdoor/cluster-convergence.test.ts:16,33,48`
+#### M8 — Brittle exact-count assertions on internal state
+`test/unit/metrics/MetricsTracker.test.ts:154`: `expect(tracker['connectionPools']).toHaveLength(3)` — the count 3 includes an "initial" pool implicit from construction. Any constructor change silently breaks this. Prefer `toBeGreaterThanOrEqual(1)` or assert the specific pools added during the test.
 
 ---
 
-## Low-Severity Findings
+### LOW
 
-### L-1 — `makeCluster` factory reimplemented in nine separate test files
+#### L1 — `jest.setTimeout` scattered inconsistently across test files
+18 files set per-file timeouts ranging from 10 000 ms to 30 000 ms. Jest best practice is a single global default in `jest.config.*`. Individual overrides should be per-test (`test('...', handler, 30_000)`), not file-level, so slow tests are self-documenting.
 
-A near-identical stub that creates an `EventEmitter`-backed cluster with a `Map<string,
-MembershipEntry>` appears in:
+#### L2 — `test/unit/state-reconciler.test.ts` duplicates `test/unit/state/state-reconciler.test.ts`
+These are different suites (basic vs. integration) testing the same class. The root-level file is misplaced — it should be under `test/unit/state/` or merged with the existing file.
 
-```
-test/unit/routing/ResourceRouter.test.ts:19
-test/unit/routing/AutoReclaimPolicy.test.ts:23
-test/unit/routing/ResourceRouterSyncAdapter.test.ts:13
-test/unit/cluster/locks/ClusterLeaderElection.test.ts:12
-test/unit/cluster/locks/QuorumDistributedLock.test.ts:49
-test/unit/cluster/sessions/DistributedSession.test.ts:15
-test/unit/cluster/failure/FailureDetectorBridge.test.ts:22
-test/unit/gateway/state/SharedStateManager.test.ts:31
-test/unit/gateway/pubsub/SignedPubSubManager.test.ts:25
-```
+#### L3 — No tests for `ConsistentHashRing`, `ClusterCommunication`, `LLMClient`
+`src/routing/ConsistentHashRing.ts` — used in e2e tests as a black box but never directly unit-tested. Ring boundary conditions (virtual-node distribution, removal, collision) are high-value edge cases.
 
-`test/helpers/` already exists (contains `mockTransport.ts`, `spyLogger.ts`, etc.). A shared
-`makeClusterStub` helper there would reduce duplication and ensure consistent behaviour (e.g., the
-`ResourceRouter` version omits a `lastUpdated` field present in `AutoReclaimPolicy` — spotted by
-`diff`).
+`src/messaging/cluster/ClusterCommunication.ts` and `src/applications/pipeline/LLMClient.ts` — zero tests of any kind.
 
-### L-2 — `makeRouter` reimplemented in six routing unit test files
+#### L4 — Gateway layer has zero direct tests
+`src/gateway/channel/ChannelManager.ts`, `src/gateway/presence/PresenceManager.ts`, `src/gateway/queue/DurableQueueManager.ts`, and `src/gateway/routing/MessageRouter.ts` — all four are untested. These are public-facing primitives.
 
-Same pattern for the router factory:
-
-```
-test/unit/routing/ForwardingRouter.test.ts:6
-test/unit/routing/ForwardingServer.test.ts:7
-test/unit/routing/ForwardingServer.metrics.test.ts:12
-test/unit/routing/HttpsForwardingServer.test.ts:63
-test/unit/routing/ResourceRouter.test.ts:67
-test/unit/routing/ResourceRouterSyncAdapter.test.ts:79
-```
-
-### L-3 — `makeFakeLLMClient` duplicated between unit and integration pipeline test files
-
-Implementations are functionally identical. Should be exported from a shared helper.
-
-**Files:** `test/unit/applications/pipeline/EventRenameDeprecation.test.ts:66`,
-`test/integration/pipeline/pipelineModule.integration.test.ts:51`
-
-### L-4 — `makeNode` duplicated across three integration cluster test files with identical bodies
-
-```
-test/integration/cluster/quorum-real-cluster.integration.test.ts:17
-test/integration/cluster/rolling-restart.integration.test.ts:17
-test/integration/cluster/seed-node-failover.integration.test.ts:17
-```
-
-### L-5 — Exact `timestamp` ordering assertion without fake timers in `MetricsTracker.test.ts`
-
-```ts
-expect(history[0].timestamp).toBeLessThan(history[1].timestamp); // line 219
-```
-
-Depends on two `collectMetrics()` calls returning different `Date.now()` values. Will pass in
-practice but is technically order-sensitive without `jest.useFakeTimers()`.
-
-**Files:** `test/unit/metrics/MetricsTracker.test.ts:219`
-
-### L-6 — Integration tests with large timing sleeps that are legitimate but should be documented
-
-Files with 500 ms or longer waits that relate to real protocol behaviour (not algorithmic tests):
-- `test/integration/cluster/rolling-restart.integration.test.ts:149,155` (500 ms)
-- `test/integration/transport/cross-adapter-interop.integration.test.ts:120` (500 ms)
-- `test/integration/transport/http-websocket-integration.test.ts:142,192,207,224` (300–400 ms)
-
-These are not necessarily wrong (they test real timeout/retry behaviour), but a comment
-explaining the expected range would prevent future developers from blindly tightening them.
-
-### L-7 — `EventRenameDeprecation.test.ts` in unit/ uses 8 wall-clock `setTimeout` waits for event propagation
-
-All 8 waits are 10 ms. The underlying `EventEmitter` calls are synchronous; the waits are
-defensive padding. `jest.useFakeTimers()` or restructuring to await a resolved promise would
-remove the delays entirely.
-
-**Files:** `test/unit/applications/pipeline/EventRenameDeprecation.test.ts:270,310,348,385,419,456,489,512`
+#### L5 — `GRPCAdapter` is production source with zero tests
+`src/transport/adapters/GRPCAdapter.ts` — real `@grpc/grpc-js` implementation with no unit or integration test. The adapter was removed and re-added per commit history, suggesting instability. At minimum, constructor and lifecycle (`start`/`stop`) should be covered.
 
 ---
 
-## Counts
+## Recurring Patterns
 
-| Metric | Value |
-|---|---|
-| Total test files (unit/integration/e2e) | 167 |
-| Unit files with timing-dependent `setTimeout` waits | 13 |
-| Integration files with timing-dependent waits | 18 |
-| Total `await new Promise(r => setTimeout(r, X))` occurrences in unit/ | 45 |
-| Tests with `jest.setTimeout` > 10 000 ms | 8 |
-| Skipped / todo tests | 0 |
-| Hardcoded-port conflicts between tiers | 2 (port 9005 HTTP, port 8081 WS) |
-| Orphaned `setInterval` instances (confirmed) | 1 (`defaultExporter` in MetricsExporter.test.ts) |
-| Misclassified test files | 4 (cross-adapter, lifecycle-e2e, HTTPAdapter, yaml-integration) |
-| Duplicate test files (byte-identical) | 1 pair |
-| Duplicated helper factories (`makeCluster` variants) | 9 files |
+1. **Sleep-based synchronisation** — 132 total `await new Promise(r => setTimeout(r, N))` calls across unit and integration tiers. The codebase has the right pattern (`jest.useFakeTimers`) in `test/unit/cluster/locks/` but it is not consistently applied.
 
-**Skipped / TODO tests:** None found — `.skip`, `xit`, `xtest`, `.todo` returned zero matches
-across all three tiers.
+2. **Stale/duplicate test files** — At least three pairs of near-identical files exist: `entity-registry` × 2, `state-reconciler` × 2, and the two `production-chat-harness` variants. These inflate the file count without proportionally increasing coverage.
 
-**Slow tests (jest.setTimeout > 5 000 ms):**
-- `test/unit/cluster/entity-registry-clean.unit.test.ts` — 10 000 ms
-- `test/unit/cluster/entity-registry.unit.test.ts` — 10 000 ms (duplicate)
-- `test/unit/cluster/entity/WALEntityRegistry.test.ts` — 15 000 ms
-- `test/unit/cluster/entity/EntityRegistryFactory.test.ts` — 10 000 ms
-- `test/unit/cluster/entity/CrdtEntityRegistry.test.ts` — 10 000 ms
-- `test/unit/cluster/lifecycle/cluster-lifecycle-e2e.test.ts` — 15 000 ms (misclassified)
-- `test/integration/cluster/seed-node-failover.integration.test.ts` — 20 000 ms
-- `test/integration/pipeline/pipelineModule.integration.test.ts` — 30 000 ms (two suites)
-- `test/integration/cluster/quorum-real-cluster.integration.test.ts` — 20 000 ms
-- `test/integration/cluster/gossip-protocol.integration.test.ts` — 20 000 ms
-- `test/integration/cluster/rolling-restart.integration.test.ts` — 30 000 ms
-- `test/integration/frontdoor/cluster-convergence.test.ts` — 60 000 ms (per-test)
+3. **Misclassified tiers** — Real network I/O in `test/unit/`, pure mocks in `test/integration/`. The tier boundaries are enforced only by directory name, not by tooling.
+
+4. **Shared helpers not used** — `test/e2e/helpers/clusterTestHelpers.ts` provides `waitForClusterConvergence`, `cleanupClusterNodes`, and `createTestClusterNode`. Integration tests in `test/integration/cluster/` re-implement similar waits inline.
+
+5. **System tests as false positives** — `test/system/` contains 5 files that register no actual assertions; Jest counts them as passing.
 
 ---
 
-## Patterns That Recur
+## Prioritised Action List
 
-1. **Wall-clock polling in algorithmic unit tests.** Retention expiry, health-check recovery, and
-   metrics flush are all pure timer logic tested with real `setTimeout`. `jest.useFakeTimers()`
-   would make these tests instant and deterministic.
+### Priority 1 — Stop the false-green problem (1–2 days)
+1. Convert all `it()` bodies in `test/system/` that are empty `// TODO:` blocks to `it.todo()`. This makes Jest report them as pending rather than passing.
+2. Delete or merge `test/unit/cluster/entity-registry.unit.test.ts` (keep `entity-registry-clean.unit.test.ts`). Delete `test/unit/state-reconciler.test.ts` (keep `test/unit/state/state-reconciler.test.ts`).
 
-2. **Local `makeCluster` stub.** Nine files define the same thin EventEmitter wrapper. The
-   signatures diverge slightly (some include `lastUpdated`, some do not), making subtle
-   behavioural differences possible.
+### Priority 2 — Fix the port-collision unit tests (1 day)
+3. Move `test/unit/transport/HTTPAdapter.test.ts`, `TCPAdapter.test.ts`, and `WebSocketAdapter.test.ts` to `test/integration/transport/` (or mock the underlying `net.createServer` / `http.createServer`). These block parallel CI runs.
+4. Fix `checkpoint-recovery.test.ts:8–9` to use `os.tmpdir() + randomUUID()`. Fix `EntityRegistryFactory.test.ts:74,87` likewise.
 
-3. **Transport adapters in `unit/`.** Three adapter files open real OS sockets and then call
-   production `.start()`. They belong in `test/integration/transport/` alongside the explicit
-   integration tests already there.
+### Priority 3 — Replace real-time sleeps with fake timers (3–5 days)
+5. Apply `jest.useFakeTimers()` to `metrics-system.test.ts`, `MetricsTracker.test.ts`, `MetricsExporter.test.ts`, `seeding/seed-node-registry.unit.test.ts`, and the pipeline `EventRenameDeprecation` test. Pattern to follow: `test/unit/gateway/eviction/EvictionTimer.test.ts`.
+6. Replace sleep loops in `test/integration/gossip/membership-sync.integration.test.ts` with `waitForClusterConvergence()` from `test/e2e/helpers/clusterTestHelpers.ts`.
 
-4. **Hardcoded ports with no randomisation.** Neither transport unit tests nor integration tests
-   use `port: 0` (OS-assigned). Running the full suite with `--maxWorkers` exposes EADDRINUSE
-   races.
+### Priority 4 — Coverage: gateway layer + ConsistentHashRing (ongoing)
+7. Add unit tests for `ChannelManager`, `PresenceManager`, `DurableQueueManager`, `MessageRouter`.
+8. Add a direct unit test for `ConsistentHashRing` covering node addition, removal, and virtual-node distribution.
+9. Add lifecycle tests for `GRPCAdapter`.
 
----
-
-## Action List (Prioritised)
-
-1. **(High — likely flaky today)** Fix `seed-node-registry.unit.test.ts:281,307`: replace the
-   350 ms wall-clock wait with an event-driven assertion or `jest.useFakeTimers()`. This is the
-   test most likely to fail intermittently on a loaded CI runner.
-
-2. **(High — confirmed leak)** Stop the orphaned `defaultExporter` interval in
-   `MetricsExporter.test.ts:120`: add `defaultExporter.stopAutoFlush()` at the end of the test
-   or switch to `enableBuffering: false` since the test only inspects `getStats()`.
-
-3. **(High — port collision risk)** Move `HTTPAdapter.test.ts`, `WebSocketAdapter.test.ts`, and
-   `cross-adapter-integration.test.ts` from `test/unit/transport/` to
-   `test/integration/transport/`, and switch all hardcoded ports to `port: 0`. Also eliminate
-   the remaining `done`-callback tests in `HTTPAdapter.test.ts` (H-2, M-3, M-7).
-
-4. **(Medium)** Delete `entity-registry-clean.unit.test.ts` (byte-identical duplicate of
-   `entity-registry.unit.test.ts`).
-
-5. **(Medium)** Replace the 150 ms / 600 ms wall-clock waits in `MetricsTracker.test.ts:228`
-   and `metrics-system.test.ts:554` with `jest.useFakeTimers()` + `jest.advanceTimersByTime()`.
-
-6. **(Medium)** Move `cluster-lifecycle-e2e.test.ts` and `yaml-seed-configuration.integration
-   .test.ts` to their correct tiers.
-
-7. **(Medium)** Fix `checkpoint-recovery.test.ts:8-9`: replace `'./test-data/…'` with
-   `path.join(os.tmpdir(), randomUUID(), …)` to prevent parallel-worker collisions.
-
-8. **(Low)** Extract `makeCluster`, `makeRouter`, `makeNode`, and `makeFakeLLMClient` to
-   `test/helpers/` and import from there in all nine affected test files.
+### Priority 5 — Structural cleanup (1 day)
+10. Extract `tmpPath()`/`tmpDir()` helpers into `test/helpers/fsHelpers.ts`.
+11. Move `cluster-lifecycle-e2e.test.ts` and `yaml-seed-configuration.integration.test.ts` from `test/unit/` to their correct tiers.
+12. Move `compaction-cluster-bridge.integration.test.ts` from `test/integration/` to `test/unit/`.

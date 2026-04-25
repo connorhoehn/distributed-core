@@ -73,6 +73,33 @@
   perform real filesystem compaction when input segments exist; fall back
   to computed-metrics simulation otherwise (preserving unit-test
   compatibility).
+- `EntityRegistryBootstrapper` (`src/cluster/entity/`) — snapshot-bootstrap
+  for joining nodes. Performs a PubSub request/response round-trip to fetch
+  current entity state from a peer before the joining node begins serving
+  traffic. Complements `EntityRegistrySyncAdapter` (which handles incremental
+  updates only).
+- `PubSubHeartbeatSource` (`src/cluster/failure/`) — self-contained heartbeat
+  driver that publishes heartbeat ticks over a PubSub topic, feeding
+  `FailureDetector` without requiring the caller to manage a timer loop. Closes
+  the "caller-wired heartbeat" gap noted in the Deferred section.
+- `HttpsForwardingTransport` + `HttpsForwardingServer` (`src/routing/`) — TLS
+  variants of `HttpForwardingTransport` / `ForwardingServer`. Identical wire
+  protocol (POST `{pathPrefix}/{resourceId}`); transport layer upgraded to
+  HTTPS. `HttpsForwardingTransport` uses a shared `HttpsAgent` for connection
+  pooling and mTLS / CA-pinning via `tlsOptions`. `HttpsForwardingServer` wraps
+  Node's `https.createServer` with the same `tlsOptions`.
+- `ForwardingServer` `metricsRegistry` config field — mounts a Prometheus scrape
+  endpoint at `GET /metrics` (configurable via `metricsPath`) on the same port
+  as the forwarding server. Closes the "pull-based /metrics route" gap noted in
+  the Deferred section.
+- `RateLimiter.maxBuckets` and `idleEvictMs` — bounded bucket map; triggers lazy
+  probabilistic eviction (1% chance per check) when `maxBuckets` is exceeded.
+  Idle buckets (full and untouched for `idleEvictMs` ms) are evicted. Defaults:
+  10 000 buckets, 5-minute idle TTL.
+- `atomicWriteFile` and `fsyncFile` (`src/persistence/atomicWrite.ts`) —
+  temp-write → fsync → rename helper used by WAL, snapshot, checkpoint, and
+  compaction paths to guarantee durability on crash. `fsyncFile` flushes an
+  existing file before unlinking input segments in a compaction pipeline.
 - `SignedPubSubManager` — optional message authentication wrapper using
   `KeyManager`. Drops or flags unverified messages.
 - `PipelineModule` + `PipelineExecutor` — server-side port of MockExecutor
@@ -151,7 +178,9 @@ persistence suites / ~40 tests; 12 e2e cluster + transport suites.
 - Full partition-tolerance for `QuorumDistributedLock` (explicit non-goal —
   would require Raft/Paxos).
 - TLS for `HttpForwardingTransport` — caller's responsibility.
-- Pull-based `/metrics` route on `ForwardingServer`. (Standalone
-  `PrometheusHttpExporter` ships, but isn't auto-mounted in the gateway.)
-- `FailureDetector` heartbeat over PubSub (currently caller-wired).
-- State-snapshot bootstrap for newly-joining nodes.
+- ~~Pull-based `/metrics` route on `ForwardingServer`.~~ Done: `metricsRegistry`
+  config field added to `ForwardingServer`.
+- ~~`FailureDetector` heartbeat over PubSub (currently caller-wired).~~ Done:
+  `PubSubHeartbeatSource` ships.
+- ~~State-snapshot bootstrap for newly-joining nodes.~~ Done:
+  `EntityRegistryBootstrapper` ships.

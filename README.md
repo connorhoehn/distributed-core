@@ -73,6 +73,10 @@ See `examples/cluster-collab/` for a complete multi-node demonstration including
 | `RateLimiter` | Token-bucket rate limiter per key | — |
 | `WALSnapshotVersionStore` | Durable snapshot store backed by Write-Ahead Log | WAL |
 | `SignedPubSubManager` | PubSub wrapper that signs outgoing and verifies incoming messages | `PubSubManager` + `KeyManager` |
+| `EntityRegistryBootstrapper` | Snapshot-bootstrap for joining nodes via PubSub request/response; complements `EntityRegistrySyncAdapter` | `EntityRegistry` + `PubSubManager` |
+| `PubSubHeartbeatSource` | Self-contained heartbeat driver over PubSub; feeds `FailureDetector` without a manual timer loop | `PubSubManager` + `FailureDetector` |
+| `HttpsForwardingTransport` | TLS variant of `HttpForwardingTransport`; shared `HttpsAgent` for connection pooling and mTLS | `ForwardingTransport` interface |
+| `HttpsForwardingServer` | TLS variant of `ForwardingServer`; identical wire protocol over HTTPS | `ResourceRouter` |
 | `LifecycleAware` | Standard `start()` / `stop()` / `isStarted()` contract implemented by all stateful primitives | — |
 
 ### Placement strategies

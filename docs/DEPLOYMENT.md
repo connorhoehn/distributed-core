@@ -534,12 +534,18 @@ every outgoing message; incoming messages with invalid or missing signatures are
 rejected:
 
 ```typescript
-import { SignedPubSubManager } from 'distributed-core';
-import { KeyManager } from 'distributed-core';
+import { SignedPubSubManager, KeyManager } from 'distributed-core';
 
-const keyManager = new KeyManager({ privateKeyPath: '/run/secrets/node-key.pem' });
-const signedPubSub = new SignedPubSubManager(rawPubSub, keyManager, {
-  strictMode: true,  // reject all unsigned messages
+// Load PEM strings from environment / Kubernetes Secret mount.
+const keyManager = new KeyManager({
+  privateKeyPem: process.env.NODE_PRIVATE_KEY_PEM!,
+  publicKeyPem:  process.env.NODE_PUBLIC_KEY_PEM!,
+});
+
+// SignedPubSubManager(inner, keyManager, localNodeId, config?)
+const signedPubSub = new SignedPubSubManager(rawPubSub, keyManager, nodeId, {
+  strictMode: true,  // reject all unsigned messages (default)
+  publicKeys: peerPublicKeys, // Map<nodeId, pemString> for all peers
 });
 
 // Pass signedPubSub to EntityRegistrySyncAdapter, EventBus, etc.
@@ -583,17 +589,15 @@ The following gaps were identified while writing this guide:
    or implement a custom `ForwardingTransport`. High priority for internal
    cluster traffic if you are not using a service mesh.
 
-2. **No Prometheus scrape endpoint out of the box.** `MetricsExporter` can push
-   to a Prometheus Pushgateway, but a pull-based `/metrics` HTTP endpoint
-   (standard for Kubernetes + Prometheus scraping) does not exist yet. The
-   metrics data model is ready; adding a `/metrics` route to `ForwardingServer`
-   is a small addition.
+2. ~~**No Prometheus scrape endpoint out of the box.**~~ `ForwardingServer` now
+   accepts a `metricsRegistry` config field that mounts a `GET /metrics`
+   Prometheus scrape endpoint on the same port. Pass your `MetricsRegistry`
+   instance and the endpoint is automatically served.
 
-3. **No built-in failure detection / heartbeat transport.** The library provides
-   `FailureDetector` and `FailureDetectorBridge` but requires the caller to wire
-   up actual heartbeating. In the cluster-collab example, failure is simulated
-   manually. A WebSocket-based or PubSub-based heartbeat plugin would close this
-   gap.
+3. ~~**No built-in failure detection / heartbeat transport.**~~ `PubSubHeartbeatSource`
+   (`src/cluster/failure/`) is a self-contained heartbeat driver that publishes
+   ticks over a PubSub topic, feeding `FailureDetector` without requiring
+   caller-managed timer loops.
 
 4. **No state bootstrap for joining nodes.** A new node joining a running cluster
    receives future updates but has no mechanism to request current state from
